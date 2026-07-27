@@ -318,6 +318,7 @@ Items resolved by inference rather than by a stakeholder statement, or still gen
 | O-7 | Absence and late handling inside the rubric | Not discussed. Assumed absence and lateness feed the AI summary as context but carry no automatic score penalty | Mentor to confirm |
 | O-8 | Out-of-scope list and decision owner (interview §5–§6) | These sections of the interview record were derived from the other answers, not stated directly by the stakeholder | Confirm the non-goals list and the named decision owner explicitly |
 | O-9 | Demo Day #2 date | To be scheduled | Mentor |
+| O-10 | **Grace-window conflict between FR-13 and FR-15.** FR-13 accepts a late entry "for one further day"; FR-15 permits targeting "the current weekday or the immediately preceding weekday". They disagree on Monday: under FR-13 Friday's grace closes Saturday night, but under FR-15 Friday is still Monday's immediately preceding weekday | The FR-15 reading — grace runs to the end of the next **weekday**, so Friday stays open until Monday 23:59:59 Asia/Colombo. Chosen for consistency with weekday-only arithmetic (FR-12) and because the alternative makes a student lose Friday unless they log in on a Saturday, on which the system offers no submission slot. Marked `// ASSUMPTION: O-10` in `packages/core` | Mentor to confirm or replace |
 
 ---
 

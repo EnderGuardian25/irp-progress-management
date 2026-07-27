@@ -118,15 +118,29 @@ deployment. Every downstream feature depends on it being right.
 
 ### Surface
 
+All calendar arithmetic runs on **civil dates** — branded `YYYY-MM-DD` strings — never on
+`Date` objects. Only two functions in the engine are timezone-aware. Everything else is pure
+string and integer arithmetic with zero timezone surface, which is what makes the engine
+deterministic under any server timezone.
+
 ```
-isWeekday(date): boolean
-previousWeekday(date): Date          // Monday → the preceding Friday
-nextWeekday(date): Date
-workingDaysBetween(start, end): Date[]
-cycleFor(date, admissionDate): { start, end, index }
-cycleWorkingDays(cycle): Date[]
-submissionWindow(now): { allowedDates: Date[], graceClosesAt: Date }
-classifyDay(date, entries, absence, now):
+type CivilDate = string & { readonly __brand: "CivilDate" }
+
+// the only two timezone-aware functions in the engine
+toProgrammeDate(instant: Date): CivilDate
+endOfProgrammeDay(date: CivilDate): Date
+
+isWeekday(date: CivilDate): boolean
+previousWeekday(date: CivilDate): CivilDate     // Monday → the preceding Friday
+nextWeekday(date: CivilDate): CivilDate
+workingDaysBetween(start, end): CivilDate[]
+cycleContaining(date: CivilDate): { start, end }
+cycleFor(date, admission): { start, end, index } | null
+cycleWorkingDays(bounds): CivilDate[]
+submissionWindow(now: Date): { targetDates: CivilDate[], graceClosesAt: Date }
+graceDeadlineFor(target: CivilDate): Date
+canSubmitFor(target: CivilDate, now: Date): boolean
+classifyDay(date, facts, now):
   'submitted' | 'late' | 'absent' | 'missed' | 'pending' | 'future'
 ```
 
@@ -154,8 +168,11 @@ TDD, written before implementation. Exhaustive on:
 to catch any reliance on server local time. This is the single most likely silent failure in
 the project and the deploy region is not Sri Lanka.
 
-Library: `date-fns` v4 with `@date-fns/tz` for zoned arithmetic. Never a hardcoded `+05:30`
-offset.
+**No date library.** The civil-date design above reduces the timezone-aware surface to two
+functions, and `Intl.DateTimeFormat` with Node's full ICU covers both. Adding `date-fns` and
+`@date-fns/tz` would introduce API surface without removing any of the logic. The zone offset
+is *derived* via `Intl`, never hardcoded as `+05:30` — Sri Lanka has observed no DST since
+2006, but a future zone change must not silently corrupt every deadline in the system.
 
 ## 6. Authentication
 
@@ -298,6 +315,7 @@ Verifiable, evidence-based:
 
 | Item | Status |
 |---|---|
+| **O-10** (new) | **FR-13 and FR-15 conflict on the grace window.** FR-13 says a late entry is accepted "for one further day"; FR-15 says an entry may target "the current weekday or the immediately preceding weekday". These disagree on Monday — under FR-13, Friday's grace closes Saturday night; under FR-15, Friday is still Monday's immediately preceding weekday. Implemented on the FR-15 reading (grace runs to the end of the next **weekday**), marked `// ASSUMPTION: O-10`. Consistent with weekday-only arithmetic and with weekends never counting against a student. **Needs mentor confirmation.** |
 | **O-5** (AI provider) | Does not touch this slice — no Evaluation table needed |
 | **O-6** (rubric wording) | Does not touch this slice — full schema deferred |
 | **FR-1** | Partially satisfied. Personal Entra tenant, not the Bistec training tenant |
