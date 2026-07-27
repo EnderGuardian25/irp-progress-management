@@ -195,12 +195,13 @@ Explicitly out of scope for v1. Each was confirmed with the stakeholder.
 |---|---|
 | FR-10 | A student submits a **text-only** daily update. No attachments, no links required. |
 | FR-11 | Multiple entries per day are allowed. All entries for a date roll up into that date's daily report. |
-| FR-12 | Submissions exist for **weekdays only**. Saturdays and Sundays have no submission slot and are not counted as missed. |
+| FR-12 | **Weekdays are required submission days.** Saturdays and Sundays are **optional**: they may hold entries, but carry no submission obligation. A weekend is never counted as missed, never flagged late, and never appears in a compliance denominator. *(Revised 2026-07-28 — see O-11.)* |
 | FR-13 | The deadline for a given weekday is 23:59:59 Asia/Colombo on that date. Entries for the immediately preceding weekday are accepted for one further day and flagged **Late**. |
 | FR-14 | After the one-day grace window closes, the day is final — no further submission is possible for it. |
 | FR-15 | Each entry may only target the current weekday or the immediately preceding weekday. Submitting to any other date is impossible by construction. |
 | FR-16 | A student can mark a weekday as **Absent** with a reason. Absence is recorded as a distinct state from a missed submission. |
 | FR-17 | A student may optionally include attendance and task notes in their daily update. This is supplementary — the mentor's own record is authoritative (FR-19). |
+| FR-33 | An entry on a Saturday or Sunday is recorded as **Extra**. Extra work is visible to the mentor and supplied to the AI summary as positive context. Its *absence* is never penalised, and it never affects the compliance rate. *(Added 2026-07-28 — see O-11.)* |
 
 #### Review workflow
 
@@ -318,6 +319,9 @@ Items resolved by inference rather than by a stakeholder statement, or still gen
 | O-7 | Absence and late handling inside the rubric | Not discussed. Assumed absence and lateness feed the AI summary as context but carry no automatic score penalty | Mentor to confirm |
 | O-8 | Out-of-scope list and decision owner (interview §5–§6) | These sections of the interview record were derived from the other answers, not stated directly by the stakeholder | Confirm the non-goals list and the named decision owner explicitly |
 | O-9 | Demo Day #2 date | To be scheduled | Mentor |
+| O-10 | **Grace-window conflict between FR-13 and FR-15.** FR-13 accepts a late entry "for one further day"; FR-15 permits targeting "the current weekday or the immediately preceding weekday". They disagree on Monday: under FR-13 Friday's grace closes Saturday night, but under FR-15 Friday is still Monday's immediately preceding weekday | The FR-15 reading — grace runs to the end of the next **weekday**, so Friday stays open until Monday 23:59:59 Asia/Colombo. Weekend work is *optional* (FR-12, FR-33), so closing Friday's grace on Saturday night would require a weekend login to protect a weekday submission — making optional work effectively mandatory. Marked `// ASSUMPTION: O-10` in `packages/core` | Mentor to confirm or replace |
+| O-12 | **Next.js 16 in place of the pinned Next.js 15.** `CLAUDE.md` and the Month 2 brief both name Next.js 15 as a fixed stack row; the current release is 16.2.12 and the Impl Lead's standing instruction is to build on newest versions | Build on Next.js 16 per [ADR-0004](adr/0004-nextjs-16-over-pinned-15.md). Next.js does not appear until Plan 3, so the cost of reversal is currently zero and stays low while `apps/web` avoids version-specific APIs | **Mentor sign-off required before Plan 3.** §4.2 reserves fixed-stack changes to the decision owner. Fallback is Next.js 15 if refused |
+| O-11 | **Weekends reclassified from "no submission slot" to optional Extra work**, revising FR-12 and adding FR-33 (2026-07-28) | Weekdays remain required; weekends may hold entries that count as Extra. Weekends are never missed, never late, and never enter a compliance denominator. Extra work feeds the AI summary as positive context but carries no automatic score bonus — mirroring the O-7 treatment of absence, so scoring stays symmetric until the mentor rules otherwise | **Mentor sign-off required.** This changes §3.4, which the §4.2 standing rule reserves to the decision owner |
 
 ---
 
