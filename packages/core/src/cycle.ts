@@ -54,3 +54,40 @@ export function shiftCycle(start: CivilDate, months: number): CivilDate {
 export function cycleWorkingDays(bounds: CycleBounds): CivilDate[] {
   return workingDaysBetween(bounds.start, bounds.end);
 }
+
+export interface Cycle extends CycleBounds {
+  /** 1-based position within the student's programme. */
+  readonly index: number;
+}
+
+/**
+ * The first cycle a student is actually evaluated for.
+ *
+ * FR-27: a student who joins partway through a cycle is not evaluated for it.
+ * So admission counts only when it lands exactly on a cycle start (the 10th);
+ * otherwise evaluation begins with the following cycle.
+ */
+export function firstEvaluatedCycleStart(admission: CivilDate): CivilDate {
+  const { start } = cycleContaining(admission);
+  return admission === start ? start : shiftCycle(start, 1);
+}
+
+/** Whole cycles between two cycle starts. */
+function cyclesBetween(from: CivilDate, to: CivilDate): number {
+  const [fromYear, fromMonth] = from.split("-").map(Number) as [number, number];
+  const [toYear, toMonth] = to.split("-").map(Number) as [number, number];
+  return (toYear - fromYear) * 12 + (toMonth - fromMonth);
+}
+
+/**
+ * The evaluated cycle that `date` falls in, for a student admitted on
+ * `admission`. Returns null when `date` precedes the first evaluated cycle.
+ */
+export function cycleFor(date: CivilDate, admission: CivilDate): Cycle | null {
+  const first = firstEvaluatedCycleStart(admission);
+  const bounds = cycleContaining(date);
+  if (bounds.start < first) {
+    return null;
+  }
+  return { ...bounds, index: cyclesBetween(first, bounds.start) + 1 };
+}

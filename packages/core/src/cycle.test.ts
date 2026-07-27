@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { civilDate } from "./civil-date.js";
-import { cycleContaining, cycleWorkingDays, shiftCycle } from "./cycle.js";
+import { cycleContaining, cycleFor, cycleWorkingDays, firstEvaluatedCycleStart, shiftCycle } from "./cycle.js";
 import { isWeekday } from "./weekday.js";
 
 describe("cycleContaining", () => {
@@ -92,5 +92,59 @@ describe("cycleWorkingDays", () => {
     });
     expect(days.length).toBeGreaterThanOrEqual(20);
     expect(days.length).toBeLessThanOrEqual(24);
+  });
+});
+
+describe("firstEvaluatedCycleStart", () => {
+  it("uses the same cycle when admitted exactly on the 10th", () => {
+    expect(firstEvaluatedCycleStart(civilDate("2026-08-10"))).toBe("2026-08-10");
+  });
+
+  it("skips to the next cycle when admitted mid-cycle (FR-27)", () => {
+    expect(firstEvaluatedCycleStart(civilDate("2026-08-22"))).toBe("2026-09-10");
+  });
+
+  it("skips to the next cycle when admitted on the 9th", () => {
+    expect(firstEvaluatedCycleStart(civilDate("2026-09-09"))).toBe("2026-09-10");
+  });
+
+  it("handles admission before the 10th in January", () => {
+    expect(firstEvaluatedCycleStart(civilDate("2026-01-05"))).toBe("2026-01-10");
+  });
+});
+
+describe("cycleFor", () => {
+  const admission = civilDate("2026-08-22");
+
+  it("returns null for a date inside the skipped partial cycle", () => {
+    expect(cycleFor(civilDate("2026-08-25"), admission)).toBeNull();
+  });
+
+  it("returns index 1 for the first evaluated cycle", () => {
+    expect(cycleFor(civilDate("2026-09-15"), admission)).toEqual({
+      start: "2026-09-10",
+      end: "2026-10-09",
+      index: 1,
+    });
+  });
+
+  it("returns index 2 for the second evaluated cycle", () => {
+    expect(cycleFor(civilDate("2026-10-15"), admission)).toEqual({
+      start: "2026-10-10",
+      end: "2026-11-09",
+      index: 2,
+    });
+  });
+
+  it("returns index 6 for the final programme cycle", () => {
+    expect(cycleFor(civilDate("2027-02-15"), admission)?.index).toBe(6);
+  });
+
+  it("counts from the admission cycle when admitted exactly on the 10th", () => {
+    expect(cycleFor(civilDate("2026-08-15"), civilDate("2026-08-10"))?.index).toBe(1);
+  });
+
+  it("returns null for a date before admission entirely", () => {
+    expect(cycleFor(civilDate("2026-07-01"), admission)).toBeNull();
   });
 });
