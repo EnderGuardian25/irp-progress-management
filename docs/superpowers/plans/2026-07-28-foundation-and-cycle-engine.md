@@ -1925,7 +1925,7 @@ Replace the `scripts` block:
 Add to `devDependencies`:
 
 ```json
-    "cross-env": "^7.0.3"
+    "cross-env": "^10.1.0"
 ```
 
 - [ ] **Step 2: Verify the suite passes under a hostile timezone**
