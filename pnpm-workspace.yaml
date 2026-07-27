@@ -1,0 +1,8 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# pnpm auto-generated this during install to exempt this specific,
+# just-published package version from its supply-chain minimum-release-age
+# freshness gate. Kept for reproducible installs; not something to prune.
+minimumReleaseAgeExclude:
+  - '@types/node@26.1.2'

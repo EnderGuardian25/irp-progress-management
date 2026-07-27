@@ -58,7 +58,48 @@ Full list: `docs/interview-and-prd.md` §5.
 
 ## 2. Build task list
 
-Ordered. Each task names the deliverable it feeds and the FRs it covers. Do them as branch + PR, one story per PR.
+> ### ⚠️ Ordering superseded, 2026-07-28
+>
+> **The Phase 1–7 ordering below is no longer the build order.** It has been replaced by the
+> slice-based roadmap in §2a. The T-numbers are still live — they remain the index from work
+> to FRs, and every plan cites them — but **the phases they sit in no longer describe
+> sequence.**
+>
+> **Why it changed.** Phase 5 put deploy behind eight Phase-4 feature tasks, one of them
+> (T-17) blocked on O-5. That parked 25 graded points behind a blocked task and made
+> Deliverable 4 unstartable, since k6 needs a deployed URL. Deploy is now pulled into
+> slice 1.
+>
+> Read §2a for order. Read §2b for the FR traceability the T-numbers carry.
+
+### 2a. Slice roadmap — this is the build order
+
+Each slice ships working software. Each plan is one branch and one PR, merged before the next
+begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/specs/`.
+
+| Slice | Plan | Covers | Feeds | Status |
+|---|---|---|---|---|
+| **1 — Deployed integration skeleton** | 1 · Foundation + cycle engine | T-01, T-03, T-06 | D2 | **In progress** |
+| | 2 · API contract + service | T-05 (User only), T-08 (thin), T-09, T-10 (thin) | D2 | Not started |
+| | 3 · Auth + web shell | T-11 | D3 | Not started |
+| | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Not started |
+| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
+| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
+| | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
+| **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
+| | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
+| | 10 · Winner + PDF | T-18 | — | Not started |
+| **4 — Proving it** | 11 · Load test + retro | T-24 – T-26 | D4 | Not started |
+
+**The one ordering rule that matters:** slice 1 must be deployed and traced before slice 2
+begins. Features land on a pipeline already known to work — never the other way round.
+
+T-02 (ADRs) is continuous, not a task: five are written, more land as decisions arise.
+T-04 (per-story docs in `docs/stories/`) is **dropped** — the spec-plus-plan pair in
+`docs/superpowers/` serves the same purpose with acceptance criteria attached, and
+maintaining both would guarantee drift.
+
+### 2b. T-number reference — traceability only, not sequence
 
 ### Phase 1 — Foundations
 | # | Task | Covers |
@@ -115,15 +156,29 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ---
 
-## 3. Suggested next action
+## 3. Current position
 
-Start with **T-01 → T-04**, then **T-06** (the cycle/date engine) before anything else touches dates — late/absent/grace logic is where this project will quietly go wrong, and every downstream feature depends on it being right.
+**Branch:** `feat/foundation-and-cycle-engine` · **Plan:** 1 of 11 · **Progress ledger:** `.superpowers/sdd/progress.md`
 
-Then **T-08** (the spec), because Deliverable 2 is scored on the spec's completeness and nothing in `apps/` should be written before the contract exists.
+Execution runs under `superpowers:subagent-driven-development`: a fresh implementer subagent
+per task, an independent reviewer after each, fixes looped until the review is clean, then a
+whole-branch review before the PR.
 
-Sequence T-14 early once the API is up — the stakeholder said if only one thing ships, it is the performance summary dashboard plus the daily submission count.
+**What still governs the order:**
 
-Leave T-17 until O-5 is resolved. Everything else can proceed around it.
+- The cycle/date engine comes before anything else touching dates. Late, absent and grace
+  logic is where this project would quietly go wrong, and every downstream feature depends
+  on it. It is Plan 1 for that reason.
+- Nothing in `apps/` is written before `spec/openapi.yaml` covers it. Deliverable 2 is scored
+  on the spec.
+- The mentor dashboard (T-14) is the stakeholder's stated must-have if only one thing ships,
+  so it lands as early as its dependencies allow — Plan 7, immediately after the flows it
+  reads from.
+- T-17 waits on O-5. Everything else routes around it.
+
+**Open points blocking future plans:** O-5 (AI provider) blocks Plan 9. O-6 (rubric wording)
+blocks the evaluation schema. O-10, O-11 and O-12 need mentor sign-off but block nothing —
+all three are implemented behind stated assumptions and marked in code.
 
 ---
 
