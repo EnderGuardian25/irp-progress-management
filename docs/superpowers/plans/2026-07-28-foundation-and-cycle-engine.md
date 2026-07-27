@@ -15,6 +15,8 @@
 - **Timezone:** all timestamps stored UTC; all boundaries evaluated in `Asia/Colombo`. Never read the server's local timezone. Never hardcode `+05:30`.
 - **Required vs optional days:** weekdays are **required**; weekends are **optional** and may hold entries counted as **Extra** (FR-12, FR-33). A weekend is never missed, never late, and never enters a compliance denominator.
 - **Cycles:** the 10th of one month to the 9th of the next (FR-9).
+- **One comparison idiom:** order two `CivilDate`s with `compareDates`, never with raw `<` / `>`. Both work — ISO dates sort lexicographically — but `compareDates` is the exported, documented API, and mixing the two inside one file is how a reader stops trusting either. The only place raw `<` / `>` on a CivilDate is allowed is inside `compareDates` itself.
+- **One parse idiom:** split a `CivilDate` with `dateParts`, never with `split("-").map(Number)` plus a tuple cast.
 - **Commits:** conventional commits. No direct commits to `main` — this plan runs on a branch.
 - **Lint before every commit:** from Task 3 onward, run `pnpm lint` and confirm exit 0 before each commit step. Type-aware rules only see code once it exists, so a clean Task 1 config does not guarantee later tasks stay clean.
 - **Assumptions:** anything resolved by assumption is marked `// ASSUMPTION: O-n` in code.
@@ -152,10 +154,21 @@ export default tseslint.config(
     // projectService resolution and break `pnpm lint` for the whole
     // workspace.
     files: ["**/*.mjs", "**/*.js", "**/*.config.ts"],
+    // Never let this reach real source. "**/*.config.ts" is repo-wide, so a
+    // future domain file such as `packages/core/src/rubric.config.ts` would
+    // silently lose every type-aware rule — no error, just weaker linting
+    // nobody notices. Config files live beside a package root, never in src/.
+    ignores: ["**/src/**"],
     ...tseslint.configs.disableTypeChecked,
   },
 );
 ```
+
+The `ignores: ["**/src/**"]` is load-bearing. Without it, dropping a file named
+`*.config.ts` anywhere under a `src/` directory disables type-aware linting for it
+silently. Verified by probe: with the ignore, `@typescript-eslint/no-unnecessary-type-assertion`
+(type-aware) fires on `packages/core/src/probe.config.ts`; without it, only the syntactic
+`no-inferrable-types` fires.
 
 **Do not add `"**/*.config.mjs"` to the global `ignores`.** A bare `{ ignores: [...] }`
 object is a *global* ignore, and `**/` matches zero path segments — so that pattern silently
@@ -319,9 +332,21 @@ git commit -m "chore: scaffold @irp/core package with vitest"
 - Produces:
   - `type CivilDate = string & { readonly __brand: "CivilDate" }`
   - `civilDate(value: string): CivilDate` — throws `RangeError` on malformed or impossible dates
+  - `dateParts(date: CivilDate): { year: number; month: number; day: number }`
   - `addDays(date: CivilDate, days: number): CivilDate`
   - `dayOfWeek(date: CivilDate): number` — 0 Sunday … 6 Saturday
   - `compareDates(a: CivilDate, b: CivilDate): number` — -1 / 0 / 1
+
+`dateParts` is the single shared way to split a `CivilDate`. Everywhere else in the engine
+that needs year/month/day calls it, rather than `split("-").map(Number)` with a
+`as [number, number, number]` cast — that cast suppresses a genuine `| undefined` under
+`noUncheckedIndexedAccess` and is exactly the idiom that gets copy-pasted somewhere it is
+not safe.
+
+**`Date.UTC` is banned in this file.** It remaps years 0-99 to 1900-1999. `civilDate()`
+validates via `setUTCFullYear` specifically so that `"0099-01-01"` is accepted, so the
+arithmetic must be built the same way — otherwise validated input yields silently wrong
+output (`addDays("0099-01-01", 1)` returning `"1999-01-02"`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -383,6 +408,13 @@ describe("addDays", () => {
   it("handles a leap year February", () => {
     expect(addDays(civilDate("2028-03-01"), -1)).toBe("2028-02-29");
   });
+
+  // civilDate() validates years 0-99 via setUTCFullYear, so the arithmetic
+  // must be built the same way. Date.UTC would remap 0099 to 1999 and return
+  // "1999-01-02" here — validated input, silently wrong output.
+  it("stays in the first century instead of remapping to 1900-1999", () => {
+    expect(addDays(civilDate("0099-01-01"), 1)).toBe("0099-01-02");
+  });
 });
 
 describe("dayOfWeek", () => {
@@ -396,6 +428,12 @@ describe("dayOfWeek", () => {
 
   it("returns 0 for a known Sunday", () => {
     expect(dayOfWeek(civilDate("2026-08-02"))).toBe(0);
+  });
+
+  // Proleptic Gregorian: 0099-01-01 is a Thursday (4). 1999-01-01 was a
+  // Friday (5), so a Date.UTC-based implementation returns 5 here.
+  it("returns the first-century weekday, not the 1900s remap", () => {
+    expect(dayOfWeek(civilDate("0099-01-01"))).toBe(4);
   });
 });
 
@@ -446,13 +484,11 @@ export function civilDate(value: string): CivilDate {
   const month = Number(match[2]);
   const day = Number(match[3]);
 
-  // Round-tripping detects impossible dates such as 2026-02-30, because the
-  // Date API normalises out-of-range parts.
+  // Date.UTC normalises out-of-range parts, so round-tripping detects
+  // impossible dates such as 2026-02-30.
   //
-  // setUTCFullYear rather than Date.UTC: Date.UTC remaps years 0-99 to
-  // 1900-1999 per the ECMAScript spec, which would make the round-trip
-  // falsely reject a perfectly valid "0099-01-01". setUTCFullYear has no
-  // such special case.
+  // Date.UTC remaps years 0-99 to 1900-1999, which would falsely reject
+  // "0099-01-01". setUTCFullYear has no such special case.
   const probe = new Date(0);
   probe.setUTCFullYear(year, month - 1, day);
   if (
@@ -466,16 +502,33 @@ export function civilDate(value: string): CivilDate {
 }
 
 /**
+ * Split a CivilDate into its numeric parts.
+ *
  * A CivilDate is `YYYY-MM-DD` by construction — civilDate() is the only way
  * to make one — so fixed-offset slicing is safe and needs no assertion. Do
  * not re-run the regex here: that would require a non-null assertion on
  * exec(), which is both a lint violation and a smell.
+ *
+ * Prefer this over `split("-").map(Number)` with a tuple cast — that cast
+ * suppresses a genuine `| undefined` under noUncheckedIndexedAccess.
  */
+export function dateParts(date: CivilDate): { year: number; month: number; day: number } {
+  return {
+    year: Number(date.slice(0, 4)),
+    month: Number(date.slice(5, 7)),
+    day: Number(date.slice(8, 10)),
+  };
+}
+
 function toUtcMidnight(date: CivilDate): Date {
-  const year = Number(date.slice(0, 4));
-  const month = Number(date.slice(5, 7));
-  const day = Number(date.slice(8, 10));
-  return new Date(Date.UTC(year, month - 1, day));
+  const { year, month, day } = dateParts(date);
+  // Built the same way civilDate() validates, and for the same reason:
+  // Date.UTC remaps years 0-99 to 1900-1999, so it would turn a validated
+  // "0099-01-01" into 1999 and hand back silently wrong arithmetic to every
+  // caller downstream. setUTCFullYear has no such special case.
+  const instant = new Date(0);
+  instant.setUTCFullYear(year, month - 1, day);
+  return instant;
 }
 
 function fromUtcMidnight(instant: Date): CivilDate {
@@ -591,7 +644,7 @@ Expected: FAIL — `Failed to resolve import "./programme-time.js"`.
 Create `packages/core/src/programme-time.ts`:
 
 ```ts
-import { civilDate, type CivilDate } from "./civil-date.js";
+import { civilDate, dateParts, type CivilDate } from "./civil-date.js";
 
 /**
  * Every deadline, cycle boundary and late determination is evaluated in this
@@ -618,7 +671,10 @@ const WALL_CLOCK_PARTS = new Intl.DateTimeFormat("en-US", {
   second: "2-digit",
 });
 
-function part(parts: Intl.DateTimeFormatPart[], type: string): string {
+function part(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPart["type"],
+): string {
   const found = parts.find((p) => p.type === type);
   if (found === undefined) {
     throw new Error(`Intl did not return a "${type}" part`);
@@ -667,7 +723,7 @@ function zoneOffsetMs(instant: Date): number {
  * means a future zone change cannot silently corrupt every deadline.
  */
 export function endOfProgrammeDay(date: CivilDate): Date {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const { year, month, day } = dateParts(date);
   const wallClock = Date.UTC(year, month - 1, day, 23, 59, 59, 999);
   const firstGuess = new Date(wallClock - zoneOffsetMs(new Date(wallClock)));
   return new Date(wallClock - zoneOffsetMs(firstGuess));
@@ -1001,7 +1057,7 @@ Expected: FAIL — `Failed to resolve import "./cycle.js"`.
 Create `packages/core/src/cycle.ts`:
 
 ```ts
-import { civilDate, type CivilDate } from "./civil-date.js";
+import { civilDate, compareDates, dateParts, type CivilDate } from "./civil-date.js";
 import { workingDaysBetween } from "./weekday.js";
 
 /** Cycles run the 10th of one month to the 9th of the next (FR-9). */
@@ -1038,18 +1094,20 @@ function build(year: number, month: number, day: number): CivilDate {
 
 /** The 10th-to-9th cycle that `date` falls inside. */
 export function cycleContaining(date: CivilDate): CycleBounds {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const { year, month, day } = dateParts(date);
   // Before the 10th means we are still inside the cycle that opened last month.
   const startMonth = day < CYCLE_START_DAY ? month - 1 : month;
-  const start = build(year, startMonth, CYCLE_START_DAY);
-  const [startYear, startMonthNormalised] = start.split("-").map(Number) as [number, number];
-  const end = build(startYear, startMonthNormalised + 1, CYCLE_END_DAY);
-  return { start, end };
+  // build() already normalises month over/underflow, so the end month can be
+  // derived from the same unnormalised inputs rather than re-parsing `start`.
+  return {
+    start: build(year, startMonth, CYCLE_START_DAY),
+    end: build(year, startMonth + 1, CYCLE_END_DAY),
+  };
 }
 
 /** Move a cycle start forward or backward by whole cycles. */
 export function shiftCycle(start: CivilDate, months: number): CivilDate {
-  const [year, month] = start.split("-").map(Number) as [number, number];
+  const { year, month } = dateParts(start);
   return build(year, month + months, CYCLE_START_DAY);
 }
 
@@ -1086,7 +1144,13 @@ git commit -m "feat(core): add 10th-to-9th cycle boundary arithmetic"
   - `firstEvaluatedCycleStart(admission: CivilDate): CivilDate`
   - `cycleFor(date: CivilDate, admission: CivilDate): Cycle | null` — `null` when `date` precedes the first evaluated cycle
 
-**Why `null` rather than a partial cycle:** FR-27 says a student who joins partway through a cycle is not evaluated for that cycle. A student admitted 22 August is not evaluated for 10 Aug – 9 Sep; their first evaluated cycle is 10 Sep – 9 Oct. This is derived from FR-27, not assumed, so it carries no `ASSUMPTION` marker.
+**Why `null` rather than a partial cycle:** FR-27 says a student who joins **or leaves** partway through a cycle is not evaluated for that cycle. A student admitted 22 August is not evaluated for 10 Aug – 9 Sep; their first evaluated cycle is 10 Sep – 9 Oct. This is derived from FR-27, not assumed, so it carries no `ASSUMPTION` marker.
+
+**Only the joining half of FR-27 is implemented here.** Departure is not modelled: there is no
+`Enrolment` record to hang a departure date on until the data-model plan, and `cycleFor` takes
+no departure argument. `cycleFor` is therefore **not FR-27-complete** — it will return a cycle
+for a student who left halfway through it. Closing this needs the data model first, so it is
+deliberately deferred rather than half-built here.
 
 - [ ] **Step 1: Append the failing tests to `packages/core/src/cycle.test.ts`**
 
@@ -1164,9 +1228,16 @@ export interface Cycle extends CycleBounds {
 /**
  * The first cycle a student is actually evaluated for.
  *
- * FR-27: a student who joins partway through a cycle is not evaluated for it.
- * So admission counts only when it lands exactly on a cycle start (the 10th);
- * otherwise evaluation begins with the following cycle.
+ * This implements only the JOINING half of FR-27. The full requirement is
+ * that a student who joins *or leaves* partway through a cycle is not
+ * evaluated for that cycle; here, admission counts only when it lands exactly
+ * on a cycle start (the 10th), and otherwise evaluation begins with the
+ * following cycle.
+ *
+ * Departure is not modelled at all. There is no enrolment record to hang a
+ * departure date on until the data-model plan lands, and `cycleFor` takes no
+ * departure argument. A caller must NOT treat `cycleFor` as FR-27-complete:
+ * it will happily return a cycle for a student who left halfway through it.
  */
 export function firstEvaluatedCycleStart(admission: CivilDate): CivilDate {
   const { start } = cycleContaining(admission);
@@ -1175,9 +1246,9 @@ export function firstEvaluatedCycleStart(admission: CivilDate): CivilDate {
 
 /** Whole cycles between two cycle starts. */
 function cyclesBetween(from: CivilDate, to: CivilDate): number {
-  const [fromYear, fromMonth] = from.split("-").map(Number) as [number, number];
-  const [toYear, toMonth] = to.split("-").map(Number) as [number, number];
-  return (toYear - fromYear) * 12 + (toMonth - fromMonth);
+  const fromParts = dateParts(from);
+  const toParts = dateParts(to);
+  return (toParts.year - fromParts.year) * 12 + (toParts.month - fromParts.month);
 }
 
 /**
@@ -1187,7 +1258,7 @@ function cyclesBetween(from: CivilDate, to: CivilDate): number {
 export function cycleFor(date: CivilDate, admission: CivilDate): Cycle | null {
   const first = firstEvaluatedCycleStart(admission);
   const bounds = cycleContaining(date);
-  if (bounds.start < first) {
+  if (compareDates(bounds.start, first) < 0) {
     return null;
   }
   return { ...bounds, index: cyclesBetween(first, bounds.start) + 1 };
@@ -1419,7 +1490,7 @@ export function graceDeadlineFor(target: CivilDate): Date {
  * No weekday guard: weekends are optional days that may hold Extra entries.
  */
 export function canSubmitFor(target: CivilDate, now: Date): boolean {
-  if (target > toProgrammeDate(now)) {
+  if (compareDates(target, toProgrammeDate(now)) > 0) {
     return false;
   }
   return now.getTime() <= graceDeadlineFor(target).getTime();
@@ -1443,7 +1514,6 @@ export function submissionWindow(now: Date): SubmissionWindow {
     }
     cursor = addDays(cursor, 1);
   }
-
   // The oldest accepted target expires soonest, so its deadline is the one
   // that closes the window. Read before reverse(), while index 0 is still
   // the oldest.
@@ -1488,13 +1558,19 @@ mentor confirmation."
 **Interfaces:**
 - Consumes: `CivilDate` from Task 3; `toProgrammeDate` from Task 4; `isWeekday` from Task 5; `graceDeadlineFor` from Task 8
 - Produces:
-  - `type DayStatus = "submitted" | "late" | "absent" | "missed" | "pending" | "extra" | "none" | "future"`
+  - `type DayStatus = "onTime" | "late" | "absent" | "missed" | "pending" | "extra" | "none" | "future"`
   - `interface DayFacts { hasEntry: boolean; firstEntryAt: Date | null; hasAbsence: boolean }`
   - `classifyDay(date: CivilDate, facts: DayFacts, now: Date): DayStatus`
 
 There is deliberately **no `rejected` status** — the review flow has no reject state.
 
-**Required days** (weekdays) resolve to `submitted`/`late`/`absent`/`missed`/`pending`.
+**The on-time member is `onTime`, deliberately not `submitted`.** Plan 2's OpenAPI carries a
+review state also called `Submitted`, meaning *has been handed in*. That is a different axis
+from *was it delivered by its deadline* — a late entry is `Submitted` in the review sense and
+`late` here. Two adjacent `status` concepts sharing a value name with different semantics is a
+bug factory, so they are kept distinct by name.
+
+**Required days** (weekdays) resolve to `onTime`/`late`/`absent`/`missed`/`pending`.
 **Optional days** (weekends) resolve to `extra` when work was recorded and `none` when it was
 not — never `missed`, never `late`, because you cannot be late for work that was never
 required (FR-12, FR-33). Absence does not apply to a weekend and is ignored there.
@@ -1522,13 +1598,13 @@ describe("classifyDay", () => {
     expect(classifyDay(tuesday, none, tuesdayMidday)).toBe("pending");
   });
 
-  it("returns submitted when the entry landed on the day itself", () => {
+  it("returns onTime when the entry landed on the day itself", () => {
     const facts: DayFacts = {
       hasEntry: true,
       firstEntryAt: new Date("2026-07-28T10:00:00Z"),
       hasAbsence: false,
     };
-    expect(classifyDay(tuesday, facts, thursdayAfter)).toBe("submitted");
+    expect(classifyDay(tuesday, facts, thursdayAfter)).toBe("onTime");
   });
 
   it("returns late when the entry landed after the day ended but inside grace", () => {
@@ -1538,6 +1614,21 @@ describe("classifyDay", () => {
       hasAbsence: false,
     };
     expect(classifyDay(tuesday, facts, thursdayAfter)).toBe("late");
+  });
+
+  // Where the O-10 grace assumption meets the classifier. canSubmitFor keeps
+  // Friday open until Monday night, so a Friday entry created Monday morning
+  // is ACCEPTED — but Friday's own day ended long before, so the mentor must
+  // still see it as late, not on time.
+  it("returns late for a Friday entry that landed the following Monday morning", () => {
+    const friday = civilDate("2026-07-31");
+    const facts: DayFacts = {
+      hasEntry: true,
+      firstEntryAt: new Date("2026-08-03T04:00:00Z"), // 09:30 Monday in Colombo
+      hasAbsence: false,
+    };
+    const laterThatWeek = new Date("2026-08-05T06:00:00Z");
+    expect(classifyDay(friday, facts, laterThatWeek)).toBe("late");
   });
 
   it("returns absent when marked absent, even with no entry", () => {
@@ -1606,7 +1697,7 @@ Expected: FAIL — `Failed to resolve import "./classify-day.js"`.
 Create `packages/core/src/classify-day.ts`:
 
 ```ts
-import type { CivilDate } from "./civil-date.js";
+import { compareDates, type CivilDate } from "./civil-date.js";
 import { endOfProgrammeDay, toProgrammeDate } from "./programme-time.js";
 import { graceDeadlineFor } from "./submission-window.js";
 import { isWeekday } from "./weekday.js";
@@ -1620,9 +1711,16 @@ import { isWeekday } from "./weekday.js";
  *
  * There is no "rejected" — the review flow runs Submitted to In Review to
  * Evaluated with no reject step, and that is a confirmed non-goal.
+ *
+ * "onTime" is deliberately NOT called "submitted". These are two different
+ * axes: DayStatus answers "was the work delivered by its deadline", while the
+ * review flow's `Submitted` state answers "has the work been handed in for
+ * review yet". A late entry is `Submitted` in the review sense and "late"
+ * here. Giving both the same name would invite a caller to compare across
+ * the two and quietly get the wrong answer.
  */
 export type DayStatus =
-  | "submitted"
+  | "onTime"
   | "late"
   | "absent"
   | "missed"
@@ -1662,7 +1760,7 @@ export type DayFacts =
  * missed is a silence.
  */
 export function classifyDay(date: CivilDate, facts: DayFacts, now: Date): DayStatus {
-  if (date > toProgrammeDate(now)) {
+  if (compareDates(date, toProgrammeDate(now)) > 0) {
     return "future";
   }
 
@@ -1676,7 +1774,7 @@ export function classifyDay(date: CivilDate, facts: DayFacts, now: Date): DaySta
   // The union narrows firstEntryAt to Date here — no null check needed.
   if (facts.hasEntry) {
     const dayEnded = endOfProgrammeDay(date).getTime();
-    return facts.firstEntryAt.getTime() <= dayEnded ? "submitted" : "late";
+    return facts.firstEntryAt.getTime() <= dayEnded ? "onTime" : "late";
   }
 
   if (facts.hasAbsence) {
@@ -1729,6 +1827,7 @@ import {
   nextWeekday,
   previousWeekday,
   submissionWindow,
+  toProgrammeDate,
   type DayFacts,
 } from "./index.js";
 
@@ -1782,19 +1881,35 @@ describe("invariants across three years of dates", () => {
     }
   });
 
-  it("submissionWindow always offers today as a target", () => {
-    // Today can never be out of grace, weekday or weekend.
+  // A single mid-day instant per date exercises the calendar arithmetic
+  // thoroughly and the timezone boundary not at all. 18:29:59.999Z is the
+  // last millisecond of a Colombo day and 18:30:00.000Z the first of the
+  // next, so each date is also probed either side of the rollover — where a
+  // UTC-vs-Colombo mixup would show up as an off-by-one day.
+  const instantsFor = (date: string): Date[] => [
+    new Date(`${date}T06:00:00Z`),
+    new Date(`${date}T18:29:59.999Z`),
+    new Date(`${date}T18:30:00.000Z`),
+  ];
+
+  it("submissionWindow always offers today as a target, including across the Colombo midnight boundary", () => {
+    // Today can never be out of grace, weekday or weekend. "Today" is the
+    // Colombo date at that instant, which past 18:30Z is the NEXT UTC date.
     for (const date of all) {
-      const noon = new Date(`${date}T06:00:00Z`);
-      expect(submissionWindow(noon).targetDates).toContain(date);
+      for (const instant of instantsFor(date)) {
+        const today = toProgrammeDate(instant);
+        expect(submissionWindow(instant).targetDates).toContain(today);
+      }
     }
   });
 
-  it("submissionWindow never offers a future date", () => {
+  it("submissionWindow never offers a future date, including across the Colombo midnight boundary", () => {
     for (const date of all) {
-      const noon = new Date(`${date}T06:00:00Z`);
-      for (const target of submissionWindow(noon).targetDates) {
-        expect(target <= date).toBe(true);
+      for (const instant of instantsFor(date)) {
+        const today = toProgrammeDate(instant);
+        for (const target of submissionWindow(instant).targetDates) {
+          expect(target <= today).toBe(true);
+        }
       }
     }
   });
@@ -1818,14 +1933,16 @@ describe("invariants across three years of dates", () => {
     }
   });
 
-  it("a weekday is never extra or none", () => {
+  // Asserting the exact status, not just "not extra and not none" — the
+  // negative form would pass for six different statuses and so proves very
+  // little. Every date in this sweep is a past weekday with nothing on
+  // record and grace long closed, which is exactly "missed".
+  it("a weekday with nothing recorded and grace closed is always missed", () => {
     const facts: DayFacts = { hasEntry: false, firstEntryAt: null, hasAbsence: false };
     const wellAfter = new Date("2029-06-01T06:00:00Z");
     for (const date of all) {
       if (!isWeekday(civilDate(date))) continue;
-      const status = classifyDay(civilDate(date), facts, wellAfter);
-      expect(status).not.toBe("extra");
-      expect(status).not.toBe("none");
+      expect(classifyDay(civilDate(date), facts, wellAfter)).toBe("missed");
     }
   });
 });
@@ -1841,7 +1958,14 @@ Expected: FAIL — the barrel exports nothing yet, so imports are undefined.
 Replace `packages/core/src/index.ts` entirely:
 
 ```ts
-export { addDays, civilDate, compareDates, dayOfWeek, type CivilDate } from "./civil-date.js";
+export {
+  addDays,
+  civilDate,
+  compareDates,
+  dateParts,
+  dayOfWeek,
+  type CivilDate,
+} from "./civil-date.js";
 export {
   PROGRAMME_TIME_ZONE,
   endOfProgrammeDay,
