@@ -16,7 +16,11 @@ A progress-tracking and evaluation system for the Bistec Hearts Academy **Indust
 | `docs/interview-and-prd.md` | Requirements, personas, non-goals, NFR targets, team contract, open points |
 | `docs/stakeholder-interview.md` | Raw stakeholder answers — the primary record; consult when a requirement's intent is unclear |
 | `docs/IRP_Progress_Management_System_Brief.pdf` | Original brief (v1.0 draft) |
-| `docs/month-2-challenge-context.md` | Programme constraints: stack, deploy target, deliverables, load-test criteria |
+| `docs/month-2-challenge-context.md` | Programme constraints: stack, deploy target, deliverables, load-test criteria. **A source record — do not edit it.** It is the evidence any deviation is measured against |
+| `docs/design-system.md` | Visual system, verified colour tokens, typography, motion, copy voice, a11y floor |
+| `docs/adr/` | Architecture decisions. Read before proposing an alternative that one already rejected |
+| `docs/superpowers/specs/` and `plans/` | Per-slice design specs and their task-by-task implementation plans |
+| `handoff.md` §2a | **The build order.** The Phase 1–7 list in §2b is traceability only, superseded as sequence |
 
 ---
 
@@ -77,8 +81,11 @@ irp-progress-management/
 │   ├── interview-and-prd.md
 │   ├── stakeholder-interview.md
 │   ├── month-2-challenge-context.md
-│   ├── stories/              S-001-*.md, one per story
-│   └── adr/                  NNNN-title.md
+│   ├── design-system.md      visual system, tokens, copy voice
+│   ├── adr/                  NNNN-title.md
+│   └── superpowers/
+│       ├── specs/            YYYY-MM-DD-<topic>-design.md
+│       └── plans/            YYYY-MM-DD-<feature>.md
 ├── .github/workflows/
 ├── CLAUDE.md
 └── handoff.md
@@ -105,8 +112,17 @@ irp-progress-management/
 
 **No deploys outside CI.** No shell scripts checked in, no portal clicks, no `az` commands run by hand for anything that should be Bicep.
 
+**How work is executed.** Every slice runs the same loop: `brainstorming` → a spec in
+`docs/superpowers/specs/` → `writing-plans` → a plan in `docs/superpowers/plans/` →
+`subagent-driven-development` to execute it, one fresh subagent per task with an independent
+reviewer after each. **One plan, one branch, one PR, merged before the next plan starts.**
+
+When a subagent finds a defect in the plan's own code, fix the plan at source and commit that
+correction alongside the code fix. A plan that has silently diverged from the codebase is
+worse than no plan.
+
 **Git discipline** (solo sprint — see the team contract in `docs/interview-and-prd.md` §4.3):
-- No direct commits to `main`. One branch and one PR per story.
+- No direct commits to `main`. One branch and one PR per plan.
 - PR description names the FR(s) it implements.
 - Conventional commits.
 - Any decision with a plausible rejected alternative gets an ADR first, naming at least two rejected alternatives.

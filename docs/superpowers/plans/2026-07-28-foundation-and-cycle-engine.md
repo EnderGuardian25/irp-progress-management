@@ -351,6 +351,16 @@ describe("civilDate", () => {
   it("rejects a leap day in a non-leap year", () => {
     expect(() => civilDate("2026-02-29")).toThrow(RangeError);
   });
+
+  // Guards the Date.UTC year-remapping trap: years 0-99 become 1900-1999,
+  // which would make the validation round-trip reject a valid date.
+  it("accepts a valid date in the first century", () => {
+    expect(civilDate("0099-01-01")).toBe("0099-01-01");
+  });
+
+  it("still rejects an impossible date in the first century", () => {
+    expect(() => civilDate("0099-02-30")).toThrow(RangeError);
+  });
 });
 
 describe("addDays", () => {
@@ -436,9 +446,15 @@ export function civilDate(value: string): CivilDate {
   const month = Number(match[2]);
   const day = Number(match[3]);
 
-  // Date.UTC normalises out-of-range parts, so round-tripping detects
-  // impossible dates such as 2026-02-30.
-  const probe = new Date(Date.UTC(year, month - 1, day));
+  // Round-tripping detects impossible dates such as 2026-02-30, because the
+  // Date API normalises out-of-range parts.
+  //
+  // setUTCFullYear rather than Date.UTC: Date.UTC remaps years 0-99 to
+  // 1900-1999 per the ECMAScript spec, which would make the round-trip
+  // falsely reject a perfectly valid "0099-01-01". setUTCFullYear has no
+  // such special case.
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
   if (
     probe.getUTCFullYear() !== year ||
     probe.getUTCMonth() !== month - 1 ||
