@@ -40,4 +40,13 @@ describe("endOfProgrammeDay", () => {
     const end = endOfProgrammeDay(civilDate("2026-07-28"));
     expect(toProgrammeDate(new Date(end.getTime() + 1))).toBe("2026-07-29");
   });
+
+  // civilDate() accepts years 0-99, so the deadline arithmetic must handle
+  // them too. Date.UTC remaps 0-99 to 1900-1999, which would land this on
+  // 1999-01-01. The round-trip is the real invariant and exercises both
+  // timezone-aware functions at once.
+  it("stays in the first century instead of remapping to 1900-1999", () => {
+    const date = civilDate("0099-01-01");
+    expect(toProgrammeDate(endOfProgrammeDay(date))).toBe(date);
+  });
 });

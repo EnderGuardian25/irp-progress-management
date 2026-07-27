@@ -39,32 +39,42 @@ function part(
 /** The Colombo calendar date that a UTC instant falls on. */
 export function toProgrammeDate(instant: Date): CivilDate {
   const parts = DATE_PARTS.formatToParts(instant);
-  return civilDate(
-    `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")}`,
-  );
+  // Intl emits the year unpadded — year 99 formats as "99", not "0099" —
+  // which would fail civilDate()'s four-digit regex outright. Padding is a
+  // no-op for every year from 1000 on.
+  const year = part(parts, "year").padStart(4, "0");
+  return civilDate(`${year}-${part(parts, "month")}-${part(parts, "day")}`);
 }
 
 /**
  * Milliseconds this zone is ahead of UTC at a given instant.
  *
  * Both sides of the subtraction are floored to the whole second. The
- * formatter emits no milliseconds, so `Date.UTC` below builds a wall clock
- * with ms = 0; subtracting an instant that carries milliseconds would skew
- * the offset by up to 999 ms and push every computed deadline off by
- * nearly a second. Zone offsets are always whole minutes, so discarding
- * milliseconds from both sides loses nothing.
+ * formatter emits no milliseconds, so the wall clock below is built with
+ * ms = 0; subtracting an instant that carries milliseconds would skew the
+ * offset by up to 999 ms and push every computed deadline off by nearly a
+ * second. Zone offsets are always whole minutes, so discarding milliseconds
+ * from both sides loses nothing.
+ *
+ * Epoch-seeded rather than `Date.UTC` for the same reason as toUtcMidnight:
+ * Date.UTC would remap a year 0-99 to 1900-1999 and yield an offset wrong by
+ * nineteen centuries.
  */
 function zoneOffsetMs(instant: Date): number {
   const parts = WALL_CLOCK_PARTS.formatToParts(instant);
-  const asIfUtc = Date.UTC(
+  const asIfUtc = new Date(0);
+  asIfUtc.setUTCFullYear(
     Number(part(parts, "year")),
     Number(part(parts, "month")) - 1,
     Number(part(parts, "day")),
+  );
+  asIfUtc.setUTCHours(
     Number(part(parts, "hour")),
     Number(part(parts, "minute")),
     Number(part(parts, "second")),
+    0,
   );
-  return asIfUtc - (instant.getTime() - instant.getUTCMilliseconds());
+  return asIfUtc.getTime() - (instant.getTime() - instant.getUTCMilliseconds());
 }
 
 /**
@@ -78,7 +88,13 @@ function zoneOffsetMs(instant: Date): number {
  */
 export function endOfProgrammeDay(date: CivilDate): Date {
   const { year, month, day } = dateParts(date);
-  const wallClock = Date.UTC(year, month - 1, day, 23, 59, 59, 999);
+  // Seeded from epoch and set via setUTCFullYear for the same reason
+  // toUtcMidnight does: Date.UTC remaps years 0-99 to 1900-1999, and
+  // civilDate() accepts those years.
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
+  probe.setUTCHours(23, 59, 59, 999);
+  const wallClock = probe.getTime();
   const firstGuess = new Date(wallClock - zoneOffsetMs(new Date(wallClock)));
   return new Date(wallClock - zoneOffsetMs(firstGuess));
 }
