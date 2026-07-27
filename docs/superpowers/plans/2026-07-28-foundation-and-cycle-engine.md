@@ -1631,12 +1631,27 @@ export type DayStatus =
   | "none"
   | "future";
 
-export interface DayFacts {
-  readonly hasEntry: boolean;
-  /** When the earliest entry for this date was created, or null if none. */
-  readonly firstEntryAt: Date | null;
-  readonly hasAbsence: boolean;
-}
+/**
+ * What is on record for one day.
+ *
+ * A discriminated union rather than three independent fields. `hasEntry: true`
+ * alongside `firstEntryAt: null` is not a state this system can be in, and
+ * leaving it representable means a later fact-builder could produce a day that
+ * holds a real entry but classifies as `missed` — a silent, wrong figure on
+ * the mentor's dashboard. Making it unrepresentable costs nothing here.
+ */
+export type DayFacts =
+  | {
+      readonly hasEntry: true;
+      /** When the earliest entry for this date was created. */
+      readonly firstEntryAt: Date;
+      readonly hasAbsence: boolean;
+    }
+  | {
+      readonly hasEntry: false;
+      readonly firstEntryAt: null;
+      readonly hasAbsence: boolean;
+    };
 
 /**
  * Classify one day.
@@ -1658,7 +1673,8 @@ export function classifyDay(date: CivilDate, facts: DayFacts, now: Date): DaySta
     return facts.hasEntry ? "extra" : "none";
   }
 
-  if (facts.hasEntry && facts.firstEntryAt !== null) {
+  // The union narrows firstEntryAt to Date here — no null check needed.
+  if (facts.hasEntry) {
     const dayEnded = endOfProgrammeDay(date).getTime();
     return facts.firstEntryAt.getTime() <= dayEnded ? "submitted" : "late";
   }
