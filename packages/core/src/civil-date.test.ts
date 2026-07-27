@@ -21,6 +21,14 @@ describe("civilDate", () => {
   it("rejects a leap day in a non-leap year", () => {
     expect(() => civilDate("2026-02-29")).toThrow(RangeError);
   });
+
+  it("accepts a valid date in the first century", () => {
+    expect(civilDate("0099-01-01")).toBe("0099-01-01");
+  });
+
+  it("still rejects an impossible date in the first century", () => {
+    expect(() => civilDate("0099-02-30")).toThrow(RangeError);
+  });
 });
 
 describe("addDays", () => {

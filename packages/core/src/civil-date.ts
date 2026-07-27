@@ -22,7 +22,11 @@ export function civilDate(value: string): CivilDate {
 
   // Date.UTC normalises out-of-range parts, so round-tripping detects
   // impossible dates such as 2026-02-30.
-  const probe = new Date(Date.UTC(year, month - 1, day));
+  //
+  // Date.UTC remaps years 0-99 to 1900-1999, which would falsely reject
+  // "0099-01-01". setUTCFullYear has no such special case.
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
   if (
     probe.getUTCFullYear() !== year ||
     probe.getUTCMonth() !== month - 1 ||
