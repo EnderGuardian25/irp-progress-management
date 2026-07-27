@@ -9,9 +9,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:tz": "cross-env TZ=America/New_York vitest run"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }
