@@ -24,7 +24,7 @@ A progress-tracking and evaluation system for the Bistec Hearts Academy **Indust
 
 | Layer | Choice |
 |---|---|
-| Frontend | Next.js 15, TypeScript strict |
+| Frontend | Next.js **16**, TypeScript strict — see [ADR-0004](docs/adr/0004-nextjs-16-over-pinned-15.md); the brief pins 15, **mentor sign-off pending (O-12)** |
 | API | Fastify + TypeScript |
 | Database | PostgreSQL 16 via Prisma |
 | Auth | Azure AD SSO, Bistec training tenant |
@@ -37,6 +37,24 @@ A progress-tracking and evaluation system for the Bistec Hearts Academy **Indust
 
 The stack is a programme constraint, not a preference. Swapping any row needs an ADR **and** stakeholder escalation.
 
+### Pinned versions
+
+Verified against the registry on 2026-07-28. **The rule is *newest version the surrounding ecosystem actually supports*, not *newest version published*** — see [ADR-0005](docs/adr/0005-typescript-6-for-eslint-compatibility.md).
+
+| Tool | Pinned | Newest | Why not newest |
+|---|---|---|---|
+| Node | 24.x | — | — |
+| pnpm | 11.17.0 | — | — |
+| TypeScript | **6.0.3** | 7.0.2 | typescript-eslint requires `<6.1.0`, and it *is* ESLint's TypeScript parser — TS 7 means no linting at all. ADR-0005 |
+| ESLint | 10.8.0 | — | — |
+| typescript-eslint | 8.65.0 | — | — |
+| Vitest | 4.1.10 | — | — |
+| Next.js | 16.2.12 | — | Brief pins 15; ADR-0004, sign-off pending (O-12) |
+| Fastify | 5.10.0 | — | — |
+| Prisma | 7.9.1 | — | — |
+
+Before bumping anything, check the peer ranges of what depends on it. The TypeScript 7 case is the worked example of why.
+
 ---
 
 ## Repository layout
@@ -46,7 +64,7 @@ irp-progress-management/
 ├── spec/
 │   └── openapi.yaml          hand-written, source of truth for the API
 ├── apps/
-│   ├── web/                  Next.js 15
+│   ├── web/                  Next.js 16
 │   └── api/                  Fastify
 ├── packages/
 │   ├── types/                GENERATED from openapi.yaml — never hand-edit

@@ -10,7 +10,9 @@
 
 ## Context
 
-`apps/web` is Next.js 15 with TypeScript strict. The stack rows fixed by the programme
+`apps/web` is Next.js 16 with TypeScript strict (ADR-0004 moved this off the pinned 15; the
+shadcn and Tailwind compatibility that ADR flags must be verified at scaffold time rather
+than assumed). The stack rows fixed by the programme
 (`CLAUDE.md`) specify the framework but say nothing about the CSS layer or component
 sourcing, so both are open decisions.
 

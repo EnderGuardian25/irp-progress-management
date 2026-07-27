@@ -36,6 +36,8 @@ Neither waits on the other.
 | Decision | Where |
 |---|---|
 | Tailwind + shadcn/ui, retuned token-first | [ADR-0001](../../adr/0001-tailwind-and-shadcn-for-web-ui.md) |
+| Next.js 16 in place of the pinned 15 — **sign-off pending (O-12)** | [ADR-0004](../../adr/0004-nextjs-16-over-pinned-15.md) |
+| TypeScript 6.0.3, not 7.0.2 — typescript-eslint is ESLint's TS parser and caps at `<6.1.0` | [ADR-0005](../../adr/0005-typescript-6-for-eslint-compatibility.md) |
 | Light default, dark supported, both contrast-verified | [ADR-0002](../../adr/0002-light-default-with-dark-support.md) |
 | Cycle ribbon as the FR-28 surface | [ADR-0003](../../adr/0003-cycle-ribbon-as-fr-28-summary.md) |
 | Visual system, tokens, typography, motion, copy voice | [`docs/design-system.md`](../../design-system.md) |
@@ -51,7 +53,7 @@ Server B1ms (free for 12 months), App Insights and Entra ID at no cost for the s
 
 ### In
 
-- pnpm workspace monorepo scaffold, TypeScript strict throughout
+- pnpm workspace monorepo scaffold, TypeScript strict throughout, ESLint with type-aware rules
 - `packages/core` — the cycle/date engine, pure and exhaustively tested
 - `spec/openapi.yaml` covering exactly two endpoints, lint-clean at zero warnings
 - Generated `packages/types` and `packages/client`, with CI failing on staleness
@@ -81,7 +83,7 @@ stock shadcn.
 irp-progress-management/
 ├── spec/openapi.yaml            hand-written, source of truth
 ├── apps/
-│   ├── web/                     Next.js 15
+│   ├── web/                     Next.js 16 (ADR-0004)
 │   └── api/                     Fastify
 ├── packages/
 │   ├── types/                   GENERATED — never hand-edited

@@ -6,7 +6,7 @@
 
 **Architecture:** All calendar arithmetic runs on **civil dates** — branded `YYYY-MM-DD` strings — never on `Date` objects. Only two functions in the whole engine are timezone-aware: converting a UTC instant to a Colombo calendar date, and converting a Colombo calendar date to its end-of-day UTC instant. Everything else is pure string/integer arithmetic with zero timezone surface. This is what makes the engine deterministic under any server timezone.
 
-**Tech Stack:** TypeScript 5 (strict), pnpm workspaces, Vitest, Node 24. No date library — `Intl.DateTimeFormat` with full ICU covers the two timezone-aware functions, and adding `date-fns` would introduce API surface without removing any of the logic below.
+**Tech Stack:** TypeScript 6.0.3 (strict), pnpm 11.17.0 workspaces, Vitest 4.1.10, ESLint 10.8.0 with typescript-eslint 8.65.0, Node 24. No date library — `Intl.DateTimeFormat` with full ICU covers the two timezone-aware functions, and adding `date-fns` would introduce API surface without removing any of the logic below.
 
 ## Global Constraints
 
@@ -16,16 +16,34 @@
 - **Required vs optional days:** weekdays are **required**; weekends are **optional** and may hold entries counted as **Extra** (FR-12, FR-33). A weekend is never missed, never late, and never enters a compliance denominator.
 - **Cycles:** the 10th of one month to the 9th of the next (FR-9).
 - **Commits:** conventional commits. No direct commits to `main` — this plan runs on a branch.
+- **Lint before every commit:** from Task 3 onward, run `pnpm lint` and confirm exit 0 before each commit step. Type-aware rules only see code once it exists, so a clean Task 1 config does not guarantee later tasks stay clean.
 - **Assumptions:** anything resolved by assumption is marked `// ASSUMPTION: O-n` in code.
 - **Node version:** 24.x (`node --version` confirms v24.15.0 on this machine).
+- **Exact version pins** — verified against the registry on 2026-07-28. Use these values verbatim; do not "upgrade" them:
+
+  | Package | Pin |
+  |---|---|
+  | `typescript` | `^6.0.3` |
+  | `vitest` | `^4.1.10` |
+  | `eslint` | `^10.8.0` |
+  | `typescript-eslint` | `^8.65.0` |
+  | `@eslint/js` | `^10.0.1` |
+  | `@types/node` | `^26.1.2` |
+  | `cross-env` | `^10.1.0` |
+  | pnpm | `11.17.0` |
+
+  **TypeScript stays on 6.x deliberately.** 7.0.2 is published, but typescript-eslint caps at
+  `typescript <6.1.0`, and typescript-eslint *is* ESLint's TypeScript parser — on TS 7 there is
+  no linting at all. See [ADR-0005](../../adr/0005-typescript-6-for-eslint-compatibility.md).
+  If any install step reports a peer-dependency conflict on these versions, stop and report
+  it rather than resolving it by bumping.
 
 ## Prerequisite
 
-`pnpm` is not installed on this machine. Before Task 1:
+`pnpm` is already installed at **11.17.0** — verify before starting:
 
 ```bash
-npm install -g pnpm
-pnpm --version    # expect 9.x or 10.x
+pnpm --version    # expect 11.17.0
 ```
 
 ---
@@ -36,12 +54,13 @@ pnpm --version    # expect 9.x or 10.x
 - Create: `package.json`
 - Create: `pnpm-workspace.yaml`
 - Create: `tsconfig.base.json`
+- Create: `eslint.config.mjs`
 - Create: `.gitignore`
 - Create: `.npmrc`
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: a workspace root that `pnpm install` succeeds in, and `tsconfig.base.json` which every package extends.
+- Produces: a workspace root that `pnpm install` succeeds in, `tsconfig.base.json` which every package extends, and a root `eslint.config.mjs` covering every package's `src/`. Linting is configured **once at the root**, not per package — there is a single `pnpm lint` script and no package defines its own.
 
 - [ ] **Step 1: Create the workspace root `package.json`**
 
@@ -50,12 +69,19 @@ pnpm --version    # expect 9.x or 10.x
   "name": "irp-progress-management",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "pnpm@10.0.0",
+  "packageManager": "pnpm@11.17.0",
   "engines": { "node": ">=24" },
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "lint": "pnpm -r lint"
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.2",
+    "eslint": "^10.8.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0"
   }
 }
 ```
@@ -90,6 +116,43 @@ packages:
 }
 ```
 
+- [ ] **Step 3b: Create `eslint.config.mjs` at the workspace root**
+
+`.mjs` rather than `.js` so the root `package.json` does not need `"type": "module"`.
+
+```js
+import js from "@eslint/js";
+import tseslint from "typescript-eslint";
+
+export default tseslint.config(
+  {
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.next/**",
+      "**/coverage/**",
+      "**/*.config.mjs",
+    ],
+  },
+  js.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslint.configs.stylisticTypeChecked,
+  {
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+);
+```
+
+`recommendedTypeChecked` plus `stylisticTypeChecked` rather than `strictTypeChecked`:
+type-aware rules are the point, but `strict` is opinionated enough to fight the plan's code
+without improving it. `projectService: true` lets typescript-eslint discover each package's
+`tsconfig.json` without a hand-maintained project list.
+
 - [ ] **Step 4: Create `.npmrc`**
 
 ```
@@ -115,11 +178,20 @@ coverage/
 Run: `pnpm install`
 Expected: completes without error; creates `pnpm-lock.yaml` and `node_modules/`.
 
-- [ ] **Step 7: Commit**
+If pnpm reports a peer-dependency conflict involving `typescript`, **stop and report it** —
+do not resolve it by changing a version. The pins are deliberate (see Global Constraints).
+
+- [ ] **Step 7: Verify ESLint runs**
+
+Run: `pnpm lint`
+Expected: exit 0. There are no `.ts` files yet, so ESLint finds nothing to report — this
+step confirms the config parses and resolves, not that any code is clean.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add package.json pnpm-workspace.yaml tsconfig.base.json .npmrc .gitignore pnpm-lock.yaml
-git commit -m "chore: initialize pnpm workspace with strict TypeScript base config"
+git add package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs .npmrc .gitignore pnpm-lock.yaml
+git commit -m "chore: initialize pnpm workspace with strict TypeScript and type-aware ESLint"
 ```
 
 ---
@@ -154,11 +226,14 @@ git commit -m "chore: initialize pnpm workspace with strict TypeScript base conf
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }
 ```
+
+No `lint` script here — ESLint is configured once at the workspace root (Task 1) and the
+root `pnpm lint` covers every package.
 
 - [ ] **Step 2: Create `packages/core/tsconfig.json`**
 
@@ -1784,7 +1859,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 11.17.0
 
       - uses: actions/setup-node@v4
         with:
@@ -1796,6 +1871,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm -r typecheck
+
+      - name: Lint
+        run: pnpm lint
 
       - name: Test
         run: pnpm -r test
@@ -1832,6 +1910,7 @@ Expected: all three matrix jobs pass on GitHub Actions.
 
 - [ ] `pnpm install` succeeds from a clean checkout
 - [ ] `pnpm -r typecheck` exits 0
+- [ ] `pnpm lint` exits 0 with no warnings
 - [ ] `pnpm -r test` passes
 - [ ] `pnpm --filter @irp/core test:tz` passes
 - [ ] CI green across all three timezone matrix jobs
@@ -1844,5 +1923,7 @@ Expected: all three matrix jobs pass on GitHub Actions.
 |---|---|---|---|
 | O-10 | Grace-window conflict between FR-13 and FR-15 — implemented on the FR-15 reading, needs mentor confirmation | Damian | Next batched Teams message |
 | O-11 | Weekends reclassified as optional Extra work, revising FR-12 and adding FR-33. **Changes §3.4, which §4.2 reserves to the decision owner** — needs mentor sign-off | Damian | Next batched Teams message |
-| — | Both open points are already recorded in `docs/interview-and-prd.md` §5 | — | Done |
+| O-12 | Next.js 16 in place of the pinned 15 ([ADR-0004](../../adr/0004-nextjs-16-over-pinned-15.md)). **Needs mentor sign-off before Plan 3**; reversal cost is zero until then | Damian | Next batched Teams message |
+| — | Move to TypeScript 7 once typescript-eslint supports it ([ADR-0005](../../adr/0005-typescript-6-for-eslint-compatibility.md)). Without this recorded, "temporarily one behind" becomes permanent | Damian | Check at Plan 4 |
+| — | O-10, O-11 and O-12 are all recorded in `docs/interview-and-prd.md` §5 | — | Done |
 | — | Plan 2: API contract and service | — | After this plan merges |
