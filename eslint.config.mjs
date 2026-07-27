@@ -29,6 +29,11 @@ export default tseslint.config(
     // projectService resolution and break `pnpm lint` for the whole
     // workspace.
     files: ["**/*.mjs", "**/*.js", "**/*.config.ts"],
+    // Never let this reach real source. "**/*.config.ts" is repo-wide, so a
+    // future domain file such as `packages/core/src/rubric.config.ts` would
+    // silently lose every type-aware rule — no error, just weaker linting
+    // nobody notices. Config files live beside a package root, never in src/.
+    ignores: ["**/src/**"],
     ...tseslint.configs.disableTypeChecked,
   },
 );
