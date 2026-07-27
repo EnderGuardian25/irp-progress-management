@@ -13,7 +13,7 @@
 - **Package manager:** pnpm workspaces. Not npm, not yarn.
 - **TypeScript:** `strict: true` everywhere. No `any`. No `@ts-ignore`.
 - **Timezone:** all timestamps stored UTC; all boundaries evaluated in `Asia/Colombo`. Never read the server's local timezone. Never hardcode `+05:30`.
-- **Weekdays:** Monday–Friday only. Weekends have no submission slot and are never missed days (FR-12).
+- **Required vs optional days:** weekdays are **required**; weekends are **optional** and may hold entries counted as **Extra** (FR-12, FR-33). A weekend is never missed, never late, and never enters a compliance denominator.
 - **Cycles:** the 10th of one month to the 9th of the next (FR-9).
 - **Commits:** conventional commits. No direct commits to `main` — this plan runs on a branch.
 - **Assumptions:** anything resolved by assumption is marked `// ASSUMPTION: O-n` in code.
@@ -1090,14 +1090,16 @@ git commit -m "feat(core): anchor cycles to admission date per FR-27"
 - Test: `packages/core/src/submission-window.test.ts`
 
 **Interfaces:**
-- Consumes: `CivilDate` from Task 3; `toProgrammeDate`, `endOfProgrammeDay` from Task 4; `isWeekday`, `previousWeekday`, `nextWeekday` from Task 5
+- Consumes: `CivilDate`, `addDays`, `compareDates` from Task 3; `toProgrammeDate`, `endOfProgrammeDay` from Task 4; `previousWeekday`, `nextWeekday` from Task 5
 - Produces:
   - `interface SubmissionWindow { targetDates: CivilDate[]; graceClosesAt: Date }`
   - `submissionWindow(now: Date): SubmissionWindow`
   - `graceDeadlineFor(target: CivilDate): Date`
   - `canSubmitFor(target: CivilDate, now: Date): boolean`
 
-**ASSUMPTION: O-10.** FR-13 says a late entry is accepted "for one further day"; FR-15 says an entry may target "the current weekday or the immediately preceding weekday". These conflict on Monday — under FR-13 Friday's grace closes Saturday night, but under FR-15 Friday is still Monday's "immediately preceding weekday". This implements the FR-15 reading: **grace runs to the end of the next weekday**. It is consistent with weekday-only arithmetic and with weekends never counting against a student (FR-12). Needs mentor confirmation.
+**Weekends are submittable (FR-33).** Optional days can hold Extra entries, so `canSubmitFor` has no weekday guard. One uniform rule covers both kinds of day: **grace for any date runs to the end of the next weekday.** Friday, Saturday and Sunday therefore all stay open until Monday 23:59:59 Colombo, and `graceDeadlineFor` needs no weekend branch at all.
+
+**ASSUMPTION: O-10.** FR-13 accepts a late entry "for one further day"; FR-15 permits targeting "the current weekday or the immediately preceding weekday". These conflict on Monday — under FR-13 Friday's grace closes Saturday night, under FR-15 Friday is still Monday's "immediately preceding weekday". This implements the FR-15 reading. Since weekend work is *optional* (FR-12, FR-33), closing Friday's grace on Saturday night would force a weekend login to protect a weekday submission, making optional work effectively mandatory. Needs mentor confirmation.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1126,15 +1128,30 @@ describe("submissionWindow", () => {
     ]);
   });
 
-  it("allows today and the prior Friday on a Monday", () => {
-    expect(submissionWindow(mondayMorning).targetDates).toEqual([
-      "2026-08-03",
+  it("allows Saturday itself plus the prior Friday, since weekends are optional work", () => {
+    expect(submissionWindow(saturdayMorning).targetDates).toEqual([
+      "2026-08-01",
       "2026-07-31",
     ]);
   });
 
-  it("allows only the prior Friday on a Saturday, with no slot for today", () => {
-    expect(submissionWindow(saturdayMorning).targetDates).toEqual(["2026-07-31"]);
+  it("on Monday still allows the whole weekend and the prior Friday", () => {
+    // Friday, Saturday and Sunday all have Monday as their next weekday,
+    // so all three remain inside grace until Monday night.
+    expect(submissionWindow(mondayMorning).targetDates).toEqual([
+      "2026-08-03",
+      "2026-08-02",
+      "2026-08-01",
+      "2026-07-31",
+    ]);
+  });
+
+  it("drops the weekend again once Monday has passed", () => {
+    const tuesdayAfter = new Date("2026-08-04T04:00:00Z");
+    expect(submissionWindow(tuesdayAfter).targetDates).toEqual([
+      "2026-08-04",
+      "2026-08-03",
+    ]);
   });
 
   it("closes grace at end of the current Colombo day mid-week", () => {
@@ -1175,8 +1192,17 @@ describe("canSubmitFor", () => {
     expect(canSubmitFor(civilDate("2026-07-29"), tuesdayMorning)).toBe(false);
   });
 
-  it("rejects a weekend target outright", () => {
-    expect(canSubmitFor(civilDate("2026-08-01"), mondayMorning)).toBe(false);
+  it("accepts a weekend target as optional Extra work (FR-33)", () => {
+    expect(canSubmitFor(civilDate("2026-08-01"), mondayMorning)).toBe(true);
+  });
+
+  it("accepts submitting for Saturday while it is still Saturday", () => {
+    expect(canSubmitFor(civilDate("2026-08-01"), saturdayMorning)).toBe(true);
+  });
+
+  it("rejects a weekend target once its grace has closed", () => {
+    const tuesdayAfter = new Date("2026-08-04T04:00:00Z");
+    expect(canSubmitFor(civilDate("2026-08-01"), tuesdayAfter)).toBe(false);
   });
 
   it("still allows Friday on the following Monday (ASSUMPTION O-10)", () => {
@@ -1211,55 +1237,68 @@ Expected: FAIL — `Failed to resolve import "./submission-window.js"`.
 Create `packages/core/src/submission-window.ts`:
 
 ```ts
-import type { CivilDate } from "./civil-date.js";
+import { addDays, compareDates, type CivilDate } from "./civil-date.js";
 import { endOfProgrammeDay, toProgrammeDate } from "./programme-time.js";
-import { isWeekday, nextWeekday, previousWeekday } from "./weekday.js";
+import { nextWeekday, previousWeekday } from "./weekday.js";
 
 export interface SubmissionWindow {
   /** Dates an entry may target right now. Most recent first. */
   readonly targetDates: CivilDate[];
-  /** When the currently-open grace period closes. */
+  /** When the oldest currently-open target expires. */
   readonly graceClosesAt: Date;
 }
 
 /**
  * The last instant an entry for `target` is accepted.
  *
+ * One rule covers required and optional days alike: grace runs to the end of
+ * the next WEEKDAY. Friday, Saturday and Sunday all resolve to Monday night.
+ *
  * ASSUMPTION: O-10. FR-13 says "one further day"; FR-15 says an entry may
  * target the current or immediately preceding weekday. They disagree on
- * Monday. This implements the FR-15 reading — grace runs to the end of the
- * next WEEKDAY, so a Friday stays open until Monday night rather than
- * expiring over a weekend on which the system offers no submission slot.
- * Needs mentor confirmation.
+ * Monday. This implements the FR-15 reading. Weekend work is optional
+ * (FR-12, FR-33), so closing Friday's grace on Saturday night would force a
+ * weekend login to protect a weekday submission — making optional work
+ * effectively mandatory. Needs mentor confirmation.
  */
 export function graceDeadlineFor(target: CivilDate): Date {
   return endOfProgrammeDay(nextWeekday(target));
 }
 
-/** What a student may submit for at instant `now`. */
-export function submissionWindow(now: Date): SubmissionWindow {
-  const today = toProgrammeDate(now);
-  const graceClosesAt = endOfProgrammeDay(today);
-
-  // FR-12: weekends have no submission slot, but the preceding Friday is
-  // still inside its grace window.
-  if (!isWeekday(today)) {
-    return { targetDates: [previousWeekday(today)], graceClosesAt };
-  }
-
-  return { targetDates: [today, previousWeekday(today)], graceClosesAt };
-}
-
-/** Whether an entry targeting `target` is accepted at instant `now` (FR-14, FR-15). */
+/**
+ * Whether an entry targeting `target` is accepted at instant `now`
+ * (FR-14, FR-15, FR-33).
+ *
+ * No weekday guard: weekends are optional days that may hold Extra entries.
+ */
 export function canSubmitFor(target: CivilDate, now: Date): boolean {
-  if (!isWeekday(target)) {
-    return false;
-  }
-  const today = toProgrammeDate(now);
-  if (target > today) {
+  if (target > toProgrammeDate(now)) {
     return false;
   }
   return now.getTime() <= graceDeadlineFor(target).getTime();
+}
+
+/**
+ * Every date a student may submit for at instant `now`, most recent first.
+ *
+ * Candidates run from the previous weekday to today inclusive, which sweeps
+ * up any intervening weekend. Each is then filtered by canSubmitFor, so the
+ * grace rule stays in exactly one place.
+ */
+export function submissionWindow(now: Date): SubmissionWindow {
+  const today = toProgrammeDate(now);
+  const targetDates: CivilDate[] = [];
+
+  let cursor = previousWeekday(today);
+  while (compareDates(cursor, today) <= 0) {
+    if (canSubmitFor(cursor, now)) {
+      targetDates.push(cursor);
+    }
+    cursor = addDays(cursor, 1);
+  }
+  targetDates.reverse();
+
+  return { targetDates, graceClosesAt: endOfProgrammeDay(today) };
 }
 ```
 
@@ -1290,11 +1329,16 @@ mentor confirmation."
 **Interfaces:**
 - Consumes: `CivilDate` from Task 3; `toProgrammeDate` from Task 4; `isWeekday` from Task 5; `graceDeadlineFor` from Task 8
 - Produces:
-  - `type DayStatus = "submitted" | "late" | "absent" | "missed" | "pending" | "future"`
+  - `type DayStatus = "submitted" | "late" | "absent" | "missed" | "pending" | "extra" | "none" | "future"`
   - `interface DayFacts { hasEntry: boolean; firstEntryAt: Date | null; hasAbsence: boolean }`
   - `classifyDay(date: CivilDate, facts: DayFacts, now: Date): DayStatus`
 
 There is deliberately **no `rejected` status** — the review flow has no reject state.
+
+**Required days** (weekdays) resolve to `submitted`/`late`/`absent`/`missed`/`pending`.
+**Optional days** (weekends) resolve to `extra` when work was recorded and `none` when it was
+not — never `missed`, never `late`, because you cannot be late for work that was never
+required (FR-12, FR-33). Absence does not apply to a weekend and is ignored there.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1356,8 +1400,39 @@ describe("classifyDay", () => {
     expect(classifyDay(civilDate("2026-07-27"), none, tuesdayMidday)).toBe("pending");
   });
 
-  it("throws for a weekend date, which has no status at all", () => {
-    expect(() => classifyDay(civilDate("2026-08-01"), none, thursdayAfter)).toThrow(RangeError);
+  it("returns extra for a weekend day with an entry (FR-33)", () => {
+    const facts: DayFacts = {
+      hasEntry: true,
+      firstEntryAt: new Date("2026-08-01T10:00:00Z"),
+      hasAbsence: false,
+    };
+    const laterThatWeek = new Date("2026-08-05T06:00:00Z");
+    expect(classifyDay(civilDate("2026-08-01"), facts, laterThatWeek)).toBe("extra");
+  });
+
+  it("returns none for a weekend day with no entry — never missed", () => {
+    const laterThatWeek = new Date("2026-08-05T06:00:00Z");
+    expect(classifyDay(civilDate("2026-08-01"), none, laterThatWeek)).toBe("none");
+  });
+
+  it("never returns late for a weekend, however long after the entry landed", () => {
+    const facts: DayFacts = {
+      hasEntry: true,
+      firstEntryAt: new Date("2026-08-03T10:00:00Z"), // Monday, after Saturday ended
+      hasAbsence: false,
+    };
+    const laterThatWeek = new Date("2026-08-05T06:00:00Z");
+    expect(classifyDay(civilDate("2026-08-01"), facts, laterThatWeek)).toBe("extra");
+  });
+
+  it("ignores an absence record on a weekend", () => {
+    const facts: DayFacts = { hasEntry: false, firstEntryAt: null, hasAbsence: true };
+    const laterThatWeek = new Date("2026-08-05T06:00:00Z");
+    expect(classifyDay(civilDate("2026-08-01"), facts, laterThatWeek)).toBe("none");
+  });
+
+  it("returns future for a weekend still ahead", () => {
+    expect(classifyDay(civilDate("2026-08-01"), none, tuesdayMidday)).toBe("future");
   });
 });
 ```
@@ -1378,7 +1453,11 @@ import { graceDeadlineFor } from "./submission-window.js";
 import { isWeekday } from "./weekday.js";
 
 /**
- * The state of one weekday for one student.
+ * The state of one day for one student.
+ *
+ * Required days (weekdays) resolve to the first five. Optional days
+ * (weekends) resolve to "extra" or "none" — never missed, never late,
+ * because you cannot be late for work that was never required.
  *
  * There is no "rejected" — the review flow runs Submitted to In Review to
  * Evaluated with no reject step, and that is a confirmed non-goal.
@@ -1389,6 +1468,8 @@ export type DayStatus =
   | "absent"
   | "missed"
   | "pending"
+  | "extra"
+  | "none"
   | "future";
 
 export interface DayFacts {
@@ -1399,21 +1480,23 @@ export interface DayFacts {
 }
 
 /**
- * Classify one weekday.
+ * Classify one day.
  *
- * Order matters: absence wins over missed because absence is explicitly
- * recorded with a reason and carries no penalty, while missed is a silence.
+ * Order matters twice over. Future is checked first so an unreached day is
+ * never reported as a gap. On required days, absence wins over missed because
+ * absence is explicitly recorded with a reason and carries no penalty, while
+ * missed is a silence.
  */
 export function classifyDay(date: CivilDate, facts: DayFacts, now: Date): DayStatus {
-  if (!isWeekday(date)) {
-    throw new RangeError(
-      `Weekends have no submission status; ${date} is not a weekday`,
-    );
+  if (date > toProgrammeDate(now)) {
+    return "future";
   }
 
-  const today = toProgrammeDate(now);
-  if (date > today) {
-    return "future";
+  // Optional day (FR-33). Recorded work is Extra; silence is nothing at all.
+  // An absence record here is meaningless — there was nothing to be absent
+  // from — so it is ignored rather than treated as a state.
+  if (!isWeekday(date)) {
+    return facts.hasEntry ? "extra" : "none";
   }
 
   if (facts.hasEntry && facts.firstEntryAt !== null) {
@@ -1464,12 +1547,14 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   civilDate,
+  classifyDay,
   cycleContaining,
   cycleWorkingDays,
   isWeekday,
   nextWeekday,
   previousWeekday,
   submissionWindow,
+  type DayFacts,
 } from "./index.js";
 
 /** Every date from 2026-01-01 for three years. */
@@ -1522,12 +1607,50 @@ describe("invariants across three years of dates", () => {
     }
   });
 
-  it("submissionWindow never offers a weekend as a target", () => {
+  it("submissionWindow always offers today as a target", () => {
+    // Today can never be out of grace, weekday or weekend.
+    for (const date of all) {
+      const noon = new Date(`${date}T06:00:00Z`);
+      expect(submissionWindow(noon).targetDates).toContain(date);
+    }
+  });
+
+  it("submissionWindow never offers a future date", () => {
     for (const date of all) {
       const noon = new Date(`${date}T06:00:00Z`);
       for (const target of submissionWindow(noon).targetDates) {
-        expect(isWeekday(target)).toBe(true);
+        expect(target <= date).toBe(true);
       }
+    }
+  });
+
+  it("a weekend is never missed, late, absent or pending (FR-12, FR-33)", () => {
+    const withEntry: DayFacts = {
+      hasEntry: true,
+      firstEntryAt: new Date("2026-01-01T00:00:00Z"),
+      hasAbsence: true,
+    };
+    const withoutEntry: DayFacts = {
+      hasEntry: false,
+      firstEntryAt: null,
+      hasAbsence: true,
+    };
+    const wellAfter = new Date("2029-06-01T06:00:00Z");
+    for (const date of all) {
+      if (isWeekday(civilDate(date))) continue;
+      expect(classifyDay(civilDate(date), withEntry, wellAfter)).toBe("extra");
+      expect(classifyDay(civilDate(date), withoutEntry, wellAfter)).toBe("none");
+    }
+  });
+
+  it("a weekday is never extra or none", () => {
+    const facts: DayFacts = { hasEntry: false, firstEntryAt: null, hasAbsence: false };
+    const wellAfter = new Date("2029-06-01T06:00:00Z");
+    for (const date of all) {
+      if (!isWeekday(civilDate(date))) continue;
+      const status = classifyDay(civilDate(date), facts, wellAfter);
+      expect(status).not.toBe("extra");
+      expect(status).not.toBe("none");
     }
   });
 });
@@ -1720,5 +1843,6 @@ Expected: all three matrix jobs pass on GitHub Actions.
 | # | Item | Owner | When |
 |---|---|---|---|
 | O-10 | Grace-window conflict between FR-13 and FR-15 — implemented on the FR-15 reading, needs mentor confirmation | Damian | Next batched Teams message |
-| — | Add O-10 to `docs/interview-and-prd.md` §5 | Damian | With the next PRD edit |
+| O-11 | Weekends reclassified as optional Extra work, revising FR-12 and adding FR-33. **Changes §3.4, which §4.2 reserves to the decision owner** — needs mentor sign-off | Damian | Next batched Teams message |
+| — | Both open points are already recorded in `docs/interview-and-prd.md` §5 | — | Done |
 | — | Plan 2: API contract and service | — | After this plan merges |

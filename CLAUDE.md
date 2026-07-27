@@ -83,7 +83,7 @@ irp-progress-management/
 
 **Time handling.** Store every timestamp in UTC. Evaluate every deadline, late flag, and cycle boundary in **Asia/Colombo (UTC+05:30)**. Never rely on the server's local timezone — the deploy region is not Sri Lanka. Cycles run the 10th → the 9th of the following month.
 
-**Weekdays only.** There is no submission slot on Saturday or Sunday, and weekends are never counted as missed days. Any date arithmetic over submissions must skip weekends.
+**Weekdays are required; weekends are optional extra work.** A weekday with no entry and no absence, past the grace window, is **Missed**. A weekend day can hold entries and they count as **Extra** — but a weekend is *never* missed, *never* late, and never appears in a compliance denominator. Any date arithmetic over *required* days must skip weekends; arithmetic over *recorded activity* must not.
 
 **No deploys outside CI.** No shell scripts checked in, no portal clicks, no `az` commands run by hand for anything that should be Bicep.
 
@@ -104,11 +104,14 @@ Read this before writing schema or naming anything.
 | **Batch** | A cohort of students with its own start and end dates. Two run concurrently; calendars are independent. |
 | **Cycle** | A monthly evaluation window, 10th → 9th, anchored to the batch's admission date, in Asia/Colombo. The unit of scoring. |
 | **Entry** | One text submission by a student. Multiple entries per day are allowed. |
-| **Daily report** | All of a student's entries for one weekday, rolled up. The reviewable unit. |
+| **Daily report** | All of a student's entries for one date, rolled up. The reviewable unit. |
 | **States** | `Submitted → In Review → Evaluated`. There is **no Rejected state** — do not add one. |
-| **Late** | An entry for the immediately preceding weekday, submitted inside the one-day grace window. Flagged, still accepted. |
-| **Absent** | A weekday a student explicitly marked as absent with a reason. Distinct from a missed submission. |
-| **Missed** | A weekday with no entry and no absence record, past the grace window. Final. |
+| **Required day** | A weekday. Carries a submission obligation and counts in compliance denominators. |
+| **Optional day** | A Saturday or Sunday. May hold entries, carries no obligation, never counts in a denominator. |
+| **Late** | An entry for a required day, submitted after that day ended but inside the grace window. Flagged, still accepted. Optional days are never late. |
+| **Absent** | A **weekday** a student explicitly marked as absent with a reason. Distinct from a missed submission. Absence does not apply to weekends — there is nothing to be absent from. |
+| **Missed** | A **weekday** with no entry and no absence record, past the grace window. Final. A weekend is never missed. |
+| **Extra** | An entry on a Saturday or Sunday. Recorded, surfaced to the mentor, and fed to the AI summary as positive context. Never required, never penalised by its absence. |
 | **Rubric** | Five fixed criteria, weights **20 / 25 / 25 / 10 / 20**. Not configurable at runtime — no admin UI for weights. |
 | **Performance index** | The AI-produced weighted score for a cycle. The score of record; a mentor may override it. |
 | **Override** | A mentor-set score that supersedes the AI's. Stores the new score, the original AI score, and the mentor's reason. |

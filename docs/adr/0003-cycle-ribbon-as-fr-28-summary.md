@@ -1,6 +1,6 @@
 # ADR-0003 — Cycle ribbon as the FR-28 summary surface
 
-- **Status:** Accepted
+- **Status:** Accepted, **amended 2026-07-28** (see Amendment 1)
 - **Date:** 2026-07-27
 - **Deciders:** Damian De Cruz (Spec / Build / Review — solo sprint, `docs/interview-and-prd.md` §4.1)
 - **Requirements:** FR-28 (must-ship, SC-4), FR-29, NFR-13
@@ -35,8 +35,8 @@ day of the current cycle, each day a small bar whose fill represents that day's 
 compliance, with today marked and future days drawn as outlines. The three FR-28 figures sit
 inline beneath it.
 
-**Weekends are not rendered at all** — not greyed, not dimmed, absent. In this domain they do
-not exist.
+**Empty weekends are not rendered at all** — not greyed, not dimmed, absent. See Amendment 1
+for weekends that carry extra work.
 
 The same component serves the student dashboard (FR-29) showing personal marks instead of
 batch compliance.
@@ -52,10 +52,10 @@ batch compliance.
 - One component serves both dashboards, so there is one thing to build, test and keep
   visually consistent across the two audiences.
 - **It is a live assertion on the date engine.** T-06 is identified in `handoff.md` §3 as the
-  subtlest logic in the system. If the ribbon ever renders a weekend, or the wrong number of
-  working days, or a boundary on the wrong date, the bug is visible on the landing screen
-  rather than buried in a scoring calculation three weeks later. The UI becomes a permanent
-  visual regression test on the hardest logic in the project.
+  subtlest logic in the system. If the ribbon ever renders an *empty* weekend, or the wrong
+  number of required days, or a boundary on the wrong date, the bug is visible on the landing
+  screen rather than buried in a scoring calculation three weeks later. The UI becomes a
+  permanent visual regression test on the hardest logic in the project.
 
 ### Negative
 
@@ -102,6 +102,33 @@ mentor working through a batch. Rejected because it demotes the stakeholder's ex
 must-have to chrome, and because the "performance summary" half of FR-28 has nowhere to live
 in a header strip. Failing the one requirement the stakeholder named is not a trade worth
 making for row count.
+
+## Amendment 1 — weekends carrying extra work (2026-07-28)
+
+**Trigger.** FR-12 was revised and FR-33 added (see O-11): weekdays remain required, but
+weekends became **optional days that may hold entries counted as Extra**. The original
+decision's "weekends do not exist in this domain" premise no longer holds.
+
+**What changes.** An *empty* weekend is still not rendered — unchanged. A weekend carrying
+extra work renders as a **half-width `+` slot** between its Friday and Monday. The ribbon is
+five-a-week by default and grows only where someone actually worked.
+
+**What does not change.** Compliance figures — "N of M submitted", late, absent, missed — are
+computed over required days only. Extra never enters a denominator, so the numbers the
+stakeholder named in SC-4 mean exactly what they meant before.
+
+**A rejected alternative, recorded because it was measured and failed.** The obvious move was
+a fifth status colour for Extra. A teal at hue 200 came out within **1.01:1 luminance** of the
+`ok` green at hue 155 — indistinguishable under colour-vision deficiency with the two marks
+adjacent in a dense strip, and no lightness in the usable range separated them, because both
+are mid-luminance hues. Distinguishing by **form** (half width plus a glyph) is
+CVD-safe by construction, and it is the more honest representation anyway: Extra is not a
+compliance outcome and does not belong in the compliance ramp.
+
+**Cost accepted.** Ribbon width is now variable across students in the same batch, so the
+43px-per-day budget in the width section above tightens when several weekends carry work. If
+a cycle with heavy weekend activity overflows 1280px, the fallback is to collapse consecutive
+extra slots into a single `+N` marker rather than to shrink the required days.
 
 ## Revisit when
 

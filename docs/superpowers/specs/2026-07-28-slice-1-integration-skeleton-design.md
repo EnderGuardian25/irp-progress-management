@@ -109,7 +109,7 @@ deployment. Every downstream feature depends on it being right.
 |---|---|
 | All timestamps stored in UTC | NFR-12 |
 | All boundaries evaluated in Asia/Colombo (UTC+05:30, no DST) | NFR-12, FR-9 |
-| Submissions exist on weekdays only; weekends are never missed days | FR-12 |
+| Weekdays are required; weekends are optional and may hold **Extra** entries. A weekend is never missed, never late, never in a denominator | FR-12, FR-33 |
 | Cycles run the 10th → the 9th of the following month | FR-9 |
 | Deadline for a weekday is 23:59:59 Asia/Colombo on that date | FR-13 |
 | Entries for the immediately preceding weekday are accepted one further day, flagged Late | FR-13 |
@@ -141,8 +141,17 @@ submissionWindow(now: Date): { targetDates: CivilDate[], graceClosesAt: Date }
 graceDeadlineFor(target: CivilDate): Date
 canSubmitFor(target: CivilDate, now: Date): boolean
 classifyDay(date, facts, now):
-  'submitted' | 'late' | 'absent' | 'missed' | 'pending' | 'future'
+  // required days (weekdays)
+  'submitted' | 'late' | 'absent' | 'missed' | 'pending'
+  // optional days (weekends)
+  | 'extra' | 'none'
+  // either
+  | 'future'
 ```
+
+**One uniform grace rule covers both kinds of day:** grace for any date runs to the end of the
+next *weekday*. Friday, Saturday and Sunday therefore all stay open until Monday 23:59:59
+Colombo, and `graceDeadlineFor` needs no weekend special-casing.
 
 ### Cycle anchoring — resolved, not assumed
 
@@ -316,6 +325,7 @@ Verifiable, evidence-based:
 | Item | Status |
 |---|---|
 | **O-10** (new) | **FR-13 and FR-15 conflict on the grace window.** FR-13 says a late entry is accepted "for one further day"; FR-15 says an entry may target "the current weekday or the immediately preceding weekday". These disagree on Monday — under FR-13, Friday's grace closes Saturday night; under FR-15, Friday is still Monday's immediately preceding weekday. Implemented on the FR-15 reading (grace runs to the end of the next **weekday**), marked `// ASSUMPTION: O-10`. Consistent with weekday-only arithmetic and with weekends never counting against a student. **Needs mentor confirmation.** |
+| **O-11** (new) | **Weekends reclassified from "no submission slot" to optional Extra work** (2026-07-28), revising FR-12 and adding FR-33. Weekdays stay required; weekends may hold entries counted as Extra, never missed, never late, never in a denominator. **Changes §3.4, which the §4.2 standing rule reserves to the decision owner — needs mentor sign-off.** |
 | **O-5** (AI provider) | Does not touch this slice — no Evaluation table needed |
 | **O-6** (rubric wording) | Does not touch this slice — full schema deferred |
 | **FR-1** | Partially satisfied. Personal Entra tenant, not the Bistec training tenant |

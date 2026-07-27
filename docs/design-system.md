@@ -38,6 +38,7 @@ Recorded so these don't get reintroduced later as "improvements."
 | Crimson as the brand primary | The palette seed suggested it. Rejected: red already means **missed** here. Colliding the brand colour with the most alarming status in a status-legibility system is a usability fault, not a style choice. The seed's hue survives — reserved exclusively for `missed`. |
 | A row of three identical stat cards | The hero-metric template. FR-28's three figures are carried by the cycle ribbon (§7) instead, which shows the same numbers plus the shape of the whole cycle. |
 | Red for `absent` | Absence is recorded with a reason and carries **no** score penalty (`// ASSUMPTION: O-7`). Colouring it as a fault would contradict the policy the system implements. `absent` is neutral slate. |
+| A sixth status colour for `extra` | Tried and measured. A teal at hue 200 lands within **1.01:1 luminance** of the `ok` green at hue 155 — indistinguishable for a colour-vision-deficient user with the two marks adjacent in a dense ribbon. No lightness in the usable range separated them adequately, because both are mid-luminance hues. Extra is also not a compliance *outcome*, so it does not belong in the compliance ramp. **Distinguished by form instead** — see §3.2. |
 | Charts in v1 | Deferred. Numbers, status and the ribbon carry the dashboard. Revisit once real data exists. |
 | Border-radius above 16px, gradient text, glassmorphism, side-stripe borders, decorative grid backgrounds | House bans. |
 
@@ -78,6 +79,22 @@ Load-bearing. These are the system's core semantic language.
 | `--st-evaluated` | `--ink` + lock glyph | `--ink` + lock glyph | Evaluated — terminal, locked |
 
 There is no `rejected` token. There is no rejected state.
+
+### Extra — distinguished by form, not colour
+
+Weekend work (FR-33) is **not** a compliance state and gets **no status colour**. It is drawn
+differently instead:
+
+- **In the ribbon** — a half-width slot in `--ink-muted` carrying a `+` glyph, inserted
+  between the Friday and Monday it sits between. Narrower than a required day, so the
+  weekday rhythm still reads at a glance.
+- **In the roster** — a count, not a pill: `+2 extra`. A student can have several extra days
+  in a cycle, which a single status pill cannot express.
+
+This is deliberate on three grounds. Extra is a different *kind* of thing from
+submitted/late/absent/missed, so putting it in the same ramp would misrepresent it. Form
+survives colour-vision deficiency where a fifth hue does not. And the compliance palette is
+already carrying four semantic colours — a fifth degrades all of them.
 
 ### 3.3 Dark
 
@@ -172,18 +189,22 @@ behaviour is structural (sidebar collapse below 1440px), never fluid typography.
 **The one element this system is remembered by.** It replaces the stat-card row and answers
 FR-28 in a single component.
 
-A horizontal strip of every **working day** in the current cycle. Weekends are not greyed
-out — they are **not rendered at all**, because in this domain they do not exist. Each day is
-a small bar whose fill is that day's batch compliance. Today is marked. Future days are outlines.
+A horizontal strip of every **required day** in the current cycle — one bar per weekday,
+filled by that day's batch compliance. Today is marked. Future days are outlines.
+
+**An empty weekend is not rendered at all.** A weekend *with* extra work (FR-33) appears as a
+half-width `+` slot between the Friday and Monday it falls between. So the ribbon is
+five-a-week by default and grows only where someone actually worked.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                                                                        │
 │  Cycle 2 · 10 Jul – 9 Aug                    Day 12 of 22 · Colombo    │
 │                                                                        │
-│  10  11  14  15  16  17  18  21  22  23  24  25  28  29  30  31  01    │
-│  ▓   ▓   ▓   ▓   ▒   ▓   ▓   ▓   ░   ▓   ▓   ▓   ▓   ▉   ·   ·   ·     │
-│                                                  today                 │
+│  10  11 ⁺ 14  15  16  17  18  21  22  23  24  25  28  29  30  31  01   │
+│  ▓   ▓  ┊ ▓   ▓   ▒   ▓   ▓   ▓   ░   ▓   ▓   ▓   ▓   ▉   ·   ·   ·    │
+│         ↑                                        today                 │
+│      extra                                                             │
 │                                                                        │
 │  8 of 10 submitted today          2 late · 1 absent · 0 missed         │
 │                                                                        │
@@ -191,8 +212,13 @@ a small bar whose fill is that day's batch compliance. Today is marked. Future d
    ↑ --surface, radius 12px, padding 24–32px — the warm zone
 ```
 
-Note the dates: `10 11 14` — the 12th and 13th were a weekend and simply aren't there. The
-weekday-only rule is visible in the interface, not just enforced in the backend.
+Note the dates: `10 11 ⁺ 14` — the 12th and 13th were a weekend. Someone worked one of them,
+so a narrow slot appears; had nobody worked, the ribbon would run `10 11 14` with no gap. The
+required-day rhythm stays legible either way, and the weekday rule remains visible in the
+interface rather than only enforced in the backend.
+
+**Extra days never enter the compliance figures.** The "8 of 10 submitted today" line and the
+late/absent/missed counts are computed over required days only (FR-12).
 
 **Why this over stat cards**
 
