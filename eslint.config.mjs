@@ -3,13 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: [
-      "**/dist/**",
-      "**/node_modules/**",
-      "**/.next/**",
-      "**/coverage/**",
-      "**/*.config.mjs",
-    ],
+    ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "**/coverage/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -21,5 +15,14 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+  },
+  {
+    // Config files are not in any tsconfig project, so type-aware rules
+    // cannot run on them. Lint them with syntactic rules only rather than
+    // ignoring them — an ignore here would make this file itself invisible,
+    // and with no .ts files yet that leaves ESLint zero candidates and a
+    // non-zero exit.
+    files: ["**/*.mjs", "**/*.js"],
+    ...tseslint.configs.disableTypeChecked,
   },
 );
