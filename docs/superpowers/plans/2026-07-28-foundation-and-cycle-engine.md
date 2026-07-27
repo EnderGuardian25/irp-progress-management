@@ -145,7 +145,13 @@ export default tseslint.config(
     // ignoring them — an ignore here would make this file itself invisible,
     // and with no .ts files yet that leaves ESLint zero candidates and a
     // non-zero exit.
-    files: ["**/*.mjs", "**/*.js"],
+    //
+    // "**/*.config.ts" matters as much as the .mjs entries: each package's
+    // tsconfig includes only src/**/*, so vitest.config.ts and its kin are
+    // real TypeScript sitting outside every project. Without this they fail
+    // projectService resolution and break `pnpm lint` for the whole
+    // workspace.
+    files: ["**/*.mjs", "**/*.js", "**/*.config.ts"],
     ...tseslint.configs.disableTypeChecked,
   },
 );
