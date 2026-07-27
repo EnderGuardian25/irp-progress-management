@@ -634,7 +634,16 @@ export function toProgrammeDate(instant: Date): CivilDate {
   );
 }
 
-/** Milliseconds this zone is ahead of UTC at a given instant. */
+/**
+ * Milliseconds this zone is ahead of UTC at a given instant.
+ *
+ * Both sides of the subtraction are floored to the whole second. The
+ * formatter emits no milliseconds, so `Date.UTC` below builds a wall clock
+ * with ms = 0; subtracting an instant that carries milliseconds would skew
+ * the offset by up to 999 ms and push every computed deadline off by
+ * nearly a second. Zone offsets are always whole minutes, so discarding
+ * milliseconds from both sides loses nothing.
+ */
 function zoneOffsetMs(instant: Date): number {
   const parts = WALL_CLOCK_PARTS.formatToParts(instant);
   const asIfUtc = Date.UTC(
@@ -645,7 +654,7 @@ function zoneOffsetMs(instant: Date): number {
     Number(part(parts, "minute")),
     Number(part(parts, "second")),
   );
-  return asIfUtc - instant.getTime();
+  return asIfUtc - (instant.getTime() - instant.getUTCMilliseconds());
 }
 
 /**
