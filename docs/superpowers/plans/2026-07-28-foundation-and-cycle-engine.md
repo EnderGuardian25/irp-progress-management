@@ -126,13 +126,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: [
-      "**/dist/**",
-      "**/node_modules/**",
-      "**/.next/**",
-      "**/coverage/**",
-      "**/*.config.mjs",
-    ],
+    ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "**/coverage/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -145,8 +139,22 @@ export default tseslint.config(
       },
     },
   },
+  {
+    // Config files are not in any tsconfig project, so type-aware rules
+    // cannot run on them. Lint them with syntactic rules only rather than
+    // ignoring them — an ignore here would make this file itself invisible,
+    // and with no .ts files yet that leaves ESLint zero candidates and a
+    // non-zero exit.
+    files: ["**/*.mjs", "**/*.js"],
+    ...tseslint.configs.disableTypeChecked,
+  },
 );
 ```
+
+**Do not add `"**/*.config.mjs"` to the global `ignores`.** A bare `{ ignores: [...] }`
+object is a *global* ignore, and `**/` matches zero path segments — so that pattern silently
+swallows this very file. The `disableTypeChecked` block above is the correct way to keep
+type-aware rules off non-TypeScript files.
 
 `recommendedTypeChecked` plus `stylisticTypeChecked` rather than `strictTypeChecked`:
 type-aware rules are the point, but `strict` is opinionated enough to fight the plan's code
@@ -184,8 +192,13 @@ do not resolve it by changing a version. The pins are deliberate (see Global Con
 - [ ] **Step 7: Verify ESLint runs**
 
 Run: `pnpm lint`
-Expected: exit 0. There are no `.ts` files yet, so ESLint finds nothing to report — this
-step confirms the config parses and resolves, not that any code is clean.
+Expected: exit 0.
+
+Then confirm it is not passing vacuously:
+
+Run: `npx eslint . --format json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log('files linted:',JSON.parse(s).length))"`
+Expected: `files linted: 1` or more — `eslint.config.mjs` itself. A count of `0` with exit 0
+means the config matches nothing and every later lint run is meaningless.
 
 - [ ] **Step 8: Commit**
 
