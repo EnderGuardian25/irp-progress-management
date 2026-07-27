@@ -449,11 +449,17 @@ export function civilDate(value: string): CivilDate {
   return value as CivilDate;
 }
 
+/**
+ * A CivilDate is `YYYY-MM-DD` by construction — civilDate() is the only way
+ * to make one — so fixed-offset slicing is safe and needs no assertion. Do
+ * not re-run the regex here: that would require a non-null assertion on
+ * exec(), which is both a lint violation and a smell.
+ */
 function toUtcMidnight(date: CivilDate): Date {
-  const match = ISO_DATE.exec(date) as RegExpExecArray;
-  return new Date(
-    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
-  );
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 function fromUtcMidnight(instant: Date): CivilDate {
