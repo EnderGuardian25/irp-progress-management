@@ -1,4 +1,11 @@
-export { addDays, civilDate, compareDates, dayOfWeek, type CivilDate } from "./civil-date.js";
+export {
+  addDays,
+  civilDate,
+  compareDates,
+  dateParts,
+  dayOfWeek,
+  type CivilDate,
+} from "./civil-date.js";
 export {
   PROGRAMME_TIME_ZONE,
   endOfProgrammeDay,

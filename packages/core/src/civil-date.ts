@@ -38,16 +38,33 @@ export function civilDate(value: string): CivilDate {
 }
 
 /**
+ * Split a CivilDate into its numeric parts.
+ *
  * A CivilDate is `YYYY-MM-DD` by construction — civilDate() is the only way
  * to make one — so fixed-offset slicing is safe and needs no assertion. Do
  * not re-run the regex here: that would require a non-null assertion on
  * exec(), which is both a lint violation and a smell.
+ *
+ * Prefer this over `split("-").map(Number)` with a tuple cast — that cast
+ * suppresses a genuine `| undefined` under noUncheckedIndexedAccess.
  */
+export function dateParts(date: CivilDate): { year: number; month: number; day: number } {
+  return {
+    year: Number(date.slice(0, 4)),
+    month: Number(date.slice(5, 7)),
+    day: Number(date.slice(8, 10)),
+  };
+}
+
 function toUtcMidnight(date: CivilDate): Date {
-  const year = Number(date.slice(0, 4));
-  const month = Number(date.slice(5, 7));
-  const day = Number(date.slice(8, 10));
-  return new Date(Date.UTC(year, month - 1, day));
+  const { year, month, day } = dateParts(date);
+  // Built the same way civilDate() validates, and for the same reason:
+  // Date.UTC remaps years 0-99 to 1900-1999, so it would turn a validated
+  // "0099-01-01" into 1999 and hand back silently wrong arithmetic to every
+  // caller downstream. setUTCFullYear has no such special case.
+  const instant = new Date(0);
+  instant.setUTCFullYear(year, month - 1, day);
+  return instant;
 }
 
 function fromUtcMidnight(instant: Date): CivilDate {

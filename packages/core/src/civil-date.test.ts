@@ -22,6 +22,8 @@ describe("civilDate", () => {
     expect(() => civilDate("2026-02-29")).toThrow(RangeError);
   });
 
+  // Guards the Date.UTC year-remapping trap: years 0-99 become 1900-1999,
+  // which would make the validation round-trip reject a valid date.
   it("accepts a valid date in the first century", () => {
     expect(civilDate("0099-01-01")).toBe("0099-01-01");
   });
@@ -51,6 +53,13 @@ describe("addDays", () => {
   it("handles a leap year February", () => {
     expect(addDays(civilDate("2028-03-01"), -1)).toBe("2028-02-29");
   });
+
+  // civilDate() validates years 0-99 via setUTCFullYear, so the arithmetic
+  // must be built the same way. Date.UTC would remap 0099 to 1999 and return
+  // "1999-01-02" here — validated input, silently wrong output.
+  it("stays in the first century instead of remapping to 1900-1999", () => {
+    expect(addDays(civilDate("0099-01-01"), 1)).toBe("0099-01-02");
+  });
 });
 
 describe("dayOfWeek", () => {
@@ -64,6 +73,12 @@ describe("dayOfWeek", () => {
 
   it("returns 0 for a known Sunday", () => {
     expect(dayOfWeek(civilDate("2026-08-02"))).toBe(0);
+  });
+
+  // Proleptic Gregorian: 0099-01-01 is a Thursday (4). 1999-01-01 was a
+  // Friday (5), so a Date.UTC-based implementation returns 5 here.
+  it("returns the first-century weekday, not the 1900s remap", () => {
+    expect(dayOfWeek(civilDate("0099-01-01"))).toBe(4);
   });
 });
 

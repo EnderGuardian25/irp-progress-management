@@ -1,4 +1,4 @@
-import type { CivilDate } from "./civil-date.js";
+import { compareDates, type CivilDate } from "./civil-date.js";
 import { endOfProgrammeDay, toProgrammeDate } from "./programme-time.js";
 import { graceDeadlineFor } from "./submission-window.js";
 import { isWeekday } from "./weekday.js";
@@ -12,9 +12,16 @@ import { isWeekday } from "./weekday.js";
  *
  * There is no "rejected" — the review flow runs Submitted to In Review to
  * Evaluated with no reject step, and that is a confirmed non-goal.
+ *
+ * "onTime" is deliberately NOT called "submitted". These are two different
+ * axes: DayStatus answers "was the work delivered by its deadline", while the
+ * review flow's `Submitted` state answers "has the work been handed in for
+ * review yet". A late entry is `Submitted` in the review sense and "late"
+ * here. Giving both the same name would invite a caller to compare across
+ * the two and quietly get the wrong answer.
  */
 export type DayStatus =
-  | "submitted"
+  | "onTime"
   | "late"
   | "absent"
   | "missed"
@@ -54,7 +61,7 @@ export type DayFacts =
  * missed is a silence.
  */
 export function classifyDay(date: CivilDate, facts: DayFacts, now: Date): DayStatus {
-  if (date > toProgrammeDate(now)) {
+  if (compareDates(date, toProgrammeDate(now)) > 0) {
     return "future";
   }
 
@@ -68,7 +75,7 @@ export function classifyDay(date: CivilDate, facts: DayFacts, now: Date): DaySta
   // The union narrows firstEntryAt to Date here — no null check needed.
   if (facts.hasEntry) {
     const dayEnded = endOfProgrammeDay(date).getTime();
-    return facts.firstEntryAt.getTime() <= dayEnded ? "submitted" : "late";
+    return facts.firstEntryAt.getTime() <= dayEnded ? "onTime" : "late";
   }
 
   if (facts.hasAbsence) {

@@ -33,7 +33,7 @@ export function graceDeadlineFor(target: CivilDate): Date {
  * No weekday guard: weekends are optional days that may hold Extra entries.
  */
 export function canSubmitFor(target: CivilDate, now: Date): boolean {
-  if (target > toProgrammeDate(now)) {
+  if (compareDates(target, toProgrammeDate(now)) > 0) {
     return false;
   }
   return now.getTime() <= graceDeadlineFor(target).getTime();

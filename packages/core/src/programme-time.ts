@@ -1,4 +1,4 @@
-import { civilDate, type CivilDate } from "./civil-date.js";
+import { civilDate, dateParts, type CivilDate } from "./civil-date.js";
 
 /**
  * Every deadline, cycle boundary and late determination is evaluated in this
@@ -25,7 +25,10 @@ const WALL_CLOCK_PARTS = new Intl.DateTimeFormat("en-US", {
   second: "2-digit",
 });
 
-function part(parts: Intl.DateTimeFormatPart[], type: string): string {
+function part(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPart["type"],
+): string {
   const found = parts.find((p) => p.type === type);
   if (found === undefined) {
     throw new Error(`Intl did not return a "${type}" part`);
@@ -74,7 +77,7 @@ function zoneOffsetMs(instant: Date): number {
  * means a future zone change cannot silently corrupt every deadline.
  */
 export function endOfProgrammeDay(date: CivilDate): Date {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const { year, month, day } = dateParts(date);
   const wallClock = Date.UTC(year, month - 1, day, 23, 59, 59, 999);
   const firstGuess = new Date(wallClock - zoneOffsetMs(new Date(wallClock)));
   return new Date(wallClock - zoneOffsetMs(firstGuess));

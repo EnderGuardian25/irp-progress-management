@@ -16,13 +16,13 @@ describe("classifyDay", () => {
     expect(classifyDay(tuesday, none, tuesdayMidday)).toBe("pending");
   });
 
-  it("returns submitted when the entry landed on the day itself", () => {
+  it("returns onTime when the entry landed on the day itself", () => {
     const facts: DayFacts = {
       hasEntry: true,
       firstEntryAt: new Date("2026-07-28T10:00:00Z"),
       hasAbsence: false,
     };
-    expect(classifyDay(tuesday, facts, thursdayAfter)).toBe("submitted");
+    expect(classifyDay(tuesday, facts, thursdayAfter)).toBe("onTime");
   });
 
   it("returns late when the entry landed after the day ended but inside grace", () => {
@@ -32,6 +32,21 @@ describe("classifyDay", () => {
       hasAbsence: false,
     };
     expect(classifyDay(tuesday, facts, thursdayAfter)).toBe("late");
+  });
+
+  // Where the O-10 grace assumption meets the classifier. canSubmitFor keeps
+  // Friday open until Monday night, so a Friday entry created Monday morning
+  // is ACCEPTED — but Friday's own day ended long before, so the mentor must
+  // still see it as late, not on time.
+  it("returns late for a Friday entry that landed the following Monday morning", () => {
+    const friday = civilDate("2026-07-31");
+    const facts: DayFacts = {
+      hasEntry: true,
+      firstEntryAt: new Date("2026-08-03T04:00:00Z"), // 09:30 Monday in Colombo
+      hasAbsence: false,
+    };
+    const laterThatWeek = new Date("2026-08-05T06:00:00Z");
+    expect(classifyDay(friday, facts, laterThatWeek)).toBe("late");
   });
 
   it("returns absent when marked absent, even with no entry", () => {
