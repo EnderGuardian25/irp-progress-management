@@ -51,6 +51,28 @@ describe("submissionWindow", () => {
       "2026-07-28T18:29:59.999Z",
     );
   });
+
+  // graceClosesAt tracks the OLDEST open target, which on a weekend is the
+  // preceding Friday — still open until Monday night. Reporting end-of-today
+  // here would understate the window by up to two days.
+  it("on a Saturday, grace closes at the end of Monday, not tonight", () => {
+    expect(submissionWindow(saturdayMorning).graceClosesAt.toISOString()).toBe(
+      "2026-08-03T18:29:59.999Z",
+    );
+  });
+
+  it("on a Sunday, grace also closes at the end of Monday", () => {
+    const sundayMorning = new Date("2026-08-02T04:00:00Z");
+    expect(submissionWindow(sundayMorning).graceClosesAt.toISOString()).toBe(
+      "2026-08-03T18:29:59.999Z",
+    );
+  });
+
+  it("on a Monday, grace closes tonight — the prior Friday's last chance", () => {
+    expect(submissionWindow(mondayMorning).graceClosesAt.toISOString()).toBe(
+      "2026-08-03T18:29:59.999Z",
+    );
+  });
 });
 
 describe("graceDeadlineFor", () => {

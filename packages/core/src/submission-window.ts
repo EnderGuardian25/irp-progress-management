@@ -57,7 +57,18 @@ export function submissionWindow(now: Date): SubmissionWindow {
     }
     cursor = addDays(cursor, 1);
   }
+  // The oldest accepted target expires soonest, so its deadline is the one
+  // that closes the window. Read before reverse(), while index 0 is still
+  // the oldest.
+  //
+  // Do NOT shortcut this to endOfProgrammeDay(today). That is only correct
+  // on a weekday, where nextWeekday(previousWeekday(today)) === today. On a
+  // Saturday the oldest target is Friday, whose grace runs to Monday night
+  // — reporting "tonight" would tell a student their window closes two days
+  // early. Today is always submittable, so the fallback never fires.
+  const graceClosesAt = graceDeadlineFor(targetDates[0] ?? today);
+
   targetDates.reverse();
 
-  return { targetDates, graceClosesAt: endOfProgrammeDay(today) };
+  return { targetDates, graceClosesAt };
 }
