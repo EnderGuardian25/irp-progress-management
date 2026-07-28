@@ -29,7 +29,11 @@ jobs:
     env:
       TZ: ${{ matrix.timezone }}
       DATABASE_URL: postgresql://irp:irp@localhost:5432/irp?schema=public
-      JWKS_URI: https://login.microsoftonline.com/common/discovery/v2.0/keys
+      # Deliberately unresolvable. No test reads this and no network call is
+      # possible (test/helpers/build-test-server.ts hard-codes a local JWKS),
+      # so a real Entra URL here would only imply CI depends on reaching
+      # Microsoft. Plan 3 wires the tenant.
+      JWKS_URI: https://jwks.invalid/keys
       JWT_ISSUER: https://issuer.test/v2.0
       JWT_AUDIENCE: api://irp-test
     steps:
