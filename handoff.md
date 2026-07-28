@@ -35,8 +35,8 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
-**Last updated:** 2026-07-28, mid Plan 2B — 9 of 10 tasks done, unmerged on
-`feat/plan-2b-service-and-persistence`. The ledger is the precise record; this section is the summary.
+**Last updated:** 2026-07-28, Plan 2B — 10 of 10 tasks done, unmerged on
+`feat/plan-2b-service-and-persistence`, awaiting the whole-branch review and PR. The ledger is the precise record; this section is the summary.
 
 ### Done
 
@@ -61,10 +61,18 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 **Code — on `feat/plan-2b-service-and-persistence`, not yet merged**
 
-Plan 2B tasks 1–8 complete and reviewed clean; task 9 in a review fix round; task 10 not started.
+Plan 2B tasks 1–10 complete and reviewed clean; the whole-branch review and PR are still pending.
 A running Fastify service exists: `GET /health` and `GET /api/v1/me`, Azure-AD-shaped JWT auth,
 Prisma-backed user lookup with soft delete, RFC 7807 errors carrying a real span's traceId.
 **34 tests across 9 files, zero skipped**, against real Postgres.
+
+Two seams are deliberate extension points, not accidents of this slice's scope: `buildServer(deps:
+ServerDeps)` in `apps/api/src/server.ts` takes config, the user repo, the JWKS key-getter, and the
+tracer provider as constructor arguments, so Plan 3 swaps the JWKS source without touching how the
+service is composed; and `createTracerProvider(exporter: SpanExporter)` in
+`apps/api/src/telemetry.ts` takes only the exporter, with `apps/api/src/index.ts` currently
+supplying `new ConsoleSpanExporter()` — Plan 4 replaces that one argument with an App Insights
+exporter and nothing else changes.
 
 **What exists now**
 
@@ -133,7 +141,7 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 |---|---|---|---|---|
 | **1 — Deployed integration skeleton** | 1 · Foundation + cycle engine | T-01, T-03, T-06 | D2 | ✅ **Merged, PR #2** |
 | | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
-| | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | **9/10 tasks done, unmerged** — branch `feat/plan-2b-service-and-persistence` |
+| | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | **10/10 tasks done, unmerged** — branch `feat/plan-2b-service-and-persistence`, PR pending |
 | | 3 · Auth + web shell | T-11 | D3 | Blocked on the Azure account |
 | | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Blocked on the Azure account |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
@@ -211,22 +219,21 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/plan-2b-service-and-persistence` · **Next:** **Plan 2B Task 10** (docs, ADR index, spec reconciliation), then the whole-branch review and the PR · **Ledger:** `.superpowers/sdd/2026-07-28-plan-2b-service-and-persistence/progress.md`
+**Branch:** `feat/plan-2b-service-and-persistence` · **Next:** **Plan 3 (Auth + web shell)** — still blocked on the Azure account · **Ledger:** `.superpowers/sdd/2026-07-28-plan-2b-service-and-persistence/progress.md`
 
 > **Ledger path convention changed.** The `subagent-driven-development` skill now resolves a
 > **per-plan** workspace via `scripts/sdd-workspace <plan-file>` — `.superpowers/sdd/<plan-basename>/`
 > — so plans no longer overwrite each other's records and the old manual archiving step is
 > obsolete. The flat `.superpowers/sdd/progress.md` path referenced by older notes is dead.
 
-**Plan 2B status: 9 of 10 tasks complete, all reviewed clean.** Tasks 1–9 are done on the branch;
+**Plan 2B status: 10 of 10 tasks complete, all reviewed clean.** Tasks 1–9 are done on the branch;
 Task 9 took one fix round (the CI step-ordering finding) and its re-review confirmed every finding
-addressed with no new breakage. **Task 10 has not started.**
+addressed with no new breakage. **Task 10 (this doc/spec reconciliation) is done.**
 
-Remaining before the PR: **Task 10**, then the whole-branch review (on the most capable model, per
-the skill's Model Selection), then `finishing-a-development-branch`. The ledger's closing block
-lists exactly what Task 10 and the PR must carry — including that the PR cites **FR-5 as
-implemented and FR-3 only as groundwork**, and records that both CI gate directions were
-demonstrated red.
+Remaining before merge: the whole-branch review (on the most capable model, per the skill's Model
+Selection), then `finishing-a-development-branch`. The ledger's closing block lists exactly what
+the PR must carry — including that the PR cites **FR-5 as implemented and FR-3 only as
+groundwork**, and records that both CI gate directions were demonstrated red.
 
 ### Starting a fresh session
 
@@ -234,11 +241,13 @@ demonstrated red.
    resume map and records every defect, ruling, and deferred minor from Plan 2B. Then
    `docs/superpowers/specs/2026-07-28-plan-2-api-contract-design.md` for the requirements
    themselves: §5 (layout), §7 (the 403 rule), §8 (data model), §9 (error handling), §10 (testing).
-2. Run `pnpm install && pnpm generate && pnpm --filter @irp/core build`, **and now also
-   `pnpm --filter @irp/api exec prisma generate`** — the Prisma client is a third git-ignored
-   generated package, so a fresh clone will not typecheck until it exists.
-3. Continue Plan 2B with `subagent-driven-development` (the skill's own scripts: `sdd-workspace`,
-   `task-brief`, `review-package`). One plan, one branch, one PR, merged before the next starts.
+2. Run `pnpm install && pnpm generate && pnpm --filter @irp/api exec prisma generate && pnpm --filter @irp/core build`
+   — the Prisma client is a third git-ignored generated package, so a fresh clone will not
+   typecheck until it exists.
+3. Plan 2B's ten tasks are complete; do the whole-branch review and
+   `finishing-a-development-branch`, then start **Plan 3** with `subagent-driven-development` (the
+   skill's own scripts: `sdd-workspace`, `task-brief`, `review-package`). One plan, one branch, one
+   PR, merged before the next starts.
 4. For new plans, the skill creates the workspace itself — no manual archiving.
 
 ### Local environment facts that cost real debugging time
@@ -268,6 +277,7 @@ New, and all of them cost a round trip or a corrected plan. Formal doc/spec reco
 | **`res.json()` returns `unknown`** | Reading a field off it trips `@typescript-eslint/no-unsafe-member-access`, and the repo lints at zero warnings. Use `res.json<T>()` with a local shape interface; bare `res.json()` only when handing the whole body to a validator or `toEqual`/`toMatchObject`. This broke the plan's verbatim test code twice |
 | **Plugin composition order is structurally enforced, not merely conventional** | `tracing` → `problem-details` → `auth` are `fastify-plugin`-wrapped with declared `dependencies`, so a wrong order in `server.ts` **throws at boot** and fails the composition test. Order is guaranteed by fp's dependency graph, not by the test's assertions |
 | **`vitest.config.ts` sets `fileParallelism: false`** | Both database suites `TRUNCATE` the same table. Enabling parallelism would make them race. Load-bearing |
+| **The generated Prisma client lives in `apps/api/src/generated/prisma/`** | A **third** git-ignored, eslint-ignored generated directory — same discipline as `@irp/types`/`@irp/client`: never committed, regenerated by `prisma generate`, and CI must generate it **before** typecheck |
 
 ### Carried forward — open items created by Plan 2B
 
@@ -346,10 +356,12 @@ Worth knowing because one of them was silently broken until the whole-branch rev
 **Added in Plan 2B Task 9:**
 
 - **A Postgres 16 service plus `prisma generate` and `prisma migrate deploy` steps** in the `verify`
-  job, so the database tests actually run in CI. `prisma generate` runs **before** the
-  tracked-output porcelain check — the check is whole-repo and unfiltered, so generating after it
-  would leave the Prisma client permanently unexamined. That ordering was corrected during review;
-  the plan's original instruction had it backwards.
+  job, so the database tests actually run in CI — **demonstrated red** against an unreachable
+  host:port (see "a gate-proof is itself a gate" above; a same-host nonexistent-database target
+  does not fail, since the image's superuser silently creates it). `prisma generate` runs
+  **before** the tracked-output porcelain check — the check is whole-repo and unfiltered, so
+  generating after it would leave the Prisma client permanently unexamined. That ordering was
+  corrected during review; the plan's original instruction had it backwards.
 - **A CI skip guard** (`apps/api/test/helpers/require-db.ts`) that turns a missing `DATABASE_URL`
   into a hard failure when `CI` is set, closing the `skipIf` false-green. Both database suites
   import `dbUrl` from it.

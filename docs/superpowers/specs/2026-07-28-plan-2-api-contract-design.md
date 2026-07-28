@@ -128,6 +128,21 @@ docker-compose.yml
 One job per plugin. `server.ts` composes them and is the only place ordering is expressed —
 telemetry first so later plugins are traced, problem-details last so it catches everything.
 
+**Reconciliation, Plan 2B.** Three things this section and §4 sketched did not land exactly as
+drawn, recorded here so the spec does not silently diverge from the code:
+
+- **`plugins/openapi.ts`** (load + dereference + register) is deferred to **Plan 6**, when the
+  first request-bodied endpoint exists to exercise it. In 2B, spec authority is compile-time
+  (`@irp/types`) plus the `ajv/dist/2020` validator compiler, proven by unit test — there is no
+  request body yet for a runtime-dereferenced schema to validate against.
+- **Tracing is hand-written** (`apps/api/src/telemetry.ts`), not built on
+  `@opentelemetry/sdk-node` with Fastify auto-instrumentation as §4's "expected libraries"
+  paragraph named — see [ADR-0007](../../adr/0007-hand-written-tracing-over-auto-instrumentation.md).
+- **The `DayStatus` set-equality decision** (whether `@irp/core`'s hand-written union and any
+  generated day-status schema can drift apart) is carried to **Plan 6**: this plan's spec
+  surface is `User`, `Role`, `Problem` and `HealthStatus`, so no day-status schema exists yet to
+  collide with.
+
 ## 6. The two endpoints
 
 | Endpoint | Auth | Proves |
@@ -270,3 +285,5 @@ the second begins.
 | Full data model | Plan 5 |
 | **O-6** (rubric wording) | Blocks the evaluation schema, not this plan |
 | **O-5** (AI provider) | Blocks Plan 9, not this plan |
+| `plugins/openapi.ts` (load/dereference/register) | Plan 6 — first request-bodied endpoint |
+| `DayStatus` set-equality (core's union vs. a generated day-status schema) | Plan 6 — no day-status schema exists in this plan's spec surface |
