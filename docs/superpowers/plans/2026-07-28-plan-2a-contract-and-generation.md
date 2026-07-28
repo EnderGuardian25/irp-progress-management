@@ -16,6 +16,7 @@
 - **Contract rules** (`CLAUDE.md`, NFR-7, NFR-8): every operation defines `200`, `400`, `401` and `500`. Every schema carries examples. Every parameter carries a description. Request bodies are `additionalProperties: false`. Errors use RFC 7807.
 - **`redocly lint` must pass with zero errors AND zero warnings.** A warning is a failure. Never silence a rule to pass — fix the document.
 - **`packages/types` and `packages/client` are generated and never hand-edited.** If output is wrong, the spec is wrong.
+- **Generated directories must be added to `eslint.config.mjs`'s global `ignores`.** Found during execution: `openapi-typescript` output tripped `@typescript-eslint/consistent-indexed-object-style`, and linting generated code is pointless since the fix would have to be made in the generator. The existing list already ignores `dist/`, `.next/` and `coverage/` for the same reason — add `packages/types/src/**` and `packages/client/src/**` alongside them. Keep the patterns package-specific; a broad `**/src/**` would silence real source.
 - **In OpenAPI 3.1 use `examples:` (an array), not `example:`.** `example` is 3.0 syntax and Redocly will flag it.
 - **Commits:** conventional. No direct commits to `main` — this plan runs on `feat/api-contract-and-service`.
 - **Before every commit:** `pnpm lint` exit 0 and `pnpm -r typecheck` exit 0.
