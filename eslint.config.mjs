@@ -3,7 +3,18 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "**/coverage/**"],
+    // packages/types/src is openapi-typescript output: generated, git-ignored,
+    // rebuilt fresh in CI, never hand-edited. It typechecks clean under the
+    // strict compiler settings (that's the real signal worth acting on); the
+    // stylistic rules below flag its index-signature shapes, which are the
+    // generator's normal output, not something the spec or a handler controls.
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.next/**",
+      "**/coverage/**",
+      "packages/types/src/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

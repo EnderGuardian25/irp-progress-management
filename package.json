@@ -8,13 +8,15 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "lint": "eslint .",
-    "spec:lint": "redocly lint spec/openapi.yaml"
+    "spec:lint": "redocly lint spec/openapi.yaml",
+    "generate:types": "openapi-typescript spec/openapi.yaml -o packages/types/src/schema.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@redocly/cli": "^2.5.0",
     "@types/node": "^26.1.2",
     "eslint": "^10.8.0",
+    "openapi-typescript": "^7.9.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.65.0"
   }
