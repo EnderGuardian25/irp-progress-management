@@ -10,13 +10,17 @@ matters — start it now, because it gates two whole plans and takes real elapse
 
 ## 1. Blocks Plan 3 and Plan 4 — start today
 
-### 1.1 Create an Azure free account
+### 1.1 Create an Azure free account — ✅ DONE, 2026-07-28
 
-Roughly 15 minutes, but identity verification can take longer.
+Signed up successfully with the work account. Current state:
 
-1. Go to <https://azure.microsoft.com/free>
-2. Sign up. **A payment card is required for identity verification even though nothing is charged** — the free grant covers this project entirely.
-3. Confirm you land on a subscription named something like *Azure subscription 1*.
+| | |
+|---|---|
+| Subscription | `Azure subscription 1` — `7bb869f8-053c-4c2d-b444-1bf079bfcef7`, Enabled |
+| Tenant | `bisteccare.lk` (`d5e769b0-fd19-45e4-a4a8-b73545450234`), as `Damian@bisteccare.lk` |
+| Hosting | Working — `az group list` succeeds |
+
+**Hosting is no longer a blocker. Entra is — see §1.1a.**
 
 What the free account gives this project:
 
@@ -33,16 +37,61 @@ Plus $200 credit for 30 days as headroom if load testing needs a bigger tier bri
 > 50 of the 75 remaining graded points sit behind having something deployed. This unblocks
 > today. Ask the mentor for Bistec tenant access anyway — see §3 — but nothing waits on it.
 
-### 1.2 Install the Azure CLI
+### 1.1a Create a dedicated Entra directory — ⬅ **THE BLOCKER. Do this next.**
 
-Not currently installed. Needed for the Entra bootstrap and for deploys.
+**Why, in one line:** the users are in `bistecglobal.com` (where you have no account), the
+subscription is in `bisteccare.lk` (where Graph is blocked by conditional access), so neither
+directory can host the app registrations. See `handoff.md` §3 for the full reasoning.
+
+Roughly 5 minutes.
+
+1. Go to <https://entra.microsoft.com>
+2. **Manage tenants → Create → Microsoft Entra ID** (*not* the B2C option)
+3. Organisation name and initial domain — e.g. `irpdemo` gives `irpdemo.onmicrosoft.com`. Pick a
+   country, complete the captcha, **Create**.
+4. **Create a native cloud-only admin inside the new directory** — Users → New user → Create new
+   user, e.g. `admin@irpdemo.onmicrosoft.com`. Assign it **Global Administrator**. Sign in once to
+   clear the initial password prompt.
+5. Create the demo users the slice needs — one mentor and two or three students. Free, and it
+   makes the demo real rather than a single-user screenshot.
+
+**Step 4 is not optional bureaucracy.** Creating a tenant grants Global Admin to your *external*
+`Damian@bisteccare.lk` identity, and external/guest identities are where Graph-via-Bicep gets
+awkward. Use the native account for all CLI and Bicep work.
+
+**Do not use a personal Microsoft account instead.** Microsoft's docs state that *"permissions for
+personal Microsoft accounts cannot be used to deploy Microsoft Graph resources declared in Bicep
+files."* An MSA would silently break the Bicep-for-Entra decision the design depends on.
+
+Then: `az login --tenant <new-tenant-id> --allow-no-subscriptions`
+
+**If tenant creation is blocked** (some directories restrict non-admins from creating tenants),
+say so — the fallback is the mentor ask in §3, with the design unchanged either way.
+
+### 1.2 Install the Azure CLI — ✅ DONE
+
+Installed and working, version **2.88.0**. Nothing to do.
+
+Note for later: `az` reaches **Azure Resource Manager fine** but is repeatedly challenged on
+**Microsoft Graph** in the `bisteccare.lk` tenant (`InteractionRequired` /
+`LocationConditionEvaluationSatisfied`, inconsistently within one session). That is a
+conditional-access policy, not a broken install — and it is the reason for §1.1a.
+
+### 1.2a Register the Azure resource providers
+
+All five are currently `NotRegistered`. Bicep fails with a confusing error rather than a clear one
+if they aren't registered first, so do this before Plan 4.
 
 ```powershell
-winget install Microsoft.AzureCLI
+az provider register --namespace Microsoft.App
+az provider register --namespace Microsoft.DBforPostgreSQL
+az provider register --namespace Microsoft.Insights
+az provider register --namespace Microsoft.OperationalInsights
+az provider register --namespace Microsoft.ContainerRegistry
 ```
 
-Then, in a terminal, run `az login` yourself — it opens a browser and I cannot do it for you.
-In this session you can run it inline by typing `! az login`.
+Free, reversible, creates nothing, takes a few minutes in the background. I can run these for you
+— just say so.
 
 ### 1.3 Grant admin consent for the Entra app registrations
 
