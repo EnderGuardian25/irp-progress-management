@@ -29,4 +29,17 @@ describe("loadConfig", () => {
   it("rejects a non-numeric PORT", () => {
     expect(() => loadConfig({ ...base, PORT: "not-a-number" })).toThrowError(/PORT/);
   });
+
+  it.each(["development", "test", "production"] as const)(
+    "accepts NODE_ENV=%s",
+    (value) => {
+      expect(loadConfig({ ...base, NODE_ENV: value }).nodeEnv).toBe(value);
+    },
+  );
+
+  it("rejects an invalid NODE_ENV", () => {
+    expect(() => loadConfig({ ...base, NODE_ENV: "staging" })).toThrowError(
+      /NODE_ENV.*staging.*development.*test.*production/is,
+    );
+  });
 });

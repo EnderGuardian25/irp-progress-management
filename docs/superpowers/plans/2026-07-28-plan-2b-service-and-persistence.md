@@ -166,7 +166,7 @@ export function buildServer(deps: ServerDeps): Promise<FastifyInstance>;
 - Create: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/api/tsconfig.build.json`, `apps/api/vitest.config.ts`, `apps/api/.env.example`
 - Create: `apps/api/src/config.ts`
 - Create test: `apps/api/test/config.test.ts`, `apps/api/test/core-consumption.test.ts`
-- Modify: `.gitignore` (add `apps/api/src/generated/`), `eslint.config.mjs` (ignore `apps/api/src/generated/**`)
+- Modify: `.gitignore` (add `apps/api/src/generated/`), `eslint.config.mjs` (ignore `apps/api/src/generated/**`), `pnpm-workspace.yaml` (approve build scripts for `@prisma/engines`, `esbuild`, `prisma` — see the note on Step 11)
 
 **Interfaces:**
 - Produces: `loadConfig(env): AppConfig` (see Interfaces block).
@@ -323,8 +323,25 @@ describe("loadConfig", () => {
   it("rejects a non-numeric PORT", () => {
     expect(() => loadConfig({ ...base, PORT: "not-a-number" })).toThrowError(/PORT/);
   });
+
+  it.each(["development", "test", "production"] as const)(
+    "accepts NODE_ENV=%s",
+    (value) => {
+      expect(loadConfig({ ...base, NODE_ENV: value }).nodeEnv).toBe(value);
+    },
+  );
+
+  it("rejects an invalid NODE_ENV", () => {
+    expect(() => loadConfig({ ...base, NODE_ENV: "staging" })).toThrowError(
+      /NODE_ENV.*staging.*development.*test.*production/is,
+    );
+  });
 });
 ```
+
+**Added during implementation (code review fix):** the `NODE_ENV` validation cases above
+were added after the initial pass shipped an unchecked cast instead of validation — see the
+note after Step 9.
 
 - [ ] **Step 8: Run it to confirm it fails**
 
@@ -346,6 +363,15 @@ export interface AppConfig {
   nodeEnv: "development" | "test" | "production";
 }
 
+const REQUIRED_ENV_NAMES = {
+  databaseUrl: "DATABASE_URL",
+  jwksUri: "JWKS_URI",
+  jwtIssuer: "JWT_ISSUER",
+  jwtAudience: "JWT_AUDIENCE",
+} as const;
+
+const VALID_NODE_ENVS = ["development", "test", "production"] as const;
+
 export function loadConfig(env: Env): AppConfig {
   const required = {
     databaseUrl: env.DATABASE_URL,
@@ -355,7 +381,7 @@ export function loadConfig(env: Env): AppConfig {
   };
   const missing = Object.entries(required)
     .filter(([, v]) => !v)
-    .map(([k]) => ({ databaseUrl: "DATABASE_URL", jwksUri: "JWKS_URI", jwtIssuer: "JWT_ISSUER", jwtAudience: "JWT_AUDIENCE" }[k]));
+    .map(([k]) => REQUIRED_ENV_NAMES[k as keyof typeof REQUIRED_ENV_NAMES]);
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
@@ -365,7 +391,13 @@ export function loadConfig(env: Env): AppConfig {
     throw new Error(`PORT must be a positive integer, got: ${String(env.PORT)}`);
   }
 
-  const nodeEnv = (env.NODE_ENV ?? "development") as AppConfig["nodeEnv"];
+  const rawNodeEnv = env.NODE_ENV ?? "development";
+  if (!(VALID_NODE_ENVS as readonly string[]).includes(rawNodeEnv)) {
+    throw new Error(
+      `Invalid NODE_ENV "${rawNodeEnv}": must be one of ${VALID_NODE_ENVS.join(", ")}`,
+    );
+  }
+  const nodeEnv = rawNodeEnv as AppConfig["nodeEnv"];
 
   return {
     port,
@@ -378,6 +410,15 @@ export function loadConfig(env: Env): AppConfig {
   };
 }
 ```
+
+**Corrected during implementation (Task 1, code review fix):** `nodeEnv` must not be an
+unchecked cast of `env.NODE_ENV` — that would silently accept a value like `"staging"`
+into a union typed as only `"development" | "test" | "production"`. Validate it loudly,
+the same way missing vars and a bad `PORT` are already rejected: unset defaults to
+`"development"`; one of the three valid values is accepted as-is; anything else throws,
+naming the offending value and the allowed set. The field→env-name map used when reporting
+missing vars is also hoisted to a module-level constant (`REQUIRED_ENV_NAMES`) instead of
+being rebuilt on every `.map()` iteration.
 
 - [ ] **Step 10: Write the `@irp/core` consumption smoke test** — `apps/api/test/core-consumption.test.ts`
 
@@ -406,13 +447,15 @@ pnpm --filter @irp/api test
 ```
 Expected: install adds the new deps; typecheck passes; config tests pass; core-consumption test passes.
 
+**Note — pnpm 11 build-script gate:** the first `pnpm install` that resolves `@prisma/client`/`prisma` will print `[ERR_PNPM_IGNORED_BUILDS]` and pnpm's automatic pre-command dependency-status check (triggered by any `pnpm --filter ... test`/`typecheck`) then fails hard with a non-zero exit before the underlying command runs — CI and a fresh clone hit this too, not just an interactive shell. Fix it in `pnpm-workspace.yaml`'s `allowBuilds` map by setting `@prisma/engines`, `esbuild`, and `prisma` to `true` (pnpm auto-generates the stub with a placeholder string on first install; this task turns it into real booleans). This is required for `pnpm install` to succeed non-interactively — do it before Step 11's install, not after.
+
 - [ ] **Step 12: Commit**
 
 ```bash
 git add apps/api/package.json apps/api/tsconfig.json apps/api/tsconfig.build.json \
   apps/api/vitest.config.ts apps/api/.env.example apps/api/src/config.ts \
   apps/api/test/config.test.ts apps/api/test/core-consumption.test.ts \
-  .gitignore eslint.config.mjs pnpm-lock.yaml
+  .gitignore eslint.config.mjs pnpm-lock.yaml pnpm-workspace.yaml
 git commit -m "feat(api): scaffold apps/api package and config module (FR-1, FR-2)"
 ```
 

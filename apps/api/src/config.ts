@@ -10,6 +10,15 @@ export interface AppConfig {
   nodeEnv: "development" | "test" | "production";
 }
 
+const REQUIRED_ENV_NAMES = {
+  databaseUrl: "DATABASE_URL",
+  jwksUri: "JWKS_URI",
+  jwtIssuer: "JWT_ISSUER",
+  jwtAudience: "JWT_AUDIENCE",
+} as const;
+
+const VALID_NODE_ENVS = ["development", "test", "production"] as const;
+
 export function loadConfig(env: Env): AppConfig {
   const required = {
     databaseUrl: env.DATABASE_URL,
@@ -19,7 +28,7 @@ export function loadConfig(env: Env): AppConfig {
   };
   const missing = Object.entries(required)
     .filter(([, v]) => !v)
-    .map(([k]) => ({ databaseUrl: "DATABASE_URL", jwksUri: "JWKS_URI", jwtIssuer: "JWT_ISSUER", jwtAudience: "JWT_AUDIENCE" }[k]));
+    .map(([k]) => REQUIRED_ENV_NAMES[k as keyof typeof REQUIRED_ENV_NAMES]);
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
@@ -29,7 +38,13 @@ export function loadConfig(env: Env): AppConfig {
     throw new Error(`PORT must be a positive integer, got: ${String(env.PORT)}`);
   }
 
-  const nodeEnv = (env.NODE_ENV ?? "development") as AppConfig["nodeEnv"];
+  const rawNodeEnv = env.NODE_ENV ?? "development";
+  if (!(VALID_NODE_ENVS as readonly string[]).includes(rawNodeEnv)) {
+    throw new Error(
+      `Invalid NODE_ENV "${rawNodeEnv}": must be one of ${VALID_NODE_ENVS.join(", ")}`,
+    );
+  }
+  const nodeEnv = rawNodeEnv as AppConfig["nodeEnv"];
 
   return {
     port,
