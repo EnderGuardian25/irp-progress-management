@@ -2,7 +2,10 @@ openapi: 3.1.0
 
 info:
   title: IRP Progress Management API
-  version: 0.1.0
+  # Kept in step with the workspace `package.json` files, all of which are
+  # 0.0.0. `/health` reports the running application version, so two sources
+  # that disagree would put a visible contradiction in the artifact.
+  version: 0.0.0
   summary: Daily progress tracking and monthly evaluation for the Bistec Hearts Academy IRP.
   description: |
     Students submit a short text update on each working day. Mentors review those
@@ -64,7 +67,7 @@ paths:
                   summary: A healthy service
                   value:
                     status: ok
-                    version: 0.1.0
+                    version: 0.0.0
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -84,8 +87,6 @@ paths:
         not an auto-created account — registration is an Admin action and there
         is no self-registration.
       tags: [Identity]
-      security:
-        - bearerAuth: []
       responses:
         '200':
           description: The authenticated user.
@@ -238,7 +239,7 @@ components:
           type: string
           description: The running application version.
           examples:
-            - 0.1.0
+            - 0.0.0
 
   responses:
     BadRequest:
