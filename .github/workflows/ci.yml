@@ -61,6 +61,9 @@ jobs:
             exit 1
           fi
 
+      - name: Generate the Prisma client
+        run: pnpm --filter @irp/api exec prisma generate
+
       - name: Fail if generated output is tracked in git
         run: |
           # Generated packages are git-ignored, so a clean regeneration leaves
@@ -69,14 +72,16 @@ jobs:
           # (`git add -f packages/types/src/schema.ts`) or .gitignore regressed
           # — either of which creates a second, hand-editable copy of the
           # contract, exactly what the staleness gate above exists to prevent.
+          #
+          # This check is whole-repo and unfiltered, so it must run after every
+          # generation step in the job — including `prisma generate` above —
+          # or the class of output it produces last is never covered by this
+          # gate. Generate first, porcelain-check once, for everything.
           if [ -n "$(git status --porcelain)" ]; then
             echo "::error::Regeneration dirtied the working tree — generated output is tracked, or .gitignore regressed."
             git status --porcelain
             exit 1
           fi
-
-      - name: Generate the Prisma client
-        run: pnpm --filter @irp/api exec prisma generate
 
       - name: Build @irp/core
         run: pnpm --filter @irp/core build

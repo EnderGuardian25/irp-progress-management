@@ -1836,7 +1836,18 @@ git commit -m "test(api): full-stack integration incl the four negative tests (s
 
 - [ ] **Step 1: Add a Postgres service + Prisma steps + test env to the `verify` job**
 
-Insert a `services:` block and, after the existing "Fail if generated output is tracked in git" step and before "Build @irp/core", add Prisma client generation. Add `prisma migrate deploy` before the test step, and the test env vars. The generated Prisma client is git-ignored, so `prisma generate` must run in CI before typecheck — exactly as `pnpm generate` does for `@irp/types`.
+Insert a `services:` block and, **before** the existing "Fail if generated output is tracked in git" step, add Prisma client generation. Add `prisma migrate deploy` before the test step, and the test env vars. The generated Prisma client is git-ignored, so `prisma generate` must run in CI before typecheck — exactly as `pnpm generate` does for `@irp/types`.
+
+> **Corrected during Task 9 review:** the original instruction placed `Generate the Prisma
+> client` *after* the porcelain-check step ("Fail if generated output is tracked in git"). That
+> ordering was implemented as written and passed review's first pass, but a second review caught
+> that the porcelain check is whole-repo and unfiltered — it already covers the entire tree, not
+> just `packages/types`/`packages/client`. Running `prisma generate` *after* it means the check
+> never sees the Prisma client's output on any run, ever: a future `.gitignore` regression or a
+> force-added `apps/api/src/generated/prisma` would go undetected in CI indefinitely, not just
+> for this PR. The fix is to generate the Prisma client *before* the porcelain check, so the one
+> whole-repo check covers both artifact classes for free — no duplicated step needed. `Build
+> @irp/core` and `Typecheck` still run after generation, unchanged.
 
 ```yaml
     services:
@@ -1859,7 +1870,7 @@ Insert a `services:` block and, after the existing "Fail if generated output is 
       JWT_AUDIENCE: api://irp-test
 ```
 
-New steps (place `Generate the Prisma client` immediately before `Build @irp/core`, and `Apply database migrations` immediately before `Test`):
+New steps (place `Generate the Prisma client` immediately before "Fail if generated output is tracked in git" — see the correction above — and `Apply database migrations` immediately before `Test`):
 
 ```yaml
       - name: Generate the Prisma client
