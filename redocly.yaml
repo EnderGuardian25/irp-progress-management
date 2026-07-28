@@ -1,0 +1,12 @@
+extends:
+  - recommended
+
+rules:
+  # The contract rules from CLAUDE.md, enforced rather than trusted.
+  operation-4xx-response: error
+  operation-operationId: error
+  operation-summary: error
+  operation-description: error
+  no-invalid-media-type-examples: error
+  # Servers are declared per environment at deploy time, not in the document.
+  no-server-example.com: off
