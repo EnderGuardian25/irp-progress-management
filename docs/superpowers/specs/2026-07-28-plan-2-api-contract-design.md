@@ -128,6 +128,40 @@ docker-compose.yml
 One job per plugin. `server.ts` composes them and is the only place ordering is expressed —
 telemetry first so later plugins are traced, problem-details last so it catches everything.
 
+**Reconciliation, Plan 2B.** Five things this section and §4 sketched did not land exactly as
+drawn, recorded here so the spec does not silently diverge from the code. The last two were
+added by the whole-branch review at the end of Plan 2B:
+
+- **`plugins/openapi.ts`** (load + dereference + register) is deferred to **Plan 6**, when the
+  first request-bodied endpoint exists to exercise it. In 2B, spec authority is compile-time
+  (`@irp/types`) plus the `ajv/dist/2020` validator compiler, proven by unit test — there is no
+  request body yet for a runtime-dereferenced schema to validate against.
+- **Tracing is hand-written** (`apps/api/src/telemetry.ts`), not built on
+  `@opentelemetry/sdk-node` with Fastify auto-instrumentation as §4's "expected libraries"
+  paragraph named — see [ADR-0007](../../adr/0007-hand-written-tracing-over-auto-instrumentation.md).
+- **The `DayStatus` set-equality decision** (whether `@irp/core`'s hand-written union and any
+  generated day-status schema can drift apart) is carried to **Plan 6**: this plan's spec
+  surface is `User`, `Role`, `Problem` and `HealthStatus`, so no day-status schema exists yet to
+  collide with.
+- **The validator compiler is two ajv instances, not one.** §4 above says only "a validator
+  compiler using `ajv/dist/2020`", which reads as a single instance and was built as one.
+  Fastify passes the compiler the `httpPart` it is compiling — `body`, `querystring`, `params`
+  or `headers`. The last three arrive as strings over the wire, so a **non-coercing** instance
+  fails every parameter this document declares `type: integer` with "must be integer", while
+  the document, the generated types and the client all look correct. Bodies are the opposite:
+  JSON already carries types, so a string where an integer is declared is a real client bug and
+  must be rejected. `createValidatorCompiler` therefore selects a strict instance for `body`
+  and a coercing one for everything else. Both are still `ajv/dist/2020` + `ajv-formats`; the
+  dialect point §4 makes is unaffected.
+- **The document-level `security` default is enforced per route, not globally.** The OpenAPI
+  document sets `security: [bearerAuth]` at the root precisely so an operation that omits the
+  key does not inherit "no auth required". The service inverts that: `apps/api` attaches
+  `preHandler: [app.authenticate]` per route, and `/health` is public only because it omits it.
+  Both shipped routes are correct, but the default is open, not closed. Until **Plan 3**
+  restructures composition onto a global fail-closed `onRequest` hook alongside real Entra
+  JWKS, the invariant is held by a test in `apps/api/test/server.test.ts` that discovers routes
+  from the composed server and fails if any `/api/` route lacks the guard.
+
 ## 6. The two endpoints
 
 | Endpoint | Auth | Proves |
@@ -270,3 +304,5 @@ the second begins.
 | Full data model | Plan 5 |
 | **O-6** (rubric wording) | Blocks the evaluation schema, not this plan |
 | **O-5** (AI provider) | Blocks Plan 9, not this plan |
+| `plugins/openapi.ts` (load/dereference/register) | Plan 6 — first request-bodied endpoint |
+| `DayStatus` set-equality (core's union vs. a generated day-status schema) | Plan 6 — no day-status schema exists in this plan's spec surface |

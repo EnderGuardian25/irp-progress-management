@@ -1,0 +1,10 @@
+{
+  "_comment": "esModuleInterop is set here and only here: ajv/dist/2020 and ajv-formats are CJS default-exports, and the base config's verbatimModuleSyntax rejects default-importing them without interop. This is an interop flag, not a strictness relaxation, so tsconfig.base.json stays untouched (CLAUDE.md: relax only in a package's own tsconfig).",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "test/**/*"]
+}

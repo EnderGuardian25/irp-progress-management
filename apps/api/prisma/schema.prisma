@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// A registered participant. FR-5: removal hides via deletedAt, never deletes.
+model User {
+  id          String    @id @default(uuid())
+  externalId  String    @unique // Entra oid claim
+  email       String    @unique
+  displayName String
+  role        Role
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum Role {
+  ADMIN
+  STUDENT
+}

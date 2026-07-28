@@ -23,6 +23,7 @@ export default tseslint.config(
       "**/coverage/**",
       "packages/types/src/**",
       "packages/client/src/**",
+      "apps/api/src/generated/**",
     ],
   },
   js.configs.recommended,

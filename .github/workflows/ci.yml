@@ -14,8 +14,28 @@ jobs:
         # The deploy region is not Sri Lanka. Running under hostile zones
         # catches any reliance on server local time (NFR-12).
         timezone: ["UTC", "America/New_York", "Pacific/Kiritimati"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: irp
+          POSTGRES_PASSWORD: irp
+          POSTGRES_DB: irp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U irp -d irp"
+          --health-interval 2s --health-timeout 5s --health-retries 15
     env:
       TZ: ${{ matrix.timezone }}
+      DATABASE_URL: postgresql://irp:irp@localhost:5432/irp?schema=public
+      # Deliberately unresolvable. No test reads this and no network call is
+      # possible (test/helpers/build-test-server.ts hard-codes a local JWKS),
+      # so a real Entra URL here would only imply CI depends on reaching
+      # Microsoft. Plan 3 wires the tenant.
+      JWKS_URI: https://jwks.invalid/keys
+      JWT_ISSUER: https://issuer.test/v2.0
+      JWT_AUDIENCE: api://irp-test
     steps:
       - uses: actions/checkout@v4
 
@@ -45,16 +65,39 @@ jobs:
             exit 1
           fi
 
-      - name: Fail if generated output is tracked in git
+      - name: Generate the Prisma client
+        run: pnpm --filter @irp/api exec prisma generate
+
+      - name: Fail if generated output is tracked or dirties the tree
         run: |
-          # Generated packages are git-ignored, so a clean regeneration leaves
-          # the tree clean. `--porcelain` excludes ignored files, so this fires
-          # only if someone force-committed generated output
-          # (`git add -f packages/types/src/schema.ts`) or .gitignore regressed
-          # — either of which creates a second, hand-editable copy of the
-          # contract, exactly what the staleness gate above exists to prevent.
+          # Two distinct failure modes. `git status --porcelain` catches only
+          # the second, though the step used to claim it caught both.
+          #
+          # (1) Force-committed generated output (`git add -f
+          #     packages/types/src/schema.ts`). The determinism gate above
+          #     guarantees regeneration is byte-identical, so a tracked copy
+          #     regenerates to no diff and `git status --porcelain` comes back
+          #     EMPTY — demonstrated: with schema.ts force-committed, the
+          #     porcelain check exited 0 while the file was plainly tracked.
+          #     `git ls-files` sees the path regardless of its content, so ask
+          #     it directly.
+          #
+          # (2) A .gitignore regression, leaving generated files untracked and
+          #     unignored. That does produce `??` lines and porcelain does fire
+          #     — and `git ls-files` alone would miss it, because untracked is
+          #     exactly what those files are. Both checks earn their place.
+          #
+          # Both are whole-repo and unfiltered, so they must run after every
+          # generation step in the job — including `prisma generate` above — or
+          # the class of output produced last is never covered. Generate first,
+          # check once, for everything.
+          if [ -n "$(git ls-files packages/types/src packages/client/src apps/api/src/generated)" ]; then
+            echo "::error::Generated output is tracked in git — a second, hand-editable copy of the contract that can drift."
+            git ls-files packages/types/src packages/client/src apps/api/src/generated
+            exit 1
+          fi
           if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Regeneration dirtied the working tree — generated output is tracked, or .gitignore regressed."
+            echo "::error::Regeneration dirtied the working tree — .gitignore regressed, or a committed file changed."
             git status --porcelain
             exit 1
           fi
@@ -67,6 +110,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Apply database migrations
+        run: pnpm --filter @irp/api exec prisma migrate deploy
 
       - name: Test
         run: pnpm -r test
