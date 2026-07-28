@@ -1828,7 +1828,9 @@ git commit -m "test(api): full-stack integration incl the four negative tests (s
 ### Task 9: CI — Postgres service, Prisma steps, and prove the DB gate
 
 **Files:**
-- Modify: `.github/workflows/ci.yml`, `apps/api/test/user-repo.test.ts` (CI skip guard, Step 3)
+- Modify: `.github/workflows/ci.yml`
+- Create: `apps/api/test/helpers/require-db.ts` (the shared CI skip guard, Step 3)
+- Modify: `apps/api/test/user-repo.test.ts`, `apps/api/test/integration.test.ts` (both import `dbUrl` from the guard)
 
 **Interfaces:** none (CI only).
 
@@ -1896,23 +1898,47 @@ Expected: **no output** (the generated dir is ignored). If `apps/api/src/generat
 > step. `CLAUDE.md` is explicit that two of this project's four gates looked correct and did
 > nothing — this is that failure mode, caught before it shipped.
 
+> **Two files need this guard, not one.** `user-repo.test.ts` (Task 5) *and*
+> `integration.test.ts` (Task 8) both gate on `describe.skipIf(!dbUrl)`. Guarding only the first
+> leaves the integration suite — the one proving the 403 rule, FR-5 soft-delete, and traceId
+> binding end-to-end — silently skippable, which is the more damaging half. An earlier draft of
+> this step named only `user-repo.test.ts`; that was under-scoped. Put the guard in **one shared
+> helper** so a future third database suite inherits it instead of forgetting it.
+
 `skipIf` is right for local dev (a laptop without Docker should not hard-fail the unit suite),
-so keep it — but make its absence fatal in CI. In `apps/api/test/user-repo.test.ts`:
+so keep it — but make its absence fatal in CI. Create `apps/api/test/helpers/require-db.ts`:
 
 ```ts
-// A DB-less run is a developer convenience, never an acceptable CI result: skipping here
-// would let a failed Postgres service report green. Fail loudly instead.
+// The single source of truth for "is there a database for this run".
+//
+// A DB-less run is a developer convenience, never an acceptable CI result: a skipped suite
+// exits 0, so a Postgres service that failed to start would report green while running zero
+// database tests. Fail loudly in CI instead. Every database suite must import dbUrl from
+// here rather than reading process.env directly, so the guard cannot be forgotten.
+export const dbUrl = process.env.DATABASE_URL;
+
 if (process.env.CI && !dbUrl) {
   throw new Error("DATABASE_URL is required in CI — the database suite must not be skipped");
 }
 ```
 
+Then in **both** `apps/api/test/user-repo.test.ts` and `apps/api/test/integration.test.ts`,
+replace the local `const dbUrl = process.env.DATABASE_URL;` with:
+
+```ts
+import { dbUrl } from "./helpers/require-db.js";
+```
+
+Leave each `describe.skipIf(!dbUrl)(...)` exactly as it is — the local-dev behaviour does not
+change, only the CI behaviour does.
+
 Then demonstrate **both** directions, and record both in the PR description:
 
 ```powershell
-# (a) the new skip guard must go red when CI has no database URL
+# (a) the new skip guard must go red when CI has no database URL — check BOTH suites
 $env:CI = "true"; Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
-pnpm --filter @irp/api test user-repo; "exit=$LASTEXITCODE"   # expect NON-ZERO
+pnpm --filter @irp/api test user-repo; "exit=$LASTEXITCODE"    # expect NON-ZERO
+pnpm --filter @irp/api test integration; "exit=$LASTEXITCODE"  # expect NON-ZERO
 Remove-Item Env:\CI
 
 # (b) the migrate step must go red against a database that does not exist
@@ -1945,12 +1971,14 @@ database tests **running**, not skipped.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .github/workflows/ci.yml apps/api/test/user-repo.test.ts
+git add .github/workflows/ci.yml apps/api/test/helpers/require-db.ts \
+  apps/api/test/user-repo.test.ts apps/api/test/integration.test.ts \
+  docs/superpowers/plans/2026-07-28-plan-2b-service-and-persistence.md
 git commit -m "ci: postgres service + prisma generate/migrate, fail on skipped db suite"
 ```
 
-`user-repo.test.ts` is included because Step 3's guard lives there. GitHub Actions sets `CI=true`
-on every runner, so the guard arms itself with no workflow change.
+The two test files are included because both now import `dbUrl` from Step 3's shared guard.
+GitHub Actions sets `CI=true` on every runner, so the guard arms itself with no workflow change.
 
 ---
 
