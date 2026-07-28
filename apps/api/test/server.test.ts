@@ -1,11 +1,19 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import type { FastifyInstance } from "fastify";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import Fastify, { type FastifyInstance } from "fastify";
 import type { JWTVerifyGetKey } from "jose";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { createTracerProvider } from "../src/telemetry.js";
+import { createTracerProvider, tracingPlugin } from "../src/telemetry.js";
+import { problemDetailsPlugin } from "../src/plugins/problem-details.js";
 import { buildServer } from "../src/server.js";
+import { buildAjv, createValidatorCompiler } from "../src/validation.js";
 import { fakeUserRepo } from "./helpers/fake-user-repo.js";
+import { problemSchema } from "./helpers/problem-schema.js";
 import { getLocalKeySet, signToken, testIssuer, testAudience } from "./helpers/keys.js";
+
+interface ProblemLike {
+  status: number;
+  detail?: string;
+}
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -39,5 +47,118 @@ describe("buildServer", () => {
 
   it("rejects GET /api/v1/me with no token (401)", async () => {
     expect((await app.inject({ method: "GET", url: "/api/v1/me" })).statusCode).toBe(401);
+  });
+});
+
+/**
+ * `test/validation.test.ts` proves `buildAjv()` in isolation. These prove the
+ * compiler is actually *wired* and that it discriminates on `httpPart`.
+ *
+ * Two layers, because Fastify refuses `app.post(...)` once `buildServer` has
+ * awaited `ready()` (`FST_ERR_INSTANCE_ALREADY_LISTENING`, set by avvio's
+ * `start` event — not only by `listen`). So the composed server is probed
+ * through the compiler it published on the instance, and the HTTP leg —
+ * `err.validation` → 400 Problem, spec §9 — is probed on a throwaway app wired
+ * exactly as `server.ts:31` wires it. Throwaway routes only: nothing new ships
+ * in `src/`. Same pattern as `problem-details.test.ts`'s `/boom`.
+ */
+const validateProblem = buildAjv().compile(problemSchema);
+
+const bodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name"],
+  properties: { name: { type: "string" }, count: { type: "integer" } },
+};
+const querySchema = {
+  type: "object",
+  required: ["n"],
+  properties: { n: { type: "integer" } },
+};
+
+describe("the composed server's validator compiler", () => {
+  it("published a validator compiler (setValidatorCompiler ran)", () => {
+    expect(app.validatorCompiler).toBeTypeOf("function");
+  });
+
+  it("enforces additionalProperties:false on the body httpPart", () => {
+    const validate = app.validatorCompiler!({
+      schema: bodySchema, method: "POST", url: "/_probe", httpPart: "body",
+    });
+    expect(validate({ name: "ok" })).toBe(true);
+    expect(validate({ name: "ok", extra: "nope" })).toBe(false);
+  });
+
+  // Query/param/header values arrive as strings over the wire. A non-coercing
+  // ajv on those httpParts fails every `type: integer` parameter the spec
+  // declares — Plan 6's page numbers and cycle ids — with "must be integer".
+  it("coerces on the querystring httpPart but not on the body httpPart", () => {
+    const query = app.validatorCompiler!({
+      schema: querySchema, method: "GET", url: "/_probe", httpPart: "querystring",
+    });
+    expect(query({ n: "5" })).toBe(true);
+
+    const body = app.validatorCompiler!({
+      schema: bodySchema, method: "POST", url: "/_probe", httpPart: "body",
+    });
+    expect(body({ name: "ok", count: "3" })).toBe(false);
+  });
+});
+
+describe("validation through the HTTP pipeline (err.validation → 400 Problem)", () => {
+  let probe: FastifyInstance;
+  beforeAll(async () => {
+    probe = Fastify();
+    probe.setValidatorCompiler(createValidatorCompiler());
+    await probe.register(tracingPlugin, {
+      tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+    });
+    await probe.register(problemDetailsPlugin);
+    probe.post("/_probe-body", { schema: { body: bodySchema } }, () => ({ ok: true }));
+    probe.get("/_probe-query", { schema: { querystring: querySchema } },
+      (req) => ({ n: (req.query as { n: number }).n }));
+    await probe.ready();
+  });
+  afterAll(async () => { await probe.close(); });
+
+  it("rejects an extra body property with a 400 Problem body", async () => {
+    const res = await probe.inject({
+      method: "POST", url: "/_probe-body", payload: { name: "ok", extra: "nope" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    const body = res.json<ProblemLike>();
+    expect(body.status).toBe(400);
+    expect(body.detail).toContain("additional properties");
+    expect(validateProblem(body)).toBe(true);
+  });
+
+  it("accepts a valid body", async () => {
+    const res = await probe.inject({
+      method: "POST", url: "/_probe-body", payload: { name: "ok", count: 3 },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("coerces a querystring integer rather than rejecting the wire string", async () => {
+    const res = await probe.inject({ method: "GET", url: "/_probe-query?n=5" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ n: 5 });
+  });
+
+  it("still rejects a non-numeric querystring integer", async () => {
+    const res = await probe.inject({ method: "GET", url: "/_probe-query?n=abc" });
+    expect(res.statusCode).toBe(400);
+    expect(validateProblem(res.json())).toBe(true);
+  });
+
+  // The other half: coercion must NOT leak into bodies, where JSON already
+  // carries types and a string-for-integer is a real client bug.
+  it("does not coerce in a request body — a string for an integer is still a 400", async () => {
+    const res = await probe.inject({
+      method: "POST", url: "/_probe-body", payload: { name: "ok", count: "3" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(validateProblem(res.json())).toBe(true);
   });
 });

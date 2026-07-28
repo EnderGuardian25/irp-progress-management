@@ -3,7 +3,7 @@ import type { JWTVerifyGetKey } from "jose";
 import type { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import type { AppConfig } from "./config.js";
 import type { UserRepo } from "./db/user-repo.js";
-import { buildAjv, createValidatorCompiler } from "./validation.js";
+import { createValidatorCompiler } from "./validation.js";
 import { tracingPlugin } from "./telemetry.js";
 import { problemDetailsPlugin } from "./plugins/problem-details.js";
 import { authPlugin } from "./plugins/auth.js";
@@ -28,7 +28,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.decorate("config", deps.config);
   // Wired now so the moment a request body lands (Plan 6) it is validated
   // against the spec's 2020-12 schema, not Fastify's draft-07 default.
-  app.setValidatorCompiler(createValidatorCompiler(buildAjv()));
+  // The compiler picks a strict instance for bodies and a coercing one for
+  // querystring/params/headers — see validation.ts.
+  app.setValidatorCompiler(createValidatorCompiler());
 
   await app.register(tracingPlugin, { tracerProvider: deps.tracerProvider });
   await app.register(problemDetailsPlugin);
