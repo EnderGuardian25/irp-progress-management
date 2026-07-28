@@ -1731,6 +1731,21 @@ const dbUrl = process.env.DATABASE_URL;
 const validateProblem = buildAjv().compile(problemSchema);
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 
+// `res.json()` returns `unknown`, so every member access on it trips
+// @typescript-eslint/no-unsafe-member-access and the repo lints at zero
+// warnings. Pass the shape to `res.json<T>()` whenever you read a field —
+// bare `res.json()` is fine only when handing the whole body to a validator
+// or comparing it with toEqual/toMatchObject. This mirrors ProblemLike in
+// test/problem-details.test.ts.
+interface ProblemLike {
+  type: string;
+  title: string;
+  status: number;
+  detail?: string;
+  instance?: string;
+  traceId?: string;
+}
+
 describe.skipIf(!dbUrl)("integration: spec → validated request → JWT → Prisma → traced response", () => {
   let app: FastifyInstance;
   let exporter: Awaited<ReturnType<typeof buildTestServer>>["exporter"];
@@ -1743,7 +1758,7 @@ describe.skipIf(!dbUrl)("integration: spec → validated request → JWT → Pri
   it("GET /health → 200", async () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
-    expect(res.json().status).toBe("ok");
+    expect(res.json<{ status: string }>().status).toBe("ok");
   });
 
   it("GET /api/v1/me returns the caller identity for a valid token", async () => {
@@ -1773,7 +1788,7 @@ describe.skipIf(!dbUrl)("integration: spec → validated request → JWT → Pri
 
   it("every error body validates against Problem and carries the span's traceId", async () => {
     const res = await app.inject({ method: "GET", url: "/api/v1/me", headers: bearer(await signToken({ oid: "ghost" })) });
-    const body = res.json();
+    const body = res.json<ProblemLike>();
     expect(validateProblem(body)).toBe(true);
     const spans = exporter.getFinishedSpans();
     expect(spans.length).toBeGreaterThan(0);
@@ -1784,14 +1799,22 @@ describe.skipIf(!dbUrl)("integration: spec → validated request → JWT → Pri
 
 - [ ] **Step 3: Run the integration suite against Postgres**
 
-Run:
-```bash
+> **Run these through PowerShell, not the Bash tool.** The Bash tool is sandboxed and cannot open
+> TCP to a localhost port — the suite would fail `P1001`/connection-refused even with a healthy
+> container. Use `127.0.0.1`, not `localhost` (which resolves to `::1` here), and host port
+> **5433**, since 5432 is held by an unrelated project's container on this machine.
+
+```powershell
+$env:IRP_DB_PORT = "5433"
 docker compose -f apps/api/docker-compose.yml up -d
-export DATABASE_URL="postgresql://irp:irp@localhost:5432/irp?schema=public"
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
 pnpm --filter @irp/api exec prisma migrate deploy
 pnpm --filter @irp/api test integration
 ```
-Expected: PASS (all six). If the run reports the suite skipped, `DATABASE_URL` is unset in that shell.
+
+Expected: PASS (all six). **If the run reports the suite skipped, `DATABASE_URL` is unset in that
+shell and the tests did nothing** — `describe.skipIf` exits 0 on a skip, so a skip is a silent
+false pass, not a green result. Confirm six tests ran.
 
 - [ ] **Step 4: Commit**
 
