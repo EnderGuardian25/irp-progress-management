@@ -31,6 +31,36 @@
 
 - **CLI flags and config keys in this plan were written against the pinned versions but not executed.** `@redocly/cli` 2.x config format, `openapi-typescript` 7.x flags and `@hey-api/openapi-ts` 0.87 options all move between releases. If a command rejects a flag, or a config key is unrecognised, **report the exact error with the tool's `--help` output** rather than guessing at the replacement. A wrong guess here produces plausible output from the wrong invocation, which is worse than a clean failure.
 
+## Amendment 1 — Tasks 2, 3 and 4 merge (2026-07-28)
+
+**Found during execution.** Task 2 defined the shared components; Tasks 3 and 4 added the two
+operations that reference them. Redocly's `no-unused-components` rule warns on every component
+nothing references, so Task 2 in isolation produced **7 warnings against a zero-warning bar** —
+`User`, `HealthStatus`, `bearerAuth` and the four error responses, all defined but not yet used.
+
+The fault is the task boundary, not the document. **A partial OpenAPI spec cannot be
+lint-clean under this rule**, and any split leaves some component orphaned: adding `/health`
+alone still strands `User`, `Role`, `Forbidden` and `bearerAuth`. The plan's own right-sizing
+rule says to split only where a reviewer could reject one task while approving its neighbour,
+and a document defining seven unreferenced components is not independently valid.
+
+**Tasks 2, 3 and 4 are therefore one task** — the complete document, lint-clean, in a single
+step. The two rejected fixes: disabling `no-unused-components` (it is a genuinely useful rule
+that will catch dead schema once the spec carries thirty operations), and accepting warnings
+at intermediate boundaries (the zero-warning bar is the whole point of the gate).
+
+Effective task numbering:
+
+| Original | Now |
+|---|---|
+| 1 · `@irp/core` build | **1** |
+| 2 + 3 + 4 · foundations, `/health`, `/api/v1/me` | **2** |
+| 5 · generate `@irp/types` | **3** |
+| 6 · generate `@irp/client` | **4** |
+| 7 · CI lint and staleness gate | **5** |
+
+The task bodies below keep their original numbering for reference; execution follows the table.
+
 ## Prerequisites
 
 `pnpm` 11.17.0, Node 24.15.0, Docker 29.6.1 — all installed. `@irp/core` is on `main` with 112 tests passing.
