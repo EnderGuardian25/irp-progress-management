@@ -51,6 +51,64 @@ describe("buildServer", () => {
 });
 
 /**
+ * Fail-closed guard for the spec's document-level `security: [bearerAuth]`.
+ *
+ * `spec/openapi.yaml` makes a bearer token the default and requires an explicit
+ * `security: []` to opt out. The implementation inverts that: auth is attached
+ * per route via `preHandler: [app.authenticate]`, so a Plan 6 route author who
+ * forgets it ships a publicly readable endpoint while the spec and the
+ * generated client both say it needs a token — and nothing else catches it.
+ *
+ * Routes are discovered from the composed server rather than listed here, so a
+ * new unguarded `/api/` route fails this test the day it lands. Restructuring
+ * composition onto a global `onRequest` hook is the better end state; Plan 3
+ * revisits auth wholesale when it wires real Entra JWKS.
+ */
+interface RouteEntry { label: string; hooks: string[] }
+
+function parseRoutes(tree: string): RouteEntry[] {
+  const routes: RouteEntry[] = [];
+  for (const raw of tree.split("\n")) {
+    // Strip Fastify's radix-tree box drawing; `•` prefixes a hook line.
+    const line = raw.replace(/^[─-╿\s]+/u, "").trim();
+    const [, hookName] = /^•\s*\((\w+)\)/u.exec(line) ?? [];
+    if (hookName !== undefined) {
+      routes.at(-1)?.hooks.push(hookName);
+      continue;
+    }
+    const [, path, method] = /^(\/\S*)\s+\((\w+)\)$/u.exec(line) ?? [];
+    if (path !== undefined && method !== undefined) {
+      routes.push({ label: `${method} ${path}`, hooks: [] });
+    }
+  }
+  return routes;
+}
+
+describe("fail-closed auth on /api/", () => {
+  it("attaches a preHandler to every route under /api/", () => {
+    const routes = parseRoutes(app.printRoutes({ includeHooks: true, commonPrefix: false }));
+    // Guards the parser itself: an empty list would make the assertion vacuous.
+    expect(routes.length).toBeGreaterThan(0);
+    const apiRoutes = routes.filter((r) => r.label.includes(" /api/"));
+    expect(apiRoutes.length).toBeGreaterThan(0);
+    for (const route of apiRoutes) {
+      expect(route.hooks, `${route.label} is not behind app.authenticate`).toContain("preHandler");
+    }
+  });
+
+  it("rejects an unauthenticated request to every /api/ GET route with 401", async () => {
+    const apiGets = parseRoutes(app.printRoutes({ includeHooks: true, commonPrefix: false }))
+      .filter((r) => r.label.startsWith("GET /api/"));
+    expect(apiGets.length).toBeGreaterThan(0);
+    for (const route of apiGets) {
+      const url = route.label.slice("GET ".length);
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, `${url} answered an anonymous caller`).toBe(401);
+    }
+  });
+});
+
+/**
  * `test/validation.test.ts` proves `buildAjv()` in isolation. These prove the
  * compiler is actually *wired* and that it discriminates on `httpPart`.
  *
