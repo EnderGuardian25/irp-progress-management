@@ -29,7 +29,7 @@ Every task's requirements implicitly include this section. Values are copied ver
   - **`jose` `6.2.4`** (JWT verify + JWKS).
   - **`ajv` `8.20.0`** (use the **`ajv/dist/2020`** entrypoint) + **`ajv-formats` `3.0.1`**.
   - OpenTelemetry: `@opentelemetry/api` `1.9.1`, `@opentelemetry/sdk-trace-node` `2.10.0`, `@opentelemetry/sdk-trace-base` `2.10.0` (devDep, for `InMemorySpanExporter`), `@opentelemetry/resources` `2.10.0`, `@opentelemetry/semantic-conventions` `1.43.0`.
-  - `tsx` `4.23.1` (devDep, local `dev` runner), `cross-env` `^10.1.0` (devDep).
+  - `tsx` `4.23.1` (devDep, local `dev` runner). ~~`cross-env` `^10.1.0` (devDep)~~ — removed by the final fix wave: no script in `apps/api` referenced it. `packages/core` keeps its own copy for `test:tz`.
 - **Contract rules** (already satisfied by the shipped spec — do not regress): every operation defines `200/400/401/500` (`/api/v1/me` adds `403`); request bodies are `additionalProperties: false`; errors are RFC 7807 Problem Details in `application/problem+json`; `pnpm spec:lint` passes with **zero warnings**.
 - **The 403 rule (spec §7).** A structurally valid, correctly signed, unexpired token whose subject (`oid` claim) has **no `User` record** receives **403**, not an auto-created account. There is no self-registration.
 - **Soft delete (FR-5).** Removal hides, never deletes. `User.deletedAt` filters every lookup; a soft-deleted user is treated as unregistered (403).
@@ -46,6 +46,69 @@ Two deviations from the spec's §5 layout, both because the shipped endpoint sur
 2. **Tracing is hand-written, not auto-instrumented.** A ~30-line Fastify span plugin over `@opentelemetry/sdk-trace-node` replaces `@opentelemetry/instrumentation-fastify` / `@fastify/otel`. Rationale in **ADR-0007** (Task 3): module-patching auto-instrumentation needs an ESM loader hook and is non-deterministic to assert in tests; a hand-written plugin is ESM-safe, injectable (Console exporter in prod, `InMemorySpanExporter` in tests), and something we own — the same "rent a property we can own in thirty lines" reasoning the spec §4 applied to rejecting `fastify-openapi-glue`.
 
 The `DayStatus` duplication risk (`handoff.md` "open design risk") **does not materialize in 2B**: the spec surface here is `User`, `Role`, `Problem`, `HealthStatus` — no day-status schema. `@irp/core`'s `DayStatus` union has no spec-generated counterpart until Plan 6. The decision (derive core's unions from `@irp/types`, or assert set-equality in a test) is recorded as a Plan 6 obligation in Task 10.
+
+> #### ⚠️ Plan corrected 2026-07-28 — four tasks carried instructions a task-scoped review could not falsify
+>
+> All ten tasks passed their own reviews. A **whole-branch** review afterwards found five
+> defects that were invisible task-by-task, because each was either a gap *between* two tasks or
+> a claim no task's own scope could test. Recorded here so a future reader of this plan does not
+> re-derive them; every one was fixed on this branch before the PR opened.
+>
+> 1. **Task 4 (problem-details) — the handler collapsed every non-`HttpError` Fastify error into
+>    a 500.** `setErrorHandler` replaces Fastify's `defaultErrorHandler` wholesale
+>    (`fastify@5.10.0`, `lib/error-handler.js:124`), and `setErrorStatusCode` / `setErrorHeaders`
+>    run only *inside* that default (`:126-132`) — so the status code is entirely ours to set,
+>    and the plan's `send(..., { status: 500 })` fallback was unconditional. Fastify's own
+>    `FST_ERR_CTP_INVALID_JSON` (400), `FST_ERR_CTP_EMPTY_JSON_BODY` (400),
+>    `FST_ERR_CTP_INVALID_MEDIA_TYPE` (415) and `FST_ERR_REQ_BODY_TOO_LARGE` (413) all reached
+>    the client as `500 "An unexpected error occurred."` and were logged as unhandled. Latent
+>    only because both shipped routes are bodyless GETs. **Resolved:** a 4xx branch honouring
+>    `err.statusCode` ahead of the 500 fallback, plus re-application of `err.headers`; the 500
+>    path still never reads `err.message`. Tests in `apps/api/test/problem-details.test.ts`.
+> 2. **Task 2 + Task 7 — `createValidatorCompiler` had zero test coverage.** Task 2 tested
+>    `buildAjv()` in isolation; Task 7 wired `setValidatorCompiler` and tested neither. So this
+>    plan's Scope-decision 1 ("proven by unit test") was true of a bare ajv object and false of
+>    the Fastify app, and spec §9's `err.validation` → 400 leg was untested. **Resolved:** tests
+>    in `apps/api/test/server.test.ts`. Note for future tasks: Fastify refuses `app.post(...)`
+>    once `buildServer` has awaited `ready()` (`FST_ERR_INSTANCE_ALREADY_LISTENING` is set by
+>    avvio's `start` event, not only by `listen`), so a throwaway route cannot be bolted onto the
+>    composed server — probe `app.validatorCompiler` directly, or build a separate app.
+> 3. **Task 2 — `coerceTypes: false` was applied to every `httpPart`, not just bodies.** Fastify
+>    passes the compiler `{ schema, method, url, httpPart }`; the plan's one-line compiler
+>    ignored `httpPart` and returned the same non-coercing instance for all four.
+>    `querystring`, `params` and `headers` arrive as strings over the wire, so the first spec
+>    parameter declared `type: integer` in Plan 6 would have failed every request with "must be
+>    integer" while the spec, the generated types and the client all looked correct.
+>    **Resolved:** two ajv instances selected on `httpPart === "body"`; `buildAjv()`'s
+>    no-argument signature is unchanged. Echoed into the Plan 2 design spec §5 reconciliation.
+> 4. **Task 9 — the tracked-generated-output CI gate could not detect the case its own error
+>    message named.** `git status --porcelain` is empty when a force-committed generated file
+>    regenerates to byte-identical content — which the determinism gate immediately above it
+>    guarantees. So `git add -f packages/types/src/schema.ts` plus a commit sailed through green.
+>    What it actually caught was a `.gitignore` regression (`??` lines), which is real work.
+>    **Resolved:** a `git ls-files` condition over the three generated directories added ahead of
+>    the porcelain condition, both kept, both demonstrated red and green. The Task 9 ordering
+>    constraint — `prisma generate` before this step — is unchanged and still load-bearing.
+>    This was the **fourth** gate in this repo found to do nothing, and one of those was a
+>    gate-*proof*: `CLAUDE.md`'s "prove a gate fails before trusting it" means running the gate's
+>    own shell logic against a deliberately broken input, not reading it.
+> 5. **Task 6 + Task 7 — authentication is opt-in per route, inverting the spec's stated
+>    default.** `spec/openapi.yaml` sets a document-level `security: [bearerAuth]` and its own
+>    comment warns that without it "an operation that simply omits the key would inherit 'no auth
+>    required' — the wrong default." The plan attaches `preHandler: [app.authenticate]` per
+>    route, so `/health` is public only because it omits it. Both shipped routes are correct;
+>    the defect is structural, and in Plan 6 a route author who forgets the `preHandler` ships a
+>    publicly readable endpoint while the generated client says it needs a token. **Resolved for
+>    now** by a guard test in `apps/api/test/server.test.ts` that discovers routes from the
+>    composed server and fails if any `/api/` route lacks the hook. A global fail-closed
+>    `onRequest` hook is the better end state and is a **Plan 3** obligation, taken alongside
+>    real Entra JWKS.
+>
+> Also swept in the same wave, non-structural: `Problem.traceId` is `required` in the spec but
+> was emitted conditionally (now unconditional); `jwtVerify` pinned neither `algorithms` nor
+> `clockTolerance`; the role ternary in `routes/me.ts` was non-exhaustive; `cross-env` was an
+> unused devDependency of `apps/api`; CI's `JWKS_URI` named a real Microsoft endpoint despite
+> being inert.
 
 ---
 
@@ -207,7 +270,6 @@ export function buildServer(deps: ServerDeps): Promise<FastifyInstance>;
   "devDependencies": {
     "@irp/types": "workspace:*",
     "@opentelemetry/sdk-trace-base": "2.10.0",
-    "cross-env": "^10.1.0",
     "prisma": "7.9.1",
     "tsx": "4.23.1",
     "typescript": "^6.0.3",
@@ -269,7 +331,10 @@ PORT=3001
 NODE_ENV=development
 APP_VERSION=0.0.0
 
-# Postgres — matches docker-compose.yml
+# Postgres — matches docker-compose.yml, which publishes ${IRP_DB_PORT:-5432}.
+# If 5432 is already taken on your machine, start the container with
+# IRP_DB_PORT=5433 and change the port here to match — otherwise this silently
+# points at whatever else is listening on 5432.
 DATABASE_URL=postgresql://irp:irp@localhost:5432/irp?schema=public
 
 # Microsoft Entra ID. Local dev/tests use a stubbed JWKS (see test/helpers/keys.ts);
@@ -1865,7 +1930,11 @@ Insert a `services:` block and, **before** the existing "Fail if generated outpu
     env:
       TZ: ${{ matrix.timezone }}
       DATABASE_URL: postgresql://irp:irp@localhost:5432/irp?schema=public
-      JWKS_URI: https://login.microsoftonline.com/common/discovery/v2.0/keys
+      # Deliberately unresolvable. No test reads this and no network call is
+      # possible (test/helpers/build-test-server.ts hard-codes a local JWKS),
+      # so a real Entra URL here would only imply CI depends on reaching
+      # Microsoft. Plan 3 wires the tenant.
+      JWKS_URI: https://jwks.invalid/keys
       JWT_ISSUER: https://issuer.test/v2.0
       JWT_AUDIENCE: api://irp-test
 ```
