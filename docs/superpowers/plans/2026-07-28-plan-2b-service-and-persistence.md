@@ -941,15 +941,56 @@ git commit -m "feat(api): RFC 7807 problem-details error handler with traceId (N
 ### Task 5: Prisma schema, migration, and user repository
 
 **Files:**
-- Create: `apps/api/docker-compose.yml`, `apps/api/prisma/schema.prisma`
+- Create: `apps/api/docker-compose.yml`, `apps/api/prisma/schema.prisma`, `apps/api/prisma.config.ts`
 - Create: `apps/api/src/db/client.ts`, `apps/api/src/db/user-repo.ts`
 - Create test: `apps/api/test/helpers/db.ts`, `apps/api/test/user-repo.test.ts`
+- Create ADR: `docs/adr/0008-prisma-driver-adapter-over-accelerate.md`
+- Modify: `apps/api/package.json` (add `@prisma/adapter-pg`, drop the now-redundant `prisma` key)
 - Generated (git-ignored): `apps/api/prisma/migrations/**` is committed; `apps/api/src/generated/prisma/**` is not.
 
 **Interfaces:**
 - Produces: `createPrismaClient(url)`, `UserRecord`, `UserRepo`, `createUserRepo(prisma)`, `resetDb(prisma)`.
 
+> #### ⚠️ Plan corrected 2026-07-28 — Prisma 7 removed both mechanisms this task originally used
+>
+> The first attempt at this task failed at Step 3 on `P1012`, before touching a database. Two
+> separate Prisma 7 breaking changes were involved, and the original Steps 2–4 tripped both:
+>
+> 1. **`url` is no longer allowed in the schema's `datasource` block.** The CLI reads the
+>    connection URL from a `prisma.config.ts` instead. `prisma validate`, `migrate` and
+>    `generate` all refuse to load a schema that still declares it.
+> 2. **`datasourceUrl` no longer exists as a `PrismaClient` option.** `PrismaClientOptions` is
+>    now a union of `{ adapter }` and `{ accelerateUrl }` — a driver adapter is *required* for a
+>    direct connection. Verified against `@prisma/client@7.9.1`'s own typings, which state
+>    "A driver adapter (or, alternatively, a Prisma Accelerate URL) is **required**."
+>
+> Choosing `@prisma/adapter-pg` over Accelerate is a real decision with plausible alternatives,
+> so it gets **ADR-0008** (Step 0 below). The whole corrected chain — config load, migrate,
+> generate, adapter-backed client, CRUD, `TRUNCATE` — was verified end-to-end by the controller
+> before this correction was written, so the code below is known-good rather than inferred.
+
+- [ ] **Step 0: Write `docs/adr/0008-prisma-driver-adapter-over-accelerate.md`**
+
+Decision: connect through the `@prisma/adapter-pg` driver adapter. Prisma 7 forces a choice
+here; record it. Name at least two rejected alternatives, per `CLAUDE.md`:
+
+- **Prisma Accelerate (`accelerateUrl`)** — rejected: a third-party connection-pooling proxy
+  that student submissions (personal data) would transit, which is the same class of concern as
+  O-5, and it needs an account the programme has not provisioned.
+- **Downgrade to Prisma 6 to keep `url` + `datasourceUrl`** — rejected: `CLAUDE.md` pins Prisma
+  7.9.1 and the rule is *newest version the ecosystem supports*; nothing here is unsupported,
+  the API merely moved.
+- **`@prisma/adapter-pg` (chosen)** — first-party, no external service, `pg` and `@types/pg`
+  arrive as its own dependencies so it is a single line in `package.json`.
+
+Note in the ADR that the adapter also becomes the seam where connection pooling is configured
+later, which matters for the NFR-1 target of p95 < 250 ms at 50 RPS.
+
 - [ ] **Step 1: Write `apps/api/docker-compose.yml`**
+
+The host port is parameterised. A developer machine may already have another project's Postgres
+on 5432 — this happened on the first run of this task — and hard-coding it makes the compose
+file unusable there. The default keeps every command below, and CI, unchanged.
 
 ```yaml
 services:
@@ -960,7 +1001,7 @@ services:
       POSTGRES_PASSWORD: irp
       POSTGRES_DB: irp
     ports:
-      - "5432:5432"
+      - "${IRP_DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U irp -d irp"]
       interval: 2s
@@ -970,7 +1011,9 @@ services:
 
 - [ ] **Step 2: Write `apps/api/prisma/schema.prisma`**
 
-The Prisma 7 `prisma-client` generator emits ESM to a **git-ignored** output dir (mirrors `packages/types`/`packages/client`).
+The Prisma 7 `prisma-client` generator emits ESM to a **git-ignored** output dir (mirrors
+`packages/types`/`packages/client`). The `datasource` block carries **`provider` only** — see
+the correction note above.
 
 ```prisma
 generator client {
@@ -981,7 +1024,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 /// A registered participant. FR-5: removal hides via deletedAt, never deletes.
@@ -1002,20 +1044,74 @@ enum Role {
 }
 ```
 
+- [ ] **Step 2a: Write `apps/api/prisma.config.ts`, add the adapter, drop the redundant `prisma` key**
+
+```ts
+import { defineConfig, env } from "prisma/config";
+
+// Prisma 7 removed `url` from the schema's datasource block. The CLI (migrate,
+// introspect) reads the connection URL from here instead; the runtime client
+// gets it via a driver adapter in src/db/client.ts. See ADR-0008.
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  datasource: {
+    url: env("DATABASE_URL"),
+  },
+});
+```
+
+Then in `apps/api/package.json`:
+- add `"@prisma/adapter-pg": "7.9.1"` to `dependencies` (exact, matching the `prisma` /
+  `@prisma/client` pin). It brings `pg` and `@types/pg` as its own dependencies — do **not** add
+  those separately.
+- **delete the `"prisma": { "schema": "prisma/schema.prisma" }` key.** `prisma.config.ts` now
+  declares `schema`, and two sources for one value is exactly the drift this repo avoids.
+
+`pnpm add` also appends `@prisma/adapter-pg@7.9.1` and `@prisma/driver-adapter-utils@7.9.1` to
+`minimumReleaseAgeExclude` in `pnpm-workspace.yaml`. That is expected — commit it.
+
 - [ ] **Step 3: Start Postgres, create the initial migration, generate the client**
 
-Run:
-```bash
+> **Run every database-touching command through PowerShell, not the Bash tool.** The Bash tool
+> is sandboxed and cannot open a TCP connection to a localhost port — `migrate dev` fails with
+> `P1001: Can't reach database server` even while the container is healthy and the port is
+> proven reachable from the host. This wastes a diagnosis cycle if you hit it cold. Use
+> `127.0.0.1` rather than `localhost`, since `localhost` resolves to `::1` here.
+
+```powershell
+$env:IRP_DB_PORT = "5432"   # set to 5433 if 5432 is already taken on this machine
 docker compose -f apps/api/docker-compose.yml up -d
-export DATABASE_URL="postgresql://irp:irp@localhost:5432/irp?schema=public"
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:$($env:IRP_DB_PORT)/irp?schema=public"
 pnpm --filter @irp/api exec prisma migrate dev --name init
 pnpm --filter @irp/api exec prisma generate
 ```
-Expected: a migration under `apps/api/prisma/migrations/<ts>_init/`, and a generated client under `apps/api/src/generated/prisma/` (git-ignored). Verify `git status` shows the migration but **not** the generated dir.
+
+Expected: `Loaded Prisma config from prisma.config.ts.`, then a migration under
+`apps/api/prisma/migrations/<ts>_init/`, then `✔ Generated Prisma Client (7.9.1) to
+.\src\generated\prisma`. Verify `git status` shows the migration but **not** the generated dir.
+
+The generator emits its entry as `client.ts` → `client.js`, alongside `models.ts`, `enums.ts`,
+`browser.ts`, `commonInputTypes.ts` and the `internal/` + `models/` dirs. This is confirmed
+against 7.9.1, so `../generated/prisma/client.js` in Step 4 is correct as written.
 
 - [ ] **Step 4: Implement `apps/api/src/db/client.ts`**
 
-The generated path is `../generated/prisma` relative to `src/db/`. The Prisma 7 `prisma-client` generator emits its entry as `client.ts` → `client.js`; confirm this against the emitted output and adjust the specifier only if the installed generator version emits a different entry file.
+The generated path is `../generated/prisma` relative to `src/db/`, and the entry is `client.js`
+as confirmed in Step 3. The connection URL reaches the client through a **`PrismaPg` driver
+adapter**, not the removed `datasourceUrl` option — see the correction note and ADR-0008. The
+signature stays `createPrismaClient(databaseUrl: string)`, so no caller changes.
+
+```ts
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../generated/prisma/client.js";
+
+export function createPrismaClient(databaseUrl: string): PrismaClient {
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+}
+```
+
+<details>
+<summary>Superseded pre-Prisma-7 version, kept so the correction is legible</summary>
 
 ```ts
 import { PrismaClient } from "../generated/prisma/client.js";
@@ -1024,6 +1120,10 @@ export function createPrismaClient(databaseUrl: string): PrismaClient {
   return new PrismaClient({ datasourceUrl: databaseUrl });
 }
 ```
+
+`datasourceUrl` is not a valid `PrismaClientOptions` member in Prisma 7 — this does not compile.
+
+</details>
 
 - [ ] **Step 5: Write the failing repo test** — `apps/api/test/user-repo.test.ts`
 
@@ -1076,8 +1176,16 @@ export async function resetDb(prisma: PrismaClient): Promise<void> {
 
 - [ ] **Step 7: Run it to confirm it fails**
 
-Run: `DATABASE_URL=postgresql://irp:irp@localhost:5432/irp?schema=public pnpm --filter @irp/api test user-repo`
-Expected: FAIL — `createUserRepo` not defined.
+In PowerShell, with `$env:DATABASE_URL` still set from Step 3 (the Bash tool cannot reach the
+database — see the Step 3 note):
+
+```powershell
+pnpm --filter @irp/api test user-repo
+```
+
+Expected: FAIL — `createUserRepo` not defined. If instead all three tests *skip*, `DATABASE_URL`
+is unset in this shell and `describe.skipIf` swallowed them — a green-looking no-op. Confirm the
+run reports three failures, not three skips.
 
 - [ ] **Step 8: Implement `apps/api/src/db/user-repo.ts`**
 
@@ -1117,19 +1225,28 @@ export function createUserRepo(prisma: PrismaClient): UserRepo {
 
 - [ ] **Step 9: Run tests to confirm they pass**
 
-Run: `DATABASE_URL=postgresql://irp:irp@localhost:5432/irp?schema=public pnpm --filter @irp/api test user-repo`
-Expected: PASS (all three).
+In the same PowerShell session: `pnpm --filter @irp/api test user-repo`
+
+Expected: PASS (all three). Then run the whole suite — `pnpm --filter @irp/api test` — and
+confirm **20 passing** (the 17 from Tasks 1–4 plus these three), followed by
+`pnpm --filter @irp/api typecheck` and the repo lint at zero warnings.
 
 - [ ] **Step 10: Commit**
 
 ```bash
 git add apps/api/docker-compose.yml apps/api/prisma/schema.prisma \
-  apps/api/prisma/migrations apps/api/src/db/client.ts apps/api/src/db/user-repo.ts \
-  apps/api/test/helpers/db.ts apps/api/test/user-repo.test.ts
+  apps/api/prisma.config.ts apps/api/prisma/migrations \
+  apps/api/src/db/client.ts apps/api/src/db/user-repo.ts \
+  apps/api/test/helpers/db.ts apps/api/test/user-repo.test.ts \
+  apps/api/package.json pnpm-lock.yaml pnpm-workspace.yaml \
+  docs/adr/0008-prisma-driver-adapter-over-accelerate.md \
+  docs/superpowers/plans/2026-07-28-plan-2b-service-and-persistence.md
 git commit -m "feat(api): User model, migration, soft-delete-aware repo (FR-5, FR-3)"
 ```
 
-Confirm `git status` still shows `apps/api/src/generated/` as untracked/ignored — it must not be staged.
+Confirm `git status` still shows `apps/api/src/generated/` as untracked/ignored — it must not be
+staged. The plan file is included because this task's correction is committed alongside the code
+it fixes, per `CLAUDE.md`.
 
 ---
 

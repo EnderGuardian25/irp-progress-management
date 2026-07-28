@@ -19,3 +19,5 @@ minimumReleaseAgeExclude:
   - '@prisma/fetch-engine@7.9.1'
   - '@prisma/get-platform@7.9.1'
   - prisma@7.9.1
+  - '@prisma/adapter-pg@7.9.1'
+  - '@prisma/driver-adapter-utils@7.9.1'

@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: irp
+      POSTGRES_PASSWORD: irp
+      POSTGRES_DB: irp
+    ports:
+      - "${IRP_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U irp -d irp"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
