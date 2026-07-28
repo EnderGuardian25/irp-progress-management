@@ -508,10 +508,19 @@ describe("buildAjv", () => {
 
   it("interprets 2020-12 keywords (prefixItems) rather than draft-07", () => {
     const ajv = buildAjv();
+    // minItems/maxItems are required by ajv strict mode's strictTuples check
+    // (a prefixItems tuple must pin the array length). They also sharpen the
+    // 2020-12-vs-draft-07 discrimination: under draft-07 `prefixItems` is
+    // unknown and ignored, so with `items: false` the array `["a", 1]` would
+    // be rejected (no items permitted); under 2020-12 prefixItems covers the
+    // first two and `items: false` forbids a third — so a valid ["a", 1]
+    // proves the 2020-12 dialect is in force.
     const validate = ajv.compile({
       type: "array",
       prefixItems: [{ type: "string" }, { type: "number" }],
       items: false,
+      minItems: 2,
+      maxItems: 2,
     });
     expect(validate(["a", 1])).toBe(true);
     expect(validate(["a", 1, "extra"])).toBe(false);
