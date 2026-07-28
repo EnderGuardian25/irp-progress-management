@@ -31,6 +31,13 @@ tags:
   - name: Identity
     description: The authenticated caller.
 
+# Fail closed: every operation requires a bearer token unless it explicitly
+# opts out with `security: []`. Without this, an operation that simply omits
+# the key would inherit "no auth required" — the wrong default for a system
+# where only health checks are public.
+security:
+  - bearerAuth: []
+
 paths:
   /health:
     get:
@@ -248,7 +255,7 @@ components:
                 title: Request validation failed
                 status: 400
                 detail: body must NOT have additional properties
-                instance: /api/v1/me
+                instance: /api/v1/example
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
 
     Unauthorized:
@@ -265,7 +272,7 @@ components:
                 title: Authentication required
                 status: 401
                 detail: The bearer token has expired.
-                instance: /api/v1/me
+                instance: /api/v1/example
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
 
     Forbidden:
@@ -301,5 +308,5 @@ components:
                 title: Internal Server Error
                 status: 500
                 detail: An unexpected error occurred.
-                instance: /api/v1/me
+                instance: /api/v1/example
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
