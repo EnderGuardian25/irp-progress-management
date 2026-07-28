@@ -41,6 +41,7 @@ CI. Two things it deferred land here:
 | **OpenTelemetry lands in Plan 2**, exporter configurable | Console exporter now, App Insights connection string in Plan 4. Unblocks the Problem Details `traceId` the parent spec §9 requires, and proves tracing before the riskiest plan rather than during it |
 | Docker Compose locally, Actions `services:` in CI | Both conventional and fast; a service container costs almost nothing against NFR-5's 8-minute budget |
 | **Runtime validation derived from the spec** | See §4 |
+| **OpenAPI 3.1**, not the brief's 3.0 | [ADR-0006](../../adr/0006-openapi-3-1-over-3-0.md). Its schemas are real JSON Schema 2020-12, so no translation layer sits between the document and the validator. Requires `ajv/dist/2020` in Plan 2B |
 
 ## 4. The spec is the source of truth — mechanically, not by convention
 
@@ -61,6 +62,18 @@ Impl Lead's per PRD §4.2: `jose` for JWT verification and JWKS caching,
 hints.
 
 **One document drives types and runtime behaviour. They cannot drift.**
+
+### The spec is OpenAPI 3.1 — and that changes the validator
+
+Per [ADR-0006](../../adr/0006-openapi-3-1-over-3-0.md), the document is **3.1.0**, not the
+3.0 the challenge brief names. 3.1 is a strict superset of **JSON Schema 2020-12**, so its
+schemas can be handed to a validator directly rather than translated from 3.0's draft-04
+dialect — which removes exactly the translation layer this section exists to eliminate.
+
+**Fastify's default ajv is draft-07 and will misinterpret 2020-12 schemas.** The Fastify
+instance must be built with a validator compiler using `ajv/dist/2020`. Leaving the default in
+place would not throw — it would silently change how keywords behave, which is the worst
+possible failure mode for the one mechanism guaranteeing the spec and the service agree.
 
 The rejected alternative — generating types from the spec while hand-writing Fastify's
 validation schemas alongside — is the pattern the challenge brief's own hint demonstrates and
