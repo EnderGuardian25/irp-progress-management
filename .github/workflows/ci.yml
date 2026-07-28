@@ -31,6 +31,25 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Lint the OpenAPI document
+        run: pnpm spec:lint
+
+      - name: Generate types and client
+        run: pnpm generate
+
+      - name: Fail if regenerating changes anything
+        run: |
+          find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-before.txt
+          pnpm generate
+          find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-after.txt
+          if ! diff -u /tmp/gen-before.txt /tmp/gen-after.txt; then
+            echo "::error::Generation is not deterministic — the same spec produced different output."
+            exit 1
+          fi
+
+      - name: Build @irp/core
+        run: pnpm --filter @irp/core build
+
       - name: Typecheck
         run: pnpm -r typecheck
 
