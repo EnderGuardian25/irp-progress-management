@@ -4,12 +4,23 @@ import type { UserRecord } from "../db/user-repo.js";
 
 type ApiUser = components["schemas"]["User"];
 
+// A mapping object, not a ternary. `UserRecord["role"]` is compiler-checked
+// against the generated Prisma enum at user-repo.ts, so a third Role member
+// fails there — but the natural fix at that point is to widen the union, and a
+// ternary would then map the new member to "Student" in silence. `Record<...>`
+// makes this half of the chain exhaustive too: widening the union without
+// adding a case here is a type error.
+const ROLE_TO_API: Record<UserRecord["role"], ApiUser["role"]> = {
+  ADMIN: "Admin",
+  STUDENT: "Student",
+};
+
 export function toApiUser(record: UserRecord): ApiUser {
   return {
     id: record.id,
     email: record.email,
     displayName: record.displayName,
-    role: record.role === "ADMIN" ? "Admin" : "Student",
+    role: ROLE_TO_API[record.role],
   };
 }
 

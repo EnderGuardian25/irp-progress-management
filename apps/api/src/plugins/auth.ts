@@ -36,6 +36,15 @@ export const authPlugin = fp<AuthOptions>(
         const { payload } = await jwtVerify(token, opts.getKey, {
           issuer: opts.issuer,
           audience: opts.audience,
+          // Entra signs with RS256. Stating it means the accepted set is a
+          // decision in the code rather than whatever jose defaults to —
+          // the control you want written down before Plan 3 points this at a
+          // real tenant, not one inferred from jose rejecting `alg: none`.
+          algorithms: ["RS256"],
+          // Zero tolerance is the default, so ordinary skew between Entra's
+          // clock and the container's produces spurious 401s on freshly
+          // issued tokens.
+          clockTolerance: "60s",
         });
         oid = payload.oid;
       } catch {
