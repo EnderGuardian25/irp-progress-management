@@ -8,12 +8,15 @@ export default tseslint.config(
     // strict compiler settings (that's the real signal worth acting on); the
     // stylistic rules below flag its index-signature shapes, which are the
     // generator's normal output, not something the spec or a handler controls.
+    // packages/client/src is @hey-api/openapi-ts output for the same reason:
+    // generated, git-ignored, rebuilt in CI, never hand-edited.
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
       "**/.next/**",
       "**/coverage/**",
       "packages/types/src/**",
+      "packages/client/src/**",
     ],
   },
   js.configs.recommended,
