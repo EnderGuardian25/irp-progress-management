@@ -35,24 +35,56 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
+**Last updated:** 2026-07-28, after Plan 2A merged.
+
 ### Done
-- **Stakeholder interview** — conducted and answered. `docs/stakeholder-interview.md`.
-- **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — drafted. `docs/interview-and-prd.md`. Contains 32 numbered FRs, 15 NFRs with numeric targets, 12 non-goals, and a traceability table back to the stakeholder's success criteria.
-- **`CLAUDE.md`** — stack, layout, house rules, domain glossary, hard boundaries.
+
+**Documentation**
+- **Stakeholder interview** — `docs/stakeholder-interview.md`.
+- **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-13.
+- **`docs/design-system.md`** — visual system. Palette verified by script: 35 pairs across light and dark pass WCAG AA, all tokens in sRGB gamut.
+- **Six ADRs** — `docs/adr/0001`–`0006`. Each names at least two rejected alternatives.
+- **`docs/manual-setup-steps.md`** — everything needing a human. **Start here if you are Damian.**
+
+**Code — merged to `main`**
+
+| PR | Plan | What |
+|---|---|---|
+| #1 | — | Design direction, ADRs 0001–0003, slice 1 spec |
+| #2 | 1 · Foundation + cycle engine | `@irp/core`, 112 tests, green under three timezones in CI |
+| #3 | 2A · Contract + generation | `spec/openapi.yaml`, `@irp/types`, `@irp/client`, spec-lint and determinism gates |
+
+**What exists now**
+
+```
+spec/openapi.yaml        OpenAPI 3.1, two operations, lints clean under recommended-strict
+packages/core/           the cycle/date engine. Builds to dist/. 112 tests
+packages/types/          GENERATED, git-ignored, never committed
+packages/client/         GENERATED, git-ignored, never committed
+redocly.yaml             recommended-strict + a custom four-response assertion
+eslint.config.mjs        type-aware, generated dirs ignored
+.github/workflows/ci.yml 3-timezone matrix: spec lint, generate, determinism, build, typecheck, lint, test
+```
 
 ### Not started
-Everything else. No code exists yet — no scaffold, no spec, no infra.
+
+`apps/api`, `apps/web`, Prisma, `infra/`, `tests/load/`. Next is **Plan 2B**.
 
 ### Blocked / needs the stakeholder
 | # | Item | Blocks |
 |---|---|---|
-| O-1 | Interview date, duration, stakeholder name for the record | Deliverable 1 final submission only |
-| O-5 | **AI provider decision + data-processing approval.** Student submissions are personal data leaving the tenant | The whole AI evaluation slice (FR-22 to FR-26). Needs an ADR and escalation to Hearts Academy / leadership before any model API is wired |
-| O-6 | Exact wording of the five rubric criteria | Prisma schema for evaluations |
-| O-2, O-3, O-7 | Email delivery in v1; winner tie-break rule; whether lateness/absence penalises the score | Reporting and scoring slices — assumptions are stated, proceed behind them and mark `// ASSUMPTION: O-n` |
-| — | Demo Day #2 date | Scheduling only |
+| **—** | **An Azure free account.** Not created; `az` is not installed | **Plan 4 entirely**, and the Entra half of Plan 3. Blocks nothing before that. `docs/manual-setup-steps.md` §1 |
+| O-5 | **AI provider + data-processing approval.** Student submissions are personal data leaving the tenant | The whole AI slice (Plan 9, FR-22 to FR-26). Needs an ADR and escalation to leadership |
+| O-6 | Exact wording of the five rubric criteria | The evaluation schema and screen |
+| O-10 | FR-13 and FR-15 conflict on the Monday grace window | Implemented on the FR-15 reading, marked `// ASSUMPTION: O-10`. Blocks nothing |
+| O-11 | Weekends reclassified as optional Extra work — **changes FR-12, adds FR-33** | Implemented. §4.2 reserves FR changes to the mentor, so sign-off is outstanding |
+| O-12 | Next.js 16 over the pinned 15 | Impl Lead confirmed 2026-07-28; build proceeds. Mentor notification outstanding |
+| O-13 | OpenAPI 3.1 over the brief's 3.0 | Impl Lead accepted the grading risk. Shipped |
+| O-1, O-2, O-3, O-4, O-7, O-8, O-9 | Interview metadata; email delivery; tie-break; leadership access; absence penalty; non-goals confirmation; Demo Day date | Assumptions stated; nothing blocked |
 
-Full list: `docs/interview-and-prd.md` §5.
+Full list with current assumptions: `docs/interview-and-prd.md` §5.
+
+Also outstanding and small: **the Bistec brand hex.** `--primary` is a placeholder indigo. Any replacement must avoid hue 20–70° (reserved for `missed`/`late`) and 140–170° (reserved for `ok`).
 
 ---
 
@@ -79,10 +111,11 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 
 | Slice | Plan | Covers | Feeds | Status |
 |---|---|---|---|---|
-| **1 — Deployed integration skeleton** | 1 · Foundation + cycle engine | T-01, T-03, T-06 | D2 | **In progress** |
-| | 2 · API contract + service | T-05 (User only), T-08 (thin), T-09, T-10 (thin) | D2 | Not started |
-| | 3 · Auth + web shell | T-11 | D3 | Not started |
-| | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Not started |
+| **1 — Deployed integration skeleton** | 1 · Foundation + cycle engine | T-01, T-03, T-06 | D2 | ✅ **Merged, PR #2** |
+| | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
+| | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | **Next** |
+| | 3 · Auth + web shell | T-11 | D3 | Blocked on the Azure account |
+| | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Blocked on the Azure account |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
@@ -158,7 +191,33 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/foundation-and-cycle-engine` · **Plan:** 1 of 11 · **Progress ledger:** `.superpowers/sdd/progress.md`
+**Branch:** `main` is current · **Next:** Plan 2B · **Ledger:** `.superpowers/sdd/progress.md` (git-ignored; completed plans archived to `plan-1/`, `plan-2a/`)
+
+### Starting a fresh session
+
+1. Read `CLAUDE.md`, then this file, then `docs/superpowers/specs/2026-07-28-plan-2-api-contract-design.md` — Plan 2B's requirements are §5 (layout), §7 (the 403 rule), §8 (data model), §9 (error handling), §10 (testing).
+2. Run `pnpm install && pnpm generate && pnpm --filter @irp/core build` before anything else. `packages/types` and `packages/client` are git-ignored, so a fresh clone has no generated code and typecheck will fail until you generate.
+3. Brainstorm → spec → `writing-plans` → `subagent-driven-development`. One plan, one branch, one PR, merged before the next starts.
+4. **Archive `.superpowers/sdd/` into `plan-<N>/` before the first task of a new plan.** The scripts reuse filenames and the directory is git-ignored, so a new plan silently destroys the previous one's record. Plan 1's ledger was lost to exactly this.
+
+### Hard-won constraints Plan 2B must honour
+
+These cost real debugging. Do not rediscover them.
+
+| Constraint | Why |
+|---|---|
+| **`ajv/dist/2020`, not Fastify's default ajv** | The spec is OpenAPI 3.1, so its schemas are JSON Schema 2020-12. Fastify's default is draft-07 and will *silently* misinterpret them — the worst failure mode for the one mechanism keeping spec and service aligned |
+| **`ajv-formats` is mandatory** | The document uses `format: uri-reference`, `uuid`, `email`. Ajv implements no formats, and in strict mode an unknown format **throws at schema-compile time** — the API fails at boot, not on a bad request. See ADR-0006 |
+| **`@irp/client` is bundler-only** | It ships runtime code as raw TypeScript with `noEmit`. Plan 3 needs `transpilePackages: ['@irp/client']` in Next.js. `apps/api` cannot load it |
+| **Relax strictness only in a generated package's own tsconfig** | Never `tsconfig.base.json`. `packages/client` sets `lib: ["ES2023","DOM"]` and `exactOptionalPropertyTypes: false` because its `include` covers only generated files |
+| **New generated dirs go in `eslint.config.mjs` ignores** | Package-specific patterns only. A broad `**/src/**` would silence real source |
+| **A partial OpenAPI document cannot lint clean** | `no-unused-components` warns on anything unreferenced, so schemas and the operations using them must land in one task. This forced a plan restructure |
+
+### An open design risk worth deciding early
+
+`@irp/core` hand-writes `DayStatus` as an eight-value union. The first domain endpoint will generate a **second** `DayStatus` from the spec with nothing linking them. Decide in Plan 2B's spec whether core's unions derive from `@irp/types`, or whether a test asserts set equality. Left alone, this is exactly the duplication the contract-first architecture exists to prevent.
+
+### What still governs the order
 
 Execution runs under `superpowers:subagent-driven-development`: a fresh implementer subagent
 per task, an independent reviewer after each, fixes looped until the review is clean, then a
@@ -177,8 +236,20 @@ whole-branch review before the PR.
 - T-17 waits on O-5. Everything else routes around it.
 
 **Open points blocking future plans:** O-5 (AI provider) blocks Plan 9. O-6 (rubric wording)
-blocks the evaluation schema. O-10, O-11 and O-12 need mentor sign-off but block nothing —
-all three are implemented behind stated assumptions and marked in code.
+blocks the evaluation schema. O-10 to O-13 need mentor sign-off but block nothing — all are
+implemented behind stated assumptions and marked in code. **The Azure account blocks Plans 3
+and 4 and is the only genuinely blocking item.**
+
+### Gates that exist, and what each actually catches
+
+Worth knowing because one of them was silently broken until the whole-branch review found it.
+
+- **`redocly lint` under `recommended-strict`** — the plain `recommended` preset exits **0 on warnings** and there is no `--fail-on-warnings` flag, so the zero-warning bar was unenforced for most of Plan 2A. `recommended-strict` promotes warnings to errors. Verified by deliberate failure.
+- **A custom Redocly assertion** enforces all four of `200`/`400`/`401`/`500`. The built-in `operation-4xx-response` only requires *at least one* 4xx — deleting a `401` used to lint clean.
+- **The determinism gate** regenerates and diffs checksums, catching a non-deterministic generator. "Never hand-edited" is enforced by `.gitignore` plus a `git status --porcelain` check, not by the diff.
+- **The three-timezone CI matrix** (UTC, America/New_York, Pacific/Kiritimati) brackets Asia/Colombo both ways, so an off-by-one-day error from reading server local time cannot pass.
+
+If you add a gate, prove it fails when it should. Two of the four above looked correct and did nothing.
 
 ---
 
