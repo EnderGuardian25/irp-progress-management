@@ -61,12 +61,12 @@ Verified against the registry on 2026-07-28. **The rule is *newest version the s
 | Fastify | 5.10.0 | — | — |
 | Prisma | 7.9.1 | — | — |
 | `@prisma/adapter-pg` | 7.9.1 | — | Prisma 7 removed `datasourceUrl` from `PrismaClientOptions`; a driver adapter is required for a direct connection (ADR-0008) |
-| `ajv` | 8.20.0 | — | The only major with an `ajv/dist/2020` JSON Schema 2020-12 dialect, matching OpenAPI 3.1's schemas (ADR-0006) |
+| `ajv` | 8.20.0 | — | Exposes the `ajv/dist/2020` entry point we require for JSON Schema 2020-12, matching OpenAPI 3.1's schemas (ADR-0006) |
 | `ajv-formats` | 3.0.1 | — | ajv implements no string formats itself; the spec uses `uri-reference`, `uuid`, `email` |
 | `jose` | 6.2.4 | — | ESM-only; `createRemoteJWKSet` + `jwtVerify` for JWT validation against a JWKS endpoint |
 | `@opentelemetry/api` | 1.9.1 | — | Stable API surface the Node SDK packages below implement against |
 | `@opentelemetry/sdk-trace-node` | 2.10.0 | — | `NodeTracerProvider` + `SimpleSpanProcessor` backing the hand-written tracing plugin (ADR-0007) |
-| `@opentelemetry/sdk-trace-base` | 2.10.0 | — | Dev-only; supplies the `SpanExporter` type for the injectable exporter seam |
+| `@opentelemetry/sdk-trace-base` | 2.10.0 | — | Dev-only; supplies `InMemorySpanExporter`, the test double injected into the exporter seam `createTracerProvider` exposes |
 | `@opentelemetry/resources` | 2.10.0 | — | `resourceFromAttributes` sets the service name on the trace resource |
 | `@opentelemetry/semantic-conventions` | 1.43.0 | — | `ATTR_SERVICE_NAME` constant, avoids a hand-typed attribute key |
 | `fastify-plugin` | ^5.1.0 | — | Declares plugin `dependencies` so `tracing` → `problem-details` → `auth` ordering is enforced at boot, not by convention |
