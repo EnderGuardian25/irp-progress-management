@@ -5,6 +5,9 @@ export interface UserRecord {
   externalId: string;
   email: string;
   displayName: string;
+  // Mirrors the generated Prisma `Role` enum. Unlike the DayStatus duplication in
+  // handoff.md §3, this one is compiler-checked: `role: u.role` below is assigned
+  // against this interface, so a third Role member would fail typecheck, not drift.
   role: "ADMIN" | "STUDENT";
 }
 

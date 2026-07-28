@@ -1197,6 +1197,9 @@ export interface UserRecord {
   externalId: string;
   email: string;
   displayName: string;
+  // Mirrors the generated Prisma `Role` enum. Unlike the DayStatus duplication in
+  // handoff.md §3, this one is compiler-checked: `role: u.role` below is assigned
+  // against this interface, so a third Role member would fail typecheck, not drift.
   role: "ADMIN" | "STUDENT";
 }
 
@@ -1802,7 +1805,7 @@ git commit -m "test(api): full-stack integration incl the four negative tests (s
 ### Task 9: CI — Postgres service, Prisma steps, and prove the DB gate
 
 **Files:**
-- Modify: `.github/workflows/ci.yml`
+- Modify: `.github/workflows/ci.yml`, `apps/api/test/user-repo.test.ts` (CI skip guard, Step 3)
 
 **Interfaces:** none (CI only).
 
@@ -1841,33 +1844,67 @@ New steps (place `Generate the Prisma client` immediately before `Build @irp/cor
         run: pnpm --filter @irp/api exec prisma migrate deploy
 ```
 
+> **Run every database-touching command below through PowerShell, not the Bash tool.** The Bash
+> tool is sandboxed and cannot open TCP to a localhost port (`P1001` even with a healthy
+> container), and its inline `VAR=value cmd` prefix is not PowerShell syntax. Use `$env:` and
+> `127.0.0.1`. Local Postgres is on **5433** here — 5432 is held by an unrelated project's
+> container. CI is unaffected: on the runner the service binds 5432 and the `env` block above is
+> correct as written.
+
 - [ ] **Step 2: Confirm the porcelain gate still holds for the Prisma client**
 
 The existing "Fail if generated output is tracked in git" step runs `git status --porcelain`. Because `apps/api/src/generated/` is git-ignored, `prisma generate` must leave the tree clean. **Locally verify:**
 
-Run:
-```bash
+```powershell
 pnpm --filter @irp/api exec prisma generate
 git status --porcelain
 ```
 Expected: **no output** (the generated dir is ignored). If `apps/api/src/generated/...` appears, the `.gitignore` entry from Task 1 is missing or wrong — fix it, do not commit the generated client.
 
-- [ ] **Step 3: Prove the new DB gate actually catches a failure** (`CLAUDE.md`: prove a gate fails)
+- [ ] **Step 3: Close the skip-false-green hole, then prove it goes red**
 
-Temporarily break the migration path and confirm the pipeline goes red locally, then revert:
+> **This is the important one.** Task 5's review raised it as the single Important finding, and
+> the naive version of this step tests the wrong thing. `apps/api/test/user-repo.test.ts` guards
+> its suite with `describe.skipIf(!dbUrl)`. With `DATABASE_URL` unset the run reports
+> `17 passed | 3 skipped` and **exits 0** — reproduced directly. So a CI job whose database
+> failed to come up, or which simply lost its `DATABASE_URL`, goes **green while running zero
+> database tests**, including the FR-5 soft-delete test this task exists to protect. Asserting
+> that `migrate deploy` fails against a bad URL does *not* cover this: it checks a different
+> step. `CLAUDE.md` is explicit that two of this project's four gates looked correct and did
+> nothing — this is that failure mode, caught before it shipped.
 
-Run:
-```bash
-# Point at a database that does not exist; migrate deploy must fail.
-DATABASE_URL="postgresql://irp:irp@localhost:5432/nonexistent?schema=public" \
-  pnpm --filter @irp/api exec prisma migrate deploy; echo "exit=$?"
+`skipIf` is right for local dev (a laptop without Docker should not hard-fail the unit suite),
+so keep it — but make its absence fatal in CI. In `apps/api/test/user-repo.test.ts`:
+
+```ts
+// A DB-less run is a developer convenience, never an acceptable CI result: skipping here
+// would let a failed Postgres service report green. Fail loudly instead.
+if (process.env.CI && !dbUrl) {
+  throw new Error("DATABASE_URL is required in CI — the database suite must not be skipped");
+}
 ```
-Expected: non-zero exit (the step would fail CI). Revert the URL. Record in the PR description that the gate was demonstrated red.
+
+Then demonstrate **both** directions, and record both in the PR description:
+
+```powershell
+# (a) the new skip guard must go red when CI has no database URL
+$env:CI = "true"; Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
+pnpm --filter @irp/api test user-repo; "exit=$LASTEXITCODE"   # expect NON-ZERO
+Remove-Item Env:\CI
+
+# (b) the migrate step must go red against a database that does not exist
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/nonexistent?schema=public"
+pnpm --filter @irp/api exec prisma migrate deploy; "exit=$LASTEXITCODE"   # expect NON-ZERO
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+```
+
+Both must exit non-zero. If (a) exits 0 the guard is not wired up and the hole is still open —
+do not proceed on the assumption that it is closed.
 
 - [ ] **Step 4: Run the full CI sequence locally to green**
 
-Run, from a clean tree with Postgres up:
-```bash
+From a clean tree with Postgres up, in PowerShell with `$env:DATABASE_URL` set to the 5433 URL:
+```powershell
 pnpm install --frozen-lockfile
 pnpm spec:lint
 pnpm generate
@@ -1879,14 +1916,18 @@ pnpm lint
 pnpm -r test
 git status --porcelain   # must be empty
 ```
-Expected: every command exits 0; the tree is clean.
+Expected: every command exits 0; the tree is clean. The `pnpm -r test` line must show the
+database tests **running**, not skipped.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .github/workflows/ci.yml
-git commit -m "ci: postgres service + prisma generate/migrate, integration tests"
+git add .github/workflows/ci.yml apps/api/test/user-repo.test.ts
+git commit -m "ci: postgres service + prisma generate/migrate, fail on skipped db suite"
 ```
+
+`user-repo.test.ts` is included because Step 3's guard lives there. GitHub Actions sets `CI=true`
+on every runner, so the guard arms itself with no workflow change.
 
 ---
 
