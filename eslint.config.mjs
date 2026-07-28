@@ -3,13 +3,19 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    // packages/types/src is openapi-typescript output: generated, git-ignored,
-    // rebuilt fresh in CI, never hand-edited. It typechecks clean under the
-    // strict compiler settings (that's the real signal worth acting on); the
-    // stylistic rules below flag its index-signature shapes, which are the
-    // generator's normal output, not something the spec or a handler controls.
-    // packages/client/src is @hey-api/openapi-ts output for the same reason:
-    // generated, git-ignored, rebuilt in CI, never hand-edited.
+    // Both generated packages are ignored for the same reason: their contents
+    // are produced by a generator, git-ignored, rebuilt fresh in CI, and never
+    // hand-edited, so a lint finding in them is not actionable — the stylistic
+    // rules below flag index-signature shapes that are the generator's normal
+    // output, not something the spec or a handler controls.
+    //
+    // They differ in how strictly they typecheck, and the difference matters:
+    //   - packages/types/src (openapi-typescript) typechecks clean under the
+    //     unmodified strict settings of tsconfig.base.json.
+    //   - packages/client/src (@hey-api/openapi-ts) does NOT. It needs
+    //     `lib: ["ES2023", "DOM"]` and `exactOptionalPropertyTypes: false`,
+    //     relaxed in packages/client/tsconfig.json only — see the `_comment`
+    //     there. tsconfig.base.json stays strict for hand-written code.
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
