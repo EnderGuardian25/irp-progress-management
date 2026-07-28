@@ -121,6 +121,16 @@ When a subagent finds a defect in the plan's own code, fix the plan at source an
 correction alongside the code fix. A plan that has silently diverged from the codebase is
 worse than no plan.
 
+**Archive the SDD scratch directory between plans.** `subagent-driven-development` writes
+task briefs, implementer reports, review diffs and the progress ledger to `.superpowers/sdd/`
+under fixed names — `progress.md`, `task-1-brief.md`, and so on. Those names repeat every
+plan, so starting a new plan silently overwrites the last one's record. The directory is
+gitignored, so nothing recovers it.
+
+**Before the first task of a new plan:** move everything except `progress.md` and `.gitignore`
+into `.superpowers/sdd/plan-<N>/`, then reset `progress.md` for the incoming plan. Plan 1's
+ledger was lost to exactly this before the convention existed.
+
 **Git discipline** (solo sprint — see the team contract in `docs/interview-and-prd.md` §4.3):
 - No direct commits to `main`. One branch and one PR per plan.
 - PR description names the FR(s) it implements.
