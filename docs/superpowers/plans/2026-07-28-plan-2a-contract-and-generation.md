@@ -14,11 +14,11 @@
 - **TypeScript:** `strict: true`. No `any`, no `@ts-ignore`, **no non-null assertions (`!`)** — the type-aware lint rules reject them.
 - **OpenAPI version is 3.1.0**, per [ADR-0006](../../adr/0006-openapi-3-1-over-3-0.md). Not 3.0, despite the challenge brief. 3.1 schemas are JSON Schema 2020-12, which is what lets Plan 2B feed them straight to a validator.
 - **Contract rules** (`CLAUDE.md`, NFR-7, NFR-8): every operation defines `200`, `400`, `401` and `500`. Every schema carries examples. Every parameter carries a description. Request bodies are `additionalProperties: false`. Errors use RFC 7807.
-- **`redocly lint` must pass with zero errors AND zero warnings.** A warning is a failure. Never silence a rule to pass — fix the document.
+- **`redocly lint` must pass with zero errors AND zero warnings.** A warning is a failure. Never silence a rule to pass — fix the document. **This is enforced by `extends: [recommended-strict]`, not by reading the console** — see Amendment 2. `redocly lint` exits 0 when warnings are present and has no `--fail-on-warnings` flag, so plain `recommended` leaves the bar unenforced.
 - **`packages/types` and `packages/client` are generated and never hand-edited.** If output is wrong, the spec is wrong.
 - **Strictness may be relaxed for generated code, but only in that package's own tsconfig — never in `tsconfig.base.json`.** Found during execution: `@hey-api/client-fetch`'s generated runtime assigns `undefined` to optional properties, which `exactOptionalPropertyTypes` forbids, and the base `lib` of `ES2023` leaves `Request`/`Response`/`Headers` undefined. `packages/client/tsconfig.json` therefore sets `lib: ["ES2023", "DOM"]` and `exactOptionalPropertyTypes: false`. Its `include` is `src/**/*`, every file of which is generated, so this touches zero hand-written code. **The line is: relax in a generated package's own config, never in the base.**
 
-  `@types/node` alone was tried first and got 64 errors down to 1 — it shims most Fetch globals but has no `BodyInit`, which is DOM-only. DOM is the correct lib here regardless: `@irp/client` is a fetch SDK that `apps/web` imports into a browser. A hand-written ambient `.d.ts` declaring `BodyInit` was rejected — it would shadow a real standard type and drift the moment the generator emits another DOM type. Adding DOM to `tsconfig.base.json` was also rejected, since that would leak browser globals into the Fastify API package. Note `lib` **replaces** the inherited value, so `ES2023` must be restated.
+  `@types/node` alone was tried first and got 64 errors down to 1 — it shims most Fetch globals but has no `BodyInit`, which is DOM-only. DOM is the correct lib here regardless: `@irp/client` is a fetch SDK that `apps/web` imports into a browser. A hand-written ambient `.d.ts` declaring `BodyInit` was rejected — it would shadow a real standard type and drift the moment the generator emits another DOM type. Adding DOM to `tsconfig.base.json` was also rejected, since that would leak browser globals into the Fastify API package. Note `lib` **replaces** the inherited value, so `ES2023` must be restated. This reasoning is recorded in a `"_comment"` key in `packages/client/tsconfig.json` itself (JSON has no comment syntax; `tsc` ignores unknown top-level keys), so it survives outside this plan.
 - **`@hey-api/openapi-ts` needs `-i ./spec/openapi.yaml`, with the `./` prefix.** Without it the CLI reads a two-segment path as a Hey API registry shorthand (`org/project`) and fails confusingly.
 - **Generated directories must be added to `eslint.config.mjs`'s global `ignores`.** Found during execution: `openapi-typescript` output tripped `@typescript-eslint/consistent-indexed-object-style`, and linting generated code is pointless since the fix would have to be made in the generator. The existing list already ignores `dist/`, `.next/` and `coverage/` for the same reason — add `packages/types/src/**` and `packages/client/src/**` alongside them. Keep the patterns package-specific; a broad `**/src/**` would silence real source.
 - **In OpenAPI 3.1 use `examples:` (an array), not `example:`.** `example` is 3.0 syntax and Redocly will flag it.
@@ -65,6 +65,62 @@ Effective task numbering:
 | 7 · CI lint and staleness gate | **5** |
 
 The task bodies below keep their original numbering for reference; execution follows the table.
+
+## Amendment 2 — whole-branch review fixes (2026-07-28)
+
+Applied after Task 7, before the branch merged. The task bodies above have been edited in
+place so the plan and the code agree; this section records what changed and why.
+
+**1 · The zero-warning bar was never wired to anything.** `redocly lint` **exits 0 when it
+reports warnings**, and there is no `--fail-on-warnings` flag. Under `extends: [recommended]`,
+`pnpm spec:lint` and the CI step running it therefore passed green *with warnings present* —
+verified: a spec carrying one `no-unused-components` warning exited **0**. The bar this plan
+invokes in four places held only because a human read the console.
+
+Fixed by `extends: [recommended-strict]`, the same rule set with warnings promoted to errors.
+The real spec still passes clean (exit 0); the same one-warning spec now exits **1**. This is
+the opposite of silencing a rule — nothing was disabled. It also raises
+`no-invalid-schema-examples` to error, closing a second hole: schema-level `examples:` arrays
+were unvalidated, so a value outside its own enum (`Role.examples: [Manager]`) linted green.
+
+**2 · The four-response rule was trusted, not enforced.** `operation-4xx-response` requires
+*at least one* 4xx, not a specific set — deleting `'401'` from `/api/v1/me` linted clean, while
+`redocly.yaml`'s own comment claimed the CLAUDE.md rules were "enforced rather than trusted".
+Fixed with a Redocly custom assertion on the `Responses` node requiring all four codes.
+Verified against `@redocly/cli` 2.40.0: with `'401'` removed the lint fails with
+`Error was generated by the rule/every-operation-defines-the-four-contract-responses rule`.
+
+**3 · The force-commit hole.** `git add -f packages/types/src/schema.ts` would have committed a
+hand-editable copy of the contract and no gate would have noticed — the staleness check
+compares checksums of files it regenerates itself, and `.gitignore` is not a gate. CI now
+asserts `git status --porcelain` is empty after regeneration. The redundant standalone
+`pnpm generate` step was removed; the staleness step already runs it twice.
+
+**4 · Redundant `security` on `/api/v1/me`,** restating the document-level default. Removed —
+it would have silently survived a change to that default, which is the failure mode the
+fail-closed default exists to prevent. Confirmed harmless: the generated SDK still emits the
+bearer security block for `getCurrentUser`. `/health`'s `security: []` stays; that opt-out is
+load-bearing.
+
+**5 · The servers comment contradicted the artifact.** `redocly.yaml` said servers are declared
+per environment at deploy time and not in the document — but the generator bakes
+`http://localhost:3001` into the SDK as its default `baseUrl`. Comment corrected: it is a
+local-development default that deployed consumers override.
+
+**6 · ADR-0006 named `ajv/dist/2020` but not `ajv-formats`.** The document uses
+`format: uri-reference`, `uuid` and `email`; ajv implements none natively and throws at
+schema-compile time in strict mode. Added to that ADR's negative consequences and to the
+follow-ups table so Plan 2B cannot miss it.
+
+**7 · A false comment in `eslint.config.mjs`,** claiming both generated packages "typecheck
+clean under the strict compiler settings". True of `@irp/types`, false of `@irp/client`, which
+needs `lib` and `exactOptionalPropertyTypes` relaxed. Comment amended to state the difference,
+and the relaxation's reasoning moved into a `"_comment"` key in
+`packages/client/tsconfig.json` — it previously lived only in a gitignored scratch file.
+
+**10 · Version mismatch.** `info.version` was `0.1.0` while every `package.json` is `0.0.0`,
+which would have given Plan 2B's `/health` handler two disagreeing sources. Set to `0.0.0`,
+along with the two `HealthStatus` examples that showed the same value.
 
 ## Prerequisites
 
@@ -175,9 +231,21 @@ excludes tests from the build via a separate tsconfig."
 
 - [ ] **Step 1: Create `redocly.yaml`**
 
+> **Superseded by Amendment 2.** The block below is what shipped after review. The
+> original used `extends: [recommended]`, carried no assertion, and described the
+> single server as a deploy-time placeholder — all three were wrong.
+
 ```yaml
+# `recommended-strict`, not `recommended`. `redocly lint` exits 0 when it
+# reports warnings — there is no `--fail-on-warnings` flag — so under
+# `recommended` the zero-warning bar CLAUDE.md sets was enforced only by a
+# human reading the console. `recommended-strict` is the same rule set with
+# every warning promoted to an error, which is what makes the exit code, and
+# therefore CI, actually reflect the bar. It also raises
+# `no-invalid-schema-examples` to error, so schema-level `examples:` arrays
+# are validated against their own schema rather than ignored.
 extends:
-  - recommended
+  - recommended-strict
 
 rules:
   # The contract rules from CLAUDE.md, enforced rather than trusted.
@@ -186,8 +254,30 @@ rules:
   operation-summary: error
   operation-description: error
   no-invalid-media-type-examples: error
-  # Servers are declared per environment at deploy time, not in the document.
+  # The single declared server is a local-development default. Deployed
+  # consumers override it — note the generated SDK bakes it in as its
+  # fallback `baseUrl`, so it is not a placeholder that can be dropped.
   no-server-example.com: off
+
+  # `operation-4xx-response` only requires *at least one* 4xx, so deleting
+  # '401' from an operation lints clean under it. CLAUDE.md requires the
+  # specific set 200 / 400 / 401 / 500 on every operation with no exceptions,
+  # so that exact set is asserted here. Without this the four-response rule is
+  # a convention, not a gate.
+  rule/every-operation-defines-the-four-contract-responses:
+    subject:
+      type: Responses
+    assertions:
+      required:
+        - '200'
+        - '400'
+        - '401'
+        - '500'
+    severity: error
+    message: >-
+      Every operation must define 200, 400, 401 and 500 responses (CLAUDE.md,
+      API contract rules). Document an unreachable status rather than omitting
+      it.
 ```
 
 - [ ] **Step 2: Create `spec/openapi.yaml`**
@@ -197,7 +287,10 @@ openapi: 3.1.0
 
 info:
   title: IRP Progress Management API
-  version: 0.1.0
+  # Amendment 2: 0.0.0, matching every workspace package.json. `/health`
+  # reports the running application version, so two disagreeing sources would
+  # put a visible contradiction in the artifact.
+  version: 0.0.0
   summary: Daily progress tracking and monthly evaluation for the Bistec Hearts Academy IRP.
   description: |
     Students submit a short text update on each working day. Mentors review those
@@ -347,7 +440,7 @@ components:
           type: string
           description: The running application version.
           examples:
-            - 0.1.0
+            - 0.0.0
 
   responses:
     BadRequest:
@@ -506,7 +599,7 @@ paths:
                   summary: A healthy service
                   value:
                     status: ok
-                    version: 0.1.0
+                    version: 0.0.0
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -555,8 +648,10 @@ Inside the existing `paths:` block, after `/health`:
         not an auto-created account — registration is an Admin action and there
         is no self-registration.
       tags: [Identity]
-      security:
-        - bearerAuth: []
+      # Amendment 2: no operation-level `security` here. The document-level
+      # default already supplies `- bearerAuth: []`; restating it would
+      # silently survive a change to that default. Only `/health`'s
+      # `security: []` opt-out is load-bearing.
       responses:
         '200':
           description: The authenticated user.
@@ -824,20 +919,36 @@ The generated directories are git-ignored, so `git diff` will not see them. The 
 
 In `.github/workflows/ci.yml`, insert these steps after `Install` and before `Typecheck`:
 
+> **Superseded by Amendment 2.** The standalone `Generate types and client` step was
+> redundant — the staleness step below already runs `pnpm generate` — and nothing
+> detected generated output that had been force-committed past `.gitignore`.
+
 ```yaml
       - name: Lint the OpenAPI document
         run: pnpm spec:lint
 
-      - name: Generate types and client
-        run: pnpm generate
-
       - name: Fail if regenerating changes anything
         run: |
+          pnpm generate
           find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-before.txt
           pnpm generate
           find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-after.txt
           if ! diff -u /tmp/gen-before.txt /tmp/gen-after.txt; then
             echo "::error::Generation is not deterministic — the same spec produced different output."
+            exit 1
+          fi
+
+      - name: Fail if generated output is tracked in git
+        run: |
+          # Generated packages are git-ignored, so a clean regeneration leaves
+          # the tree clean. `--porcelain` excludes ignored files, so this fires
+          # only if someone force-committed generated output
+          # (`git add -f packages/types/src/schema.ts`) or .gitignore regressed
+          # — either of which creates a second, hand-editable copy of the
+          # contract, exactly what the staleness gate above exists to prevent.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Regeneration dirtied the working tree — generated output is tracked, or .gitignore regressed."
+            git status --porcelain
             exit 1
           fi
 
@@ -915,6 +1026,6 @@ Watch the run. All three timezone legs must pass with the new steps. **Do not cl
 
 | # | Item | When |
 |---|---|---|
-| — | **Plan 2B: service and persistence.** Prisma, Fastify, the four plugins, routes, integration tests. Must use `ajv/dist/2020` — Fastify's default ajv is draft-07 and will silently misinterpret 3.1's JSON Schema 2020-12 | After 2A merges |
+| — | **Plan 2B: service and persistence.** Prisma, Fastify, the four plugins, routes, integration tests. Must use `ajv/dist/2020` — Fastify's default ajv is draft-07 and will silently misinterpret 3.1's JSON Schema 2020-12 — **and must register `ajv-formats`**, because the document uses `format: uri-reference`, `uuid` and `email`, none of which ajv implements natively, and an unknown format in strict mode throws at schema-compile time (boot), not at request time. See [ADR-0006](../../adr/0006-openapi-3-1-over-3-0.md) negative consequences | After 2A merges |
 | O-13 | OpenAPI 3.1 instead of the brief's 3.0 ([ADR-0006](../../adr/0006-openapi-3-1-over-3-0.md)). Grading risk accepted by the Impl Lead; mentor notification optional | Next Teams batch |
 | — | `packages/types` and `packages/client` point at TypeScript source, which is fine for compile-time consumers. If `apps/api` ever needs `@irp/client` at runtime, it needs the same `dist` treatment `@irp/core` got in Task 1 | Plan 3 |

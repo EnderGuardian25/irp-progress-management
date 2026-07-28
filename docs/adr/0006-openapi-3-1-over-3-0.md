@@ -53,6 +53,15 @@ Author `spec/openapi.yaml` as **OpenAPI 3.1.0**.
   requirement, not a footnote: leaving it on the default silently changes how keywords such as
   `prefixItems` and `$dynamicRef` behave, and would undermine the whole point of deriving
   validation from the spec. Recorded in Plan 2's spec so the implementation cannot miss it.
+- **`ajv/dist/2020` alone is not enough — `ajv-formats` must be registered too.** The document
+  uses `format: uri-reference` (throughout `Problem`), `format: uuid` (`User.id`) and
+  `format: email` (`User.email`). Ajv implements no formats out of the box, and in strict mode
+  an unknown format is a *schema-compile-time throw*, not a silently ignored keyword — so the
+  API fails at boot, not at the first bad request. Installing `ajv-formats` and calling
+  `addFormats(ajv)` is therefore a hard prerequisite for Plan 2B, and the alternative
+  (`strict: false`, or `strictSchema: "log"`) is not acceptable here: it would turn every
+  `format` in the contract into decoration, which is the drift this whole approach exists to
+  prevent.
 - Tooling support is good but marginally younger. `@redocly/cli`, `openapi-typescript` and
   `@hey-api/openapi-ts` all support 3.1; if any proves unreliable, the fallback is 3.0.3.
 
