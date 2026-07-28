@@ -14,8 +14,24 @@ jobs:
         # The deploy region is not Sri Lanka. Running under hostile zones
         # catches any reliance on server local time (NFR-12).
         timezone: ["UTC", "America/New_York", "Pacific/Kiritimati"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: irp
+          POSTGRES_PASSWORD: irp
+          POSTGRES_DB: irp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U irp -d irp"
+          --health-interval 2s --health-timeout 5s --health-retries 15
     env:
       TZ: ${{ matrix.timezone }}
+      DATABASE_URL: postgresql://irp:irp@localhost:5432/irp?schema=public
+      JWKS_URI: https://login.microsoftonline.com/common/discovery/v2.0/keys
+      JWT_ISSUER: https://issuer.test/v2.0
+      JWT_AUDIENCE: api://irp-test
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +75,9 @@ jobs:
             exit 1
           fi
 
+      - name: Generate the Prisma client
+        run: pnpm --filter @irp/api exec prisma generate
+
       - name: Build @irp/core
         run: pnpm --filter @irp/core build
 
@@ -67,6 +86,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Apply database migrations
+        run: pnpm --filter @irp/api exec prisma migrate deploy
 
       - name: Test
         run: pnpm -r test

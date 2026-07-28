@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { createPrismaClient } from "../src/db/client.js";
 import { createUserRepo } from "../src/db/user-repo.js";
 import { resetDb } from "./helpers/db.js";
-
-const dbUrl = process.env.DATABASE_URL;
+import { dbUrl } from "./helpers/require-db.js";
 
 describe.skipIf(!dbUrl)("createUserRepo", () => {
   const prisma = createPrismaClient(dbUrl!);

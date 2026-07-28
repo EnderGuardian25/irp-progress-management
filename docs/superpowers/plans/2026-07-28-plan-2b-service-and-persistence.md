@@ -1941,11 +1941,25 @@ pnpm --filter @irp/api test user-repo; "exit=$LASTEXITCODE"    # expect NON-ZERO
 pnpm --filter @irp/api test integration; "exit=$LASTEXITCODE"  # expect NON-ZERO
 Remove-Item Env:\CI
 
-# (b) the migrate step must go red against a database that does not exist
-$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/nonexistent?schema=public"
+# (b) the migrate step must go red when the database is unreachable
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5599/irp?schema=public"
 pnpm --filter @irp/api exec prisma migrate deploy; "exit=$LASTEXITCODE"   # expect NON-ZERO
 $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
 ```
+
+> **Corrected during Task 9 execution:** the original (b) pointed `DATABASE_URL` at
+> `.../nonexistent` on the *same, reachable* host. That does not prove the gate red — the
+> `POSTGRES_USER` created by the official `postgres:16` image is a superuser with `CREATEDB`,
+> a fact reproduced locally (`SELECT rolname, rolcreatedb, rolsuper FROM pg_roles WHERE
+> rolname='irp'` → `t | t`). `prisma migrate deploy` silently auto-creates a missing database
+> under those privileges and applies migrations to it — exit **0**, database `nonexistent`
+> left behind in the container. Since GitHub's `services:` block configures the same image the
+> same way, CI's `irp` role would have identical privileges, so this test would pass locally
+> and on the runner without ever proving the gate can fail. Pointing at an unreachable
+> host:port instead (simulating the real failure this gate protects against — a Postgres
+> service that never came up, or a `DATABASE_URL` that is simply wrong) reproduces Prisma's
+> `P1001` and a genuine non-zero exit. The accidentally-created `nonexistent` database was
+> dropped after discovery.
 
 Both must exit non-zero. If (a) exits 0 the guard is not wired up and the hole is still open —
 do not proceed on the assumption that it is closed.

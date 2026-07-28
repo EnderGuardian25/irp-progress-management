@@ -6,8 +6,8 @@ import { resetDb } from "./helpers/db.js";
 import { buildAjv } from "../src/validation.js";
 import { problemSchema } from "./helpers/problem-schema.js";
 import { signToken, signExpiredToken } from "./helpers/keys.js";
+import { dbUrl } from "./helpers/require-db.js";
 
-const dbUrl = process.env.DATABASE_URL;
 const validateProblem = buildAjv().compile(problemSchema);
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 
