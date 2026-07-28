@@ -1,0 +1,313 @@
+openapi: 3.1.0
+
+info:
+  title: IRP Progress Management API
+  # Kept in step with the workspace `package.json` files, all of which are
+  # 0.0.0. `/health` reports the running application version, so two sources
+  # that disagree would put a visible contradiction in the artifact.
+  version: 0.0.0
+  summary: Daily progress tracking and monthly evaluation for the Bistec Hearts Academy IRP.
+  description: |
+    Students submit a short text update on each working day. Mentors review those
+    submissions, record attendance, and evaluate monthly against a fixed rubric.
+
+    Weekdays are required submission days. Weekends are optional and may hold
+    Extra work; a weekend is never counted as missed and never enters a
+    compliance denominator.
+
+    All timestamps are UTC. All deadlines and evaluation-cycle boundaries are
+    evaluated in Asia/Colombo.
+  contact:
+    name: Damian De Cruz
+    email: johann@bistecglobal.com
+  license:
+    name: UNLICENSED
+    url: https://bistecglobal.com
+
+servers:
+  - url: http://localhost:3001
+    description: Local development.
+
+tags:
+  - name: System
+    description: Liveness and diagnostics. Unauthenticated.
+  - name: Identity
+    description: The authenticated caller.
+
+# Fail closed: every operation requires a bearer token unless it explicitly
+# opts out with `security: []`. Without this, an operation that simply omits
+# the key would inherit "no auth required" — the wrong default for a system
+# where only health checks are public.
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe
+      description: |
+        Reports that the service is running. Touches no database and requires
+        no token, so it is safe to use as a container liveness probe.
+
+        The 400 and 401 responses are unreachable on this operation — it accepts
+        no input and requires no credentials — but are documented because the
+        contract defines all four for every operation without exception.
+      tags: [System]
+      security: []
+      responses:
+        '200':
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              examples:
+                running:
+                  summary: A healthy service
+                  value:
+                    status: ok
+                    version: 0.0.0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/me:
+    get:
+      operationId: getCurrentUser
+      summary: The authenticated caller
+      description: |
+        Returns the registered user matching the bearer token's `oid` claim.
+
+        Authentication is not authorisation. A structurally valid, correctly
+        signed, unexpired token whose subject has no user record receives 403,
+        not an auto-created account — registration is an Admin action and there
+        is no self-registration.
+      tags: [Identity]
+      responses:
+        '200':
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                student:
+                  summary: A student
+                  value:
+                    id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    email: a.perera@bistecglobal.com
+                    displayName: Amaya Perera
+                    role: Student
+                mentor:
+                  summary: A mentor
+                  value:
+                    id: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+                    email: d.decruz@bistecglobal.com
+                    displayName: Damian De Cruz
+                    role: Admin
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A JWT issued by Microsoft Entra ID. The token's `oid` claim is matched
+        against a registered user. Authentication is not authorisation: a valid
+        token whose subject has no user record is rejected with 403, because
+        registration is an Admin action.
+
+  schemas:
+    Problem:
+      type: object
+      title: Problem
+      description: |
+        An error, as RFC 7807 Problem Details, extended with the OpenTelemetry
+        trace id of the request that failed.
+
+        `additionalProperties` is deliberately permitted here: RFC 7807 defines
+        extension members, and `traceId` is one. The repository rule requiring
+        `additionalProperties: false` applies to request bodies, not to this
+        response shape.
+      required: [type, title, status, traceId]
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: A URI reference identifying the problem type.
+          default: about:blank
+          examples:
+            - https://irp.bistec.example/problems/validation-failed
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type. Stable across occurrences.
+          examples:
+            - Request validation failed
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: The HTTP status code, repeated here for convenience.
+          examples:
+            - 400
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence.
+          examples:
+            - body must NOT have additional properties
+        instance:
+          type: string
+          format: uri-reference
+          description: A URI reference identifying this specific occurrence.
+          examples:
+            - /api/v1/me
+        traceId:
+          type: string
+          description: |
+            The OpenTelemetry trace id of the failing request. Quote this when
+            reporting a problem; it maps directly to the trace in Application Insights.
+          examples:
+            - 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Role:
+      type: string
+      title: Role
+      enum: [Admin, Student]
+      description: |
+        Admin is a mentor. Every mentor holds an Admin account and there is no
+        super-admin tier above it. Admins share access across all batches in v1.
+      examples:
+        - Student
+
+    User:
+      type: object
+      title: User
+      description: A registered participant in the programme.
+      required: [id, email, displayName, role]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable internal identifier. Not the Entra object id.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        email:
+          type: string
+          format: email
+          description: Bistec account email address. Unique across users.
+          examples:
+            - a.perera@bistecglobal.com
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Name as shown in the interface.
+          examples:
+            - Amaya Perera
+        role:
+          $ref: '#/components/schemas/Role'
+
+    HealthStatus:
+      type: object
+      title: HealthStatus
+      description: Liveness report.
+      required: [status, version]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          description: Always `ok`. A service that cannot report `ok` does not respond at all.
+          examples:
+            - ok
+        version:
+          type: string
+          description: The running application version.
+          examples:
+            - 0.0.0
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed schema validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            additionalProperty:
+              summary: A request body carried an unexpected property
+              value:
+                type: https://irp.bistec.example/problems/validation-failed
+                title: Request validation failed
+                status: 400
+                detail: body must NOT have additional properties
+                instance: /api/v1/example
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Unauthorized:
+      description: No bearer token was supplied, or the token was malformed or expired.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            expiredToken:
+              summary: The bearer token had expired
+              value:
+                type: https://irp.bistec.example/problems/unauthorized
+                title: Authentication required
+                status: 401
+                detail: The bearer token has expired.
+                instance: /api/v1/example
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Forbidden:
+      description: |
+        The token was valid, but its subject is not a registered user.
+        Registration is an Admin action; there is no self-registration.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unregistered:
+              summary: Authenticated, but no user record exists
+              value:
+                type: https://irp.bistec.example/problems/not-registered
+                title: Not a registered user
+                status: 403
+                detail: This account has not been registered by an Admin.
+                instance: /api/v1/me
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    InternalServerError:
+      description: An unexpected error. The trace id identifies the failing request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unhandled:
+              summary: An unhandled error
+              value:
+                type: about:blank
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred.
+                instance: /api/v1/example
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736

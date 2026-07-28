@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "JSON has no comment syntax, so the rationale lives in this key. tsc ignores unknown top-level keys.",
+    "Every file under src/ is @hey-api/openapi-ts output: generated, git-ignored, rebuilt in CI, never hand-edited. Two of tsconfig.base.json's strict settings are relaxed here, and ONLY here — tsconfig.base.json stays strict so hand-written code keeps the full settings.",
+    "lib: ['ES2023', 'DOM'] — the generated fetch runtime uses Request, Response, Headers, FormData and BodyInit. The base lib of ES2023 leaves all of them undefined. @types/node alone was tried first and took 64 errors down to 1: it shims most Fetch globals but has no BodyInit, which is DOM-only. DOM is correct here regardless, since @irp/client is a fetch SDK that apps/web imports into a browser. Adding DOM to tsconfig.base.json was rejected — it would leak browser globals into the Fastify API package. A hand-written ambient .d.ts declaring BodyInit was rejected too — it would shadow a real standard type and drift the moment the generator emits another DOM type. Note `lib` REPLACES the inherited value, so ES2023 must be restated.",
+    "exactOptionalPropertyTypes: false — @hey-api/client-fetch's generated runtime assigns `undefined` to optional properties explicitly, which that option forbids. The offending code is generated, so it cannot be fixed in place; the alternative is patching generator output, which the never-hand-edit rule prohibits."
+  ],
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "noEmit": true,
+    "lib": ["ES2023", "DOM"],
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["src/**/*"]
+}

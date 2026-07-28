@@ -31,6 +31,37 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Lint the OpenAPI document
+        run: pnpm spec:lint
+
+      - name: Fail if regenerating changes anything
+        run: |
+          pnpm generate
+          find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-before.txt
+          pnpm generate
+          find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-after.txt
+          if ! diff -u /tmp/gen-before.txt /tmp/gen-after.txt; then
+            echo "::error::Generation is not deterministic — the same spec produced different output."
+            exit 1
+          fi
+
+      - name: Fail if generated output is tracked in git
+        run: |
+          # Generated packages are git-ignored, so a clean regeneration leaves
+          # the tree clean. `--porcelain` excludes ignored files, so this fires
+          # only if someone force-committed generated output
+          # (`git add -f packages/types/src/schema.ts`) or .gitignore regressed
+          # — either of which creates a second, hand-editable copy of the
+          # contract, exactly what the staleness gate above exists to prevent.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Regeneration dirtied the working tree — generated output is tracked, or .gitignore regressed."
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Build @irp/core
+        run: pnpm --filter @irp/core build
+
       - name: Typecheck
         run: pnpm -r typecheck
 

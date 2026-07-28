@@ -1,0 +1,42 @@
+# `recommended-strict`, not `recommended`. `redocly lint` exits 0 when it
+# reports warnings — there is no `--fail-on-warnings` flag — so under
+# `recommended` the zero-warning bar CLAUDE.md sets was enforced only by a
+# human reading the console. `recommended-strict` is the same rule set with
+# every warning promoted to an error, which is what makes the exit code, and
+# therefore CI, actually reflect the bar. It also raises
+# `no-invalid-schema-examples` to error, so schema-level `examples:` arrays
+# are validated against their own schema rather than ignored.
+extends:
+  - recommended-strict
+
+rules:
+  # The contract rules from CLAUDE.md, enforced rather than trusted.
+  operation-4xx-response: error
+  operation-operationId: error
+  operation-summary: error
+  operation-description: error
+  no-invalid-media-type-examples: error
+  # The single declared server is a local-development default. Deployed
+  # consumers override it — note the generated SDK bakes it in as its
+  # fallback `baseUrl`, so it is not a placeholder that can be dropped.
+  no-server-example.com: off
+
+  # `operation-4xx-response` only requires *at least one* 4xx, so deleting
+  # '401' from an operation lints clean under it. CLAUDE.md requires the
+  # specific set 200 / 400 / 401 / 500 on every operation with no exceptions,
+  # so that exact set is asserted here. Without this the four-response rule is
+  # a convention, not a gate.
+  rule/every-operation-defines-the-four-contract-responses:
+    subject:
+      type: Responses
+    assertions:
+      required:
+        - '200'
+        - '400'
+        - '401'
+        - '500'
+    severity: error
+    message: >-
+      Every operation must define 200, 400, 401 and 500 responses (CLAUDE.md,
+      API contract rules). Document an unreachable status rather than omitting
+      it.
