@@ -218,9 +218,15 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 > — so plans no longer overwrite each other's records and the old manual archiving step is
 > obsolete. The flat `.superpowers/sdd/progress.md` path referenced by older notes is dead.
 
-**Plan 2B status: 9 of 10 tasks complete.** Tasks 1–8 merged clean on the branch. Task 9 (CI) is
-implemented with one review finding in a fix round — **read the ledger's Task 9 lines and
-`git log` for its final state rather than trusting this paragraph.** Task 10 has not started.
+**Plan 2B status: 9 of 10 tasks complete, all reviewed clean.** Tasks 1–9 are done on the branch;
+Task 9 took one fix round (the CI step-ordering finding) and its re-review confirmed every finding
+addressed with no new breakage. **Task 10 has not started.**
+
+Remaining before the PR: **Task 10**, then the whole-branch review (on the most capable model, per
+the skill's Model Selection), then `finishing-a-development-branch`. The ledger's closing block
+lists exactly what Task 10 and the PR must carry — including that the PR cites **FR-5 as
+implemented and FR-3 only as groundwork**, and records that both CI gate directions were
+demonstrated red.
 
 ### Starting a fresh session
 
