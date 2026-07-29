@@ -56,6 +56,16 @@ jobs:
 
       - name: Fail if regenerating changes anything
         run: |
+          # Scoped to the CODE GENERATORS' output on purpose. packages/*/dist is
+          # generated too but is deliberately NOT checksummed here: this gate
+          # exists for the risk that @hey-api/openapi-ts emits different output
+          # from the same spec (iteration-order-dependent templating). tsc
+          # compiling already-checksummed src into .d.ts is a categorically more
+          # reliable transform — no timestamps, no environment-dependent codegen,
+          # compiler pinned by the lockfile — and covering it would mean running
+          # both package builds twice, against the under-8-minute deploy target.
+          # ADD packages/client/dist HERE IF tsconfig.build.json ever gains
+          # declarationMap or anything else that can embed machine-specific paths.
           pnpm generate
           find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-before.txt
           pnpm generate
