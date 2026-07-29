@@ -46,12 +46,11 @@ describe("assertBypassNotInProduction", () => {
     ).toThrow(/AUTH_DEV_BYPASS/);
   });
 
-  // middleware.ts imports auth.config.ts directly, never through auth.ts
-  // (auth.ts is not edge-safe). The guard must therefore also run as a
-  // module-scope side effect of importing auth.config.ts itself, not only
-  // when a caller explicitly invokes the exported function — otherwise an
-  // edge-only import path (e.g. a health check that only loads
-  // middleware.ts) would boot clean with a live bypass in production.
+  // proxy.ts imports auth.config.ts directly, never through auth.ts. The
+  // guard must therefore also run as a module-scope side effect of importing
+  // auth.config.ts itself, not only when a caller explicitly invokes the
+  // exported function — otherwise a request path that only loads proxy.ts
+  // (e.g. a health check) would boot clean with a live bypass in production.
   it("throws merely by importing auth.config.ts when the bypass is set in production", async () => {
     vi.resetModules();
     vi.stubEnv("NODE_ENV", "production");

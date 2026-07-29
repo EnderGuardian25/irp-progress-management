@@ -6,7 +6,7 @@ import { authConfig } from "./auth.config";
 // scope, not here. This module already imports auth.config.ts below, so
 // that call has already executed by the time this line is reached — calling
 // it again here would be redundant, not additional coverage. auth.config.ts
-// is the one that must self-invoke, because middleware.ts imports it
+// is the one that must self-invoke, because proxy.ts imports it
 // directly without going through this file.
 const bypassEnabled = process.env.AUTH_DEV_BYPASS === "true";
 

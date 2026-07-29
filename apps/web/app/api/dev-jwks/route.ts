@@ -9,9 +9,9 @@ import { assertBypassNotInProduction } from "@/auth.config";
  * normal build.
  *
  * This is a THIRD entry point into the bypass, alongside auth.ts and
- * middleware.ts (via auth.config.ts) — and it does not go through either of
+ * proxy.ts (via auth.config.ts) — and it does not go through either of
  * those. auth.config.ts's own module-scope call guards auth.ts and
- * middleware.ts, but this route imports lib/dev-identity directly and never
+ * proxy.ts, but this route imports lib/dev-identity directly and never
  * pulls auth.config.ts in any other way, so nothing there was covering it.
  * A whole-branch review proved that gap: with the bypass flag off, a
  * production `next start` correctly 500s on `/` and `/api/auth/session`

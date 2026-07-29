@@ -40,15 +40,12 @@ export function assertBypassNotInProduction(env: BypassGuardEnv): void {
   }
 }
 
-// Invoked here at module scope — not only from auth.ts — because
-// middleware.ts imports auth.config.ts directly (auth.ts is not edge-safe,
-// so middleware cannot go through it). Without this call living here, an
-// Edge health check that only loads middleware.ts would boot clean with
-// AUTH_DEV_BYPASS=true in production; only a page or route that also pulls
-// in @/auth would trip the guard. process.env reads are Edge-runtime-safe in
-// Next 16 — the Edge sandbox mirrors the real process.env, it does not
-// restrict reads to NEXT_PUBLIC_*-prefixed or statically inlined names — so
-// this call is safe on both the edge and the Node import path.
+// proxy.ts imports auth.config.ts directly. Without this call living here, a
+// request that only loads proxy.ts would boot clean with AUTH_DEV_BYPASS=true
+// in production; only a page or route that also pulls in @/auth would trip the
+// guard. Since Plan 4A (ADR-0013) proxy.ts runs on Node rather than the Edge,
+// so process.env is plainly available — but this call must stay regardless:
+// its purpose is per-entry-point coverage, not runtime compatibility.
 assertBypassNotInProduction(process.env);
 
 /**
