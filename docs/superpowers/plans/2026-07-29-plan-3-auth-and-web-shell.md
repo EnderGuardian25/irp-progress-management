@@ -1843,6 +1843,7 @@ private key cannot be exported at all."
 - Consumes: `@irp/client/client` (Task 1), `auth.ts` (Task 5).
 - Produces:
   ```ts
+  export function deriveSessionCookieName(authUrl: string | undefined): string;
   export const SESSION_COOKIE_NAME: string;
   export async function readAccessToken(cookieValue: string | undefined): Promise<string>;
   export async function apiClient(): Promise<Client>;
@@ -1855,6 +1856,8 @@ First, **the token is read from the encrypted cookie, never from the session.** 
 
 > **Why `decode` and not `getToken`:** `getToken` needs a request-like object whose shape is coupled to Auth.js internals and has churned across betas. `decode` takes `{ token, secret, salt }` — three values we control. The cookie name **is** the salt in Auth.js v5.
 
+> **Correction, post-implementation review:** the first draft of this task derived the `__Secure-` prefix from `NODE_ENV === "production"`. That is the wrong signal — Auth.js derives it from the URL **protocol** (`@auth/core/lib/init.js`: `defaultCookies(config.useSecureCookies ?? url.protocol === "https:")`), never from `NODE_ENV`. The two diverge concretely for a production build served over plain http, e.g. `next start` with `AUTH_URL=http://localhost:3000` (the value in `.env.example`): Auth.js writes the bare cookie name while a `NODE_ENV` check reads the prefixed one, so `readAccessToken` throws "No session cookie" for a correctly signed-in user and every `(app)` page 500s. Step 4 below derives the name from `AUTH_URL`'s protocol via a standalone, directly-testable `deriveSessionCookieName` function instead.
+
 Second, **a fresh client per request.** `packages/client/src/client.gen.ts` creates a module-level singleton at import time; attaching a per-user token to it would leak tokens across concurrent requests in a Next.js server process.
 
 - [ ] **Step 1: Write the failing test**
@@ -1864,7 +1867,7 @@ Create `apps/web/test/api-client.test.ts`:
 ```ts
 import { describe, expect, it } from "vitest";
 import { encode } from "next-auth/jwt";
-import { SESSION_COOKIE_NAME, readAccessToken } from "@/lib/api-client";
+import { SESSION_COOKIE_NAME, deriveSessionCookieName, readAccessToken } from "@/lib/api-client";
 
 const SECRET = "test-secret-at-least-32-bytes-long-xx";
 
@@ -1893,6 +1896,37 @@ describe("readAccessToken", () => {
   it("throws rather than proceeding unauthenticated when the cookie is corrupt", async () => {
     process.env.AUTH_SECRET = SECRET;
     await expect(readAccessToken("not-a-jwe")).rejects.toThrow();
+  });
+});
+
+describe("deriveSessionCookieName", () => {
+  // Vitest runs with NODE_ENV=test, so the readAccessToken tests above only
+  // ever exercise the bare-name branch. These pin the prefix derivation
+  // directly against the URL protocol, independent of NODE_ENV.
+
+  it("uses the __Secure- prefix for an https AUTH_URL", () => {
+    expect(deriveSessionCookieName("https://irp.example.com")).toBe(
+      "__Secure-authjs.session-token",
+    );
+  });
+
+  it("uses the bare name for an http AUTH_URL", () => {
+    expect(deriveSessionCookieName("http://localhost:3000")).toBe("authjs.session-token");
+  });
+
+  it("fails safe to the bare name when AUTH_URL is unset", () => {
+    expect(deriveSessionCookieName(undefined)).toBe("authjs.session-token");
+  });
+
+  // A naive `startsWith("https")` without the colon would wrongly treat
+  // "httpsomething://" as secure. These prove the check is on the `https:`
+  // scheme, not a loose prefix match.
+  it("does not treat a bare 'https' string as secure", () => {
+    expect(deriveSessionCookieName("https")).toBe("authjs.session-token");
+  });
+
+  it("does not treat a non-https protocol that merely starts with 'https' as secure", () => {
+    expect(deriveSessionCookieName("httpsomething://x")).toBe("authjs.session-token");
   });
 });
 ```
@@ -2007,13 +2041,26 @@ import { createClient, createConfig, type Client } from "@irp/client/client";
 import { getCurrentUser } from "@irp/client";
 
 /**
- * In Auth.js v5 the session cookie's name IS the encryption salt.
- * The __Secure- prefix applies when cookies are marked secure, i.e. production.
+ * Auth.js derives the __Secure- prefix from the URL PROTOCOL, never from
+ * NODE_ENV — see @auth/core/lib/init.js:
+ *   defaultCookies(config.useSecureCookies ?? url.protocol === "https:")
+ *
+ * Matching on NODE_ENV diverges from that. A production build served over
+ * http — a local `next start` with AUTH_URL=http://localhost:3000, the value
+ * in .env.example — has Auth.js write the bare name while a NODE_ENV check
+ * reads the prefixed one, so every authenticated request 500s with
+ * "No session cookie" for a correctly signed-in user.
  */
-export const SESSION_COOKIE_NAME =
-  process.env.NODE_ENV === "production"
+export function deriveSessionCookieName(authUrl: string | undefined): string {
+  return authUrl?.startsWith("https:") === true
     ? "__Secure-authjs.session-token"
     : "authjs.session-token";
+}
+
+/**
+ * In Auth.js v5 the session cookie's name IS the encryption salt.
+ */
+export const SESSION_COOKIE_NAME = deriveSessionCookieName(process.env.AUTH_URL);
 
 /**
  * Reads the access token out of the ENCRYPTED, HTTP-ONLY session cookie.

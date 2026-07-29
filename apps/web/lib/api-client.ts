@@ -7,13 +7,26 @@ import { createClient, createConfig, type Client } from "@irp/client/client";
 import { getCurrentUser } from "@irp/client";
 
 /**
- * In Auth.js v5 the session cookie's name IS the encryption salt.
- * The __Secure- prefix applies when cookies are marked secure, i.e. production.
+ * Auth.js derives the __Secure- prefix from the URL PROTOCOL, never from
+ * NODE_ENV — see @auth/core/lib/init.js:
+ *   defaultCookies(config.useSecureCookies ?? url.protocol === "https:")
+ *
+ * Matching on NODE_ENV diverges from that. A production build served over
+ * http — a local `next start` with AUTH_URL=http://localhost:3000, the value
+ * in .env.example — has Auth.js write the bare name while a NODE_ENV check
+ * reads the prefixed one, so every authenticated request 500s with
+ * "No session cookie" for a correctly signed-in user.
  */
-export const SESSION_COOKIE_NAME =
-  process.env.NODE_ENV === "production"
+export function deriveSessionCookieName(authUrl: string | undefined): string {
+  return authUrl?.startsWith("https:") === true
     ? "__Secure-authjs.session-token"
     : "authjs.session-token";
+}
+
+/**
+ * In Auth.js v5 the session cookie's name IS the encryption salt.
+ */
+export const SESSION_COOKIE_NAME = deriveSessionCookieName(process.env.AUTH_URL);
 
 /**
  * Reads the access token out of the ENCRYPTED, HTTP-ONLY session cookie.
