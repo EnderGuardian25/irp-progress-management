@@ -8,9 +8,10 @@ describe("PageShell", () => {
     expect(screen.getByText("hello")).toBeInTheDocument();
   });
 
-  it("applies the font custom properties to the shell", () => {
+  it("enforces the desktop-only minimum width from NFR-13", () => {
     const { container } = render(<PageShell><span /></PageShell>);
     const shell = container.firstElementChild;
+    expect(shell?.className).toContain("min-w-[1280px]");
     expect(shell?.className).toContain("min-h-dvh");
   });
 });

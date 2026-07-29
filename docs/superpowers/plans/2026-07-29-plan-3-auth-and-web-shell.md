@@ -419,18 +419,23 @@ export default {
 }
 
 /* docs/design-system.md §3.3. Light is the default (ADR-0002); dark is
-   supported, never the default. */
+   supported, never the default. §3.3's canvas is deliberately chroma-0
+   near-black (#121212 is R=G=B=18) — surfaces lift toward indigo, the
+   canvas does not. */
+/* NOTE: the dark neutrals below were wrong in the original version of this
+   plan (invented, not verified). They are corrected here to match
+   docs/design-system.md §3.3. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14161c;
-    --surface: #1b1e26;
-    --surface-sunk: #171a21;
-    --line: #2b2f3a;
-    --line-strong: #737887;
-    --ink: #e9ebf1;
-    --ink-muted: #a2a7b4;
-    --primary: #93a4ff;
-    --primary-weak: #232840;
+    --bg: #121212;
+    --surface: #1c1e23;
+    --surface-sunk: #16171b;
+    --line: #313339;
+    --line-strong: #656974;
+    --ink: #f2f3f6;
+    --ink-muted: #a7aab4;
+    --primary: #8a9ff0;
+    --primary-weak: #262c45;
 
     --st-ok: #65c98c;
     --st-late: #eeac53;
