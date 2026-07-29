@@ -1,4 +1,10 @@
-export type DayMark = "ok" | "partial" | "late" | "absent" | "missed" | "future" | "today";
+/**
+ * The VISUAL mark for one required day. Deliberately distinct from
+ * @irp/core's domain-level DayStatus union — this is presentation, that is
+ * domain truth, and Plan 6 owns deciding how the two relate. Do not import
+ * one where the other is meant.
+ */
+export type DayMark = "ok" | "partial" | "late" | "absent" | "missed" | "future";
 
 export interface RibbonDay {
   /** ISO date, YYYY-MM-DD. A required day (weekday) only. */
@@ -6,6 +12,12 @@ export interface RibbonDay {
   mark: DayMark;
   /** 0..1, used only when mark === "partial". */
   fill?: number;
+  /**
+   * Decoration, ORTHOGONAL to mark. Today has a real status like any other day
+   * — it may be unsubmitted, partial, or late — so the ring is drawn OVER
+   * whatever mark applies rather than replacing it.
+   */
+  isToday?: boolean;
 }
 
 export interface RibbonProps {
@@ -19,28 +31,29 @@ export interface RibbonProps {
 
 // docs/design-system.md §3.2 / §7: full (ok) · partial (proportional fill,
 // same colour family as ok) · ochre notch (late) · slate (absent) ·
-// red (missed) · ringed (today, drawn in the ok colour with a primary ring).
-// "future" is excluded here and rendered as an outline instead — §7 "outline
-// (not yet reached)".
+// red (missed). "future" is excluded here and rendered as an outline instead
+// — §7 "outline (not yet reached)". Today is not a mark of its own — it is a
+// ring (isToday) drawn OVER whichever of these colours the day's real status
+// produces, so an unsubmitted today still shows as unsubmitted.
 const MARK_COLOR: Record<Exclude<DayMark, "future">, string> = {
   ok: "var(--st-ok)",
   partial: "var(--st-ok)",
   late: "var(--st-late)",
   absent: "var(--st-absent)",
   missed: "var(--st-missed)",
-  today: "var(--st-ok)",
 };
 
 function DaySlot({ day }: { day: RibbonDay }) {
   const heightPct = day.mark === "partial" ? Math.round((day.fill ?? 0) * 100) : 100;
   const background = day.mark === "future" ? "transparent" : MARK_COLOR[day.mark];
+  const label = day.isToday === true ? `${day.date}: ${day.mark}, today` : `${day.date}: ${day.mark}`;
 
   return (
     <li
-      aria-label={`${day.date}: ${day.mark}`}
+      aria-label={label}
       className="relative flex h-11 w-2 items-end"
       style={
-        day.mark === "today"
+        day.isToday === true
           ? { outline: "1.5px solid var(--primary)", outlineOffset: "1px", borderRadius: "2px" }
           : undefined
       }
@@ -117,7 +130,7 @@ export function CycleRibbon({ days, extraAfter = [], label, caption }: RibbonPro
 
       {/* Extra days never enter a compliance denominator (FR-12). */}
       <span data-testid="required-day-count" className="sr-only">
-        {days.length}
+        {days.length} required days in this cycle
       </span>
 
       {caption !== undefined && (

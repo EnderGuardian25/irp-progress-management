@@ -8,7 +8,7 @@ const days: RibbonDay[] = [
   { date: "2026-07-14", mark: "absent" },
   { date: "2026-07-15", mark: "missed" },
   { date: "2026-07-16", mark: "partial", fill: 0.6 },
-  { date: "2026-07-17", mark: "today" },
+  { date: "2026-07-17", mark: "ok", isToday: true },
   { date: "2026-07-20", mark: "future" },
 ];
 
@@ -21,8 +21,21 @@ describe("CycleRibbon", () => {
   it("labels every day with its mark for assistive tech", () => {
     render(<CycleRibbon days={days} />);
     for (const d of days) {
-      expect(screen.getByLabelText(`${d.date}: ${d.mark}`)).toBeInTheDocument();
+      const expected =
+        d.isToday === true ? `${d.date}: ${d.mark}, today` : `${d.date}: ${d.mark}`;
+      expect(screen.getByLabelText(expected)).toBeInTheDocument();
     }
+  });
+
+  it("draws the today ring over the day's real status instead of forcing ok", () => {
+    // The bug this guards: `today` used to be a mark of its own, hardcoded to
+    // 100% height and the ok colour, so an unsubmitted today rendered as a
+    // solid full green bar. isToday must decorate whatever mark applies.
+    render(<CycleRibbon days={[{ date: "2026-07-17", mark: "missed", isToday: true }]} />);
+    const item = screen.getByLabelText("2026-07-17: missed, today");
+    const bar = item.firstElementChild;
+    expect(bar).toHaveStyle({ background: "var(--st-missed)", height: "100%" });
+    expect(item).toHaveStyle({ outline: "1.5px solid var(--primary)" });
   });
 
   it("renders no weekend slot when nobody worked the weekend", () => {
@@ -44,7 +57,9 @@ describe("CycleRibbon", () => {
     render(<CycleRibbon days={days} extraAfter={["2026-07-10"]} />);
     // 7 required + 1 extra = 8 slots, but only 7 are required days.
     expect(screen.getAllByRole("listitem")).toHaveLength(8);
-    expect(screen.getByTestId("required-day-count")).toHaveTextContent("7");
+    expect(screen.getByTestId("required-day-count")).toHaveTextContent(
+      "7 required days in this cycle",
+    );
   });
 
   it("renders the label and caption when supplied", () => {
