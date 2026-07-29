@@ -1,5 +1,5 @@
 import fp from "fastify-plugin";
-import { jwtVerify, type JWTVerifyGetKey } from "jose";
+import { jwtVerify, errors as joseErrors, type JWTVerifyGetKey } from "jose";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from "../errors.js";
 import type { UserRecord, UserRepo } from "../db/user-repo.js";
@@ -48,11 +48,23 @@ export const authPlugin = fp<AuthOptions>(
       // caller's (401). One catch around both reports an outage as "your token
       // is invalid", which is actively misleading during an incident.
       let keyRetrievalFailed = false;
-      const trackingGetKey: JWTVerifyGetKey = async (header, input) => {
+      const trackingGetKey: JWTVerifyGetKey = async (protectedHeader, input) => {
         try {
-          return await opts.getKey(header, input);
+          return await opts.getKey(protectedHeader, input);
         } catch (cause) {
-          keyRetrievalFailed = true;
+          // A kid that matches no published key is the TOKEN's problem, not
+          // ours: jose raises this from the key-getter only AFTER attempting a
+          // refetch, so the endpoint is demonstrably reachable. Treating it as
+          // an outage would report a forged token as 503 "please retry",
+          // masking an attack and emitting 5xx for a caller error (NFR-2).
+          if (
+            !(
+              cause instanceof joseErrors.JWKSNoMatchingKey ||
+              cause instanceof joseErrors.JWKSMultipleMatchingKeys
+            )
+          ) {
+            keyRetrievalFailed = true;
+          }
           throw cause;
         }
       };

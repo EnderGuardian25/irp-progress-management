@@ -1,26 +1,30 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { SignJWT, generateKeyPair } from "jose";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { createPrismaClient } from "../src/db/client.js";
-import { createUserRepo } from "../src/db/user-repo.js";
 import { createTracerProvider } from "../src/telemetry.js";
 import { buildServer } from "../src/server.js";
-import { signToken, testIssuer, testAudience } from "./helpers/keys.js";
-import { dbUrl } from "./helpers/require-db.js";
+import { signToken, getLocalKeySet, testIssuer, testAudience } from "./helpers/keys.js";
+import { fakeUserRepo } from "./helpers/fake-user-repo.js";
 
-describe.skipIf(!dbUrl)("when the JWKS endpoint is unreachable", () => {
+// This suite exercises only the auth plugin's key-getter branching — it never
+// reaches `userRepo.findByExternalId` on any of the 503/401 paths below, so it
+// needs no database. The stub repo is structurally required by `buildServer`
+// but is never consulted; a real Prisma client here would be dead weight
+// that gates pure-auth coverage behind a running Postgres for no reason.
+const userRepo = fakeUserRepo([]);
+
+describe("when the JWKS endpoint is unreachable", () => {
   let app: FastifyInstance;
-  let prisma: ReturnType<typeof createPrismaClient>;
 
   beforeAll(async () => {
-    prisma = createPrismaClient(dbUrl!);
     app = await buildServer({
       config: {
-        port: 3001, databaseUrl: dbUrl!, jwksUri: "unused",
+        port: 3001, databaseUrl: "unused", jwksUri: "unused",
         jwtIssuer: testIssuer, jwtAudience: testAudience,
         version: "0.0.0", nodeEnv: "test",
       },
-      userRepo: createUserRepo(prisma),
+      userRepo,
       // Stands in for createRemoteJWKSet against a dead endpoint.
       getKey: () => {
         throw new Error("ECONNREFUSED: the JWKS endpoint is unreachable");
@@ -31,7 +35,6 @@ describe.skipIf(!dbUrl)("when the JWKS endpoint is unreachable", () => {
 
   afterAll(async () => {
     await app.close();
-    await prisma.$disconnect();
   });
 
   it("returns 503, not 401 — the token is fine, our key source is down", async () => {
@@ -62,5 +65,56 @@ describe.skipIf(!dbUrl)("when the JWKS endpoint is unreachable", () => {
     });
     // Malformed input fails before the key-getter is ever consulted.
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("when a token's kid matches no published key", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildServer({
+      config: {
+        port: 3001, databaseUrl: "unused", jwksUri: "unused",
+        jwtIssuer: testIssuer, jwtAudience: testAudience,
+        version: "0.0.0", nodeEnv: "test",
+      },
+      userRepo,
+      // A REAL key-getter over a healthy, reachable key set — this is not a
+      // simulated outage. It simply does not contain the kid the forged
+      // token below claims, which is exactly what a live server sees when
+      // presented a token signed with an unpublished or rotated-out key.
+      getKey: await getLocalKeySet(),
+      tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it("returns 401, not 503 — the key source is healthy, the token is forged", async () => {
+    // A self-signed key pair standing in for an attacker's: it signs a
+    // structurally valid, correctly-issued token, but its public half was
+    // never published to the server's key set, so the server cannot find a
+    // key for `kid: "rotated-key-99"`.
+    const forgedKeys = await generateKeyPair("RS256", { extractable: true });
+
+    const token = await new SignJWT({ oid: "oid-1" })
+      .setProtectedHeader({ alg: "RS256", kid: "rotated-key-99" })
+      .setIssuedAt()
+      .setIssuer(testIssuer)
+      .setAudience(testAudience)
+      .setExpirationTime("5m")
+      .sign(forgedKeys.privateKey);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(401);
+    const body = res.json<{ title: string; detail: string }>();
+    expect(body.detail).not.toMatch(/retry/i);
   });
 });

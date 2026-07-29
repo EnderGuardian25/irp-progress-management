@@ -3001,6 +3001,9 @@ Demonstrated red: GET /api/v1/anything-at-all returned 404 before this."
 **Files:**
 - Modify: `apps/api/src/plugins/auth.ts:34-53`
 - Create: `apps/api/test/auth-jwks-failure.test.ts`
+- Modify (added in fix pass 1): `spec/openapi.yaml` (`/api/v1/me` gains a
+  `503` response referencing a new `ServiceUnavailable` component),
+  regenerating `packages/types` and `packages/client`.
 
 **Interfaces:**
 - Consumes: nothing new.
@@ -3008,34 +3011,58 @@ Demonstrated red: GET /api/v1/anything-at-all returned 404 before this."
 
 **Why:** `catch` around `jwtVerify` is unconditional and swallows errors thrown by the **key-getter** too. Inert with a local key set. Once Task 6's dev JWKS or a real Entra endpoint is in play, a JWKS outage tells every user *"your token is invalid"* (401) while the true fault is ours (5xx) — actively misleading during an incident. Plan 2B logged this as a Plan 3 obligation precisely because this is the plan that makes it real.
 
+**FIX PASS 1 NOTE:** the guard as originally written here (Step 4) was itself
+too broad — it set `keyRetrievalFailed = true` on *any* throw from the
+key-getter, including `jose.errors.JWKSNoMatchingKey` /
+`JWKSMultipleMatchingKeys`, which jose raises only after the key set has
+already been (re)fetched successfully. That meant a forged token bearing an
+unrecognised `kid` was reported as our 503 outage rather than the caller's
+401 — a security-relevant defect, proved against a live, healthy JWKS server.
+See the corrected Step 4 code below and the added test in Step 1's file. The
+new 503 status this task introduces also had to be documented in
+`spec/openapi.yaml` before it could ship, per CLAUDE.md's spec-first rule —
+the original plan pass didn't anticipate that a bugfix to an internal `catch`
+would surface a new externally-visible status code.
+
 - [ ] **Step 1: Write the failing test**
 
-Create `apps/api/test/auth-jwks-failure.test.ts`:
+Create `apps/api/test/auth-jwks-failure.test.ts`. **CORRECTED IN FIX PASS 1:**
+the version below needs no database — every path this suite exercises throws
+before `userRepo.findByExternalId` is ever consulted, so a `fakeUserRepo([])`
+stub is honest and sufficient. An earlier draft built a real Prisma client and
+wrapped the suite in `describe.skipIf(!dbUrl)`, which needlessly skipped this
+pure-auth coverage on every DB-less run. It also adds a second `describe`
+block absent from the first draft, proving the discriminating guard in Step 4
+the other way: a **healthy, reachable** key set that simply doesn't recognise
+the token's `kid` (a forged or rotated-out signing key) must 401, not 503.
 
 ```ts
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { SignJWT, generateKeyPair } from "jose";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { createPrismaClient } from "../src/db/client.js";
-import { createUserRepo } from "../src/db/user-repo.js";
 import { createTracerProvider } from "../src/telemetry.js";
 import { buildServer } from "../src/server.js";
-import { signToken, testIssuer, testAudience } from "./helpers/keys.js";
-import { dbUrl } from "./helpers/require-db.js";
+import { signToken, getLocalKeySet, testIssuer, testAudience } from "./helpers/keys.js";
+import { fakeUserRepo } from "./helpers/fake-user-repo.js";
+
+// This suite exercises only the auth plugin's key-getter branching — it never
+// reaches `userRepo.findByExternalId` on any of the 503/401 paths below, so it
+// needs no database. The stub repo is structurally required by `buildServer`
+// but is never consulted.
+const userRepo = fakeUserRepo([]);
 
 describe("when the JWKS endpoint is unreachable", () => {
   let app: FastifyInstance;
-  let prisma: ReturnType<typeof createPrismaClient>;
 
   beforeAll(async () => {
-    prisma = createPrismaClient(dbUrl!);
     app = await buildServer({
       config: {
-        port: 3001, databaseUrl: dbUrl!, jwksUri: "unused",
+        port: 3001, databaseUrl: "unused", jwksUri: "unused",
         jwtIssuer: testIssuer, jwtAudience: testAudience,
         version: "0.0.0", nodeEnv: "test",
       },
-      userRepo: createUserRepo(prisma),
+      userRepo,
       // Stands in for createRemoteJWKSet against a dead endpoint.
       getKey: () => {
         throw new Error("ECONNREFUSED: the JWKS endpoint is unreachable");
@@ -3046,7 +3073,6 @@ describe("when the JWKS endpoint is unreachable", () => {
 
   afterAll(async () => {
     await app.close();
-    await prisma.$disconnect();
   });
 
   it("returns 503, not 401 — the token is fine, our key source is down", async () => {
@@ -3079,6 +3105,57 @@ describe("when the JWKS endpoint is unreachable", () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe("when a token's kid matches no published key", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildServer({
+      config: {
+        port: 3001, databaseUrl: "unused", jwksUri: "unused",
+        jwtIssuer: testIssuer, jwtAudience: testAudience,
+        version: "0.0.0", nodeEnv: "test",
+      },
+      userRepo,
+      // A REAL key-getter over a healthy, reachable key set — this is not a
+      // simulated outage. It simply does not contain the kid the forged
+      // token below claims, which is exactly what a live server sees when
+      // presented a token signed with an unpublished or rotated-out key.
+      getKey: await getLocalKeySet(),
+      tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it("returns 401, not 503 — the key source is healthy, the token is forged", async () => {
+    // A self-signed key pair standing in for an attacker's: it signs a
+    // structurally valid, correctly-issued token, but its public half was
+    // never published to the server's key set, so the server cannot find a
+    // key for `kid: "rotated-key-99"`.
+    const forgedKeys = await generateKeyPair("RS256", { extractable: true });
+
+    const token = await new SignJWT({ oid: "oid-1" })
+      .setProtectedHeader({ alg: "RS256", kid: "rotated-key-99" })
+      .setIssuedAt()
+      .setIssuer(testIssuer)
+      .setAudience(testAudience)
+      .setExpirationTime("5m")
+      .sign(forgedKeys.privateKey);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(401);
+    const body = res.json<{ title: string; detail: string }>();
+    expect(body.detail).not.toMatch(/retry/i);
+  });
+});
 ```
 
 - [ ] **Step 2: Run it and CONFIRM IT FAILS**
@@ -3089,6 +3166,11 @@ pnpm --filter @irp/api test auth-jwks-failure
 ```
 
 Expected: FAIL — 401 received where 503 expected, on the first two tests. **Record the observed behaviour.**
+
+(Fix pass 1's fourth test, above, was verified the other direction: with the
+Step 4 guard's `if` condition removed, this test fails with 503 instead of
+401 — proving the guard is load-bearing, not decorative. Restore the guard
+before committing.)
 
 - [ ] **Step 3: Add `ServiceUnavailableError` to `apps/api/src/errors.ts`**
 
@@ -3118,11 +3200,36 @@ Replace the `let oid: unknown;` block through the end of its `catch` with:
       // caller's (401). One catch around both reports an outage as "your token
       // is invalid", which is actively misleading during an incident.
       let keyRetrievalFailed = false;
-      const trackingGetKey: JWTVerifyGetKey = async (header, input) => {
+      const trackingGetKey: JWTVerifyGetKey = async (protectedHeader, input) => {
         try {
-          return await opts.getKey(header, input);
+          return await opts.getKey(protectedHeader, input);
         } catch (cause) {
-          keyRetrievalFailed = true;
+          // A kid that matches no published key is the TOKEN's problem, not
+          // ours: jose raises this from the key-getter only AFTER attempting a
+          // refetch, so the endpoint is demonstrably reachable. Treating it as
+          // an outage would report a forged token as 503 "please retry",
+          // masking an attack and emitting 5xx for a caller error (NFR-2).
+          //
+          // CORRECTED IN FIX PASS 1: the original version of this plan set
+          // keyRetrievalFailed = true unconditionally, so a token with an
+          // unknown `kid` — e.g. a forged/self-signed token, or one signed
+          // with a rotated-out key — was reported as a 503 outage rather
+          // than a 401. A reviewer proved this against a live, healthy JWKS
+          // server. jose's own error classes for "reachable but no match"
+          // live at `jose.errors.JWKSNoMatchingKey` /
+          // `jose.errors.JWKSMultipleMatchingKeys` (an `errors` namespace
+          // export, not top-level names — the first attempt at this fix
+          // imported them as top-level named exports, which are `undefined`
+          // in jose 6.x, so `instanceof undefined` threw and silently
+          // defeated the guard).
+          if (
+            !(
+              cause instanceof joseErrors.JWKSNoMatchingKey ||
+              cause instanceof joseErrors.JWKSMultipleMatchingKeys
+            )
+          ) {
+            keyRetrievalFailed = true;
+          }
           throw cause;
         }
       };
@@ -3155,10 +3262,24 @@ Replace the `let oid: unknown;` block through the end of its `catch` with:
 Update the imports at the top of the file:
 
 ```ts
+import { jwtVerify, errors as joseErrors, type JWTVerifyGetKey } from "jose";
 import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from "../errors.js";
 ```
 
 The `authenticate` decorator's signature must now accept the request for logging — it already receives `req`.
+
+**CORRECTED IN FIX PASS 1 — the discriminating guard needed a spec change too.**
+Once the guard above distinguishes "key retrieval failed" from "key not found
+for this kid," an authenticated route can return **503** in addition to the
+existing 200/400/401/403/500 — and `spec/openapi.yaml` is the hand-written
+source of truth that changes *before* handlers, per CLAUDE.md. The original
+version of this task never touched the spec, so `/api/v1/me` under-documented
+its own contract and `packages/client` could not discriminate the new status.
+Added a `ServiceUnavailable` response component (referencing `Problem`, with
+description + `application/problem+json` example, matching the neighbouring
+responses) and referenced it as `/api/v1/me`'s `503`. This does not disturb
+the required 200/400/401/500 set the custom Redocly assertion enforces. After
+editing the spec: `pnpm generate` then `pnpm --filter @irp/client build`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -3167,7 +3288,9 @@ $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
 pnpm --filter @irp/api test
 ```
 
-Expected: PASS. 3 new tests; 55 total in `apps/api`.
+Expected: PASS. 4 tests in this file (the original 3 for a JWKS outage, plus
+a fix-pass-1 addition proving a forged token with an unknown `kid` against a
+**healthy** key set gets 401, not 503); 59 total in `apps/api` as of fix pass 1.
 
 - [ ] **Step 6: Commit**
 

@@ -117,6 +117,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
 components:
   securitySchemes:
@@ -310,4 +312,28 @@ components:
                 status: 500
                 detail: An unexpected error occurred.
                 instance: /api/v1/example
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    ServiceUnavailable:
+      description: |
+        A dependency required to authenticate the request could not be
+        reached — for example, the JWKS endpoint used to verify the bearer
+        token's signature. This is distinct from 401: the token itself may be
+        perfectly valid, but it could not be checked. Retrying later is
+        reasonable; retrying with a different token is not.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            jwksUnreachable:
+              summary: The JWKS endpoint could not be reached
+              value:
+                type: https://irp.bistec.example/problems/service-unavailable
+                title: Service temporarily unavailable
+                status: 503
+                detail: >-
+                  Could not retrieve the signing keys needed to verify your
+                  session. Please retry.
+                instance: /api/v1/me
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
