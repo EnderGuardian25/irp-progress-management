@@ -2548,9 +2548,25 @@ is the 403 trap the spec designs around rather than discovers."
 
 **Interfaces:**
 - Consumes: `authConfig` (Task 5), `getCurrentUserOrRedirect` (Task 7).
-- Produces: route `/`, and a matcher excluding `api/auth`, `signin`, `not-registered`, `_next`, static files.
+- Produces: route `/`, and a matcher excluding `api` wholesale, `signin`, `not-registered`, `_next`, static files.
 
 **`not-registered` MUST be in the exclusion list.** If middleware guards it, a 403 user is redirected there, middleware sees a valid session, allows it — fine. But if it were *not* excluded and the session later expired, the user would bounce to `/signin` from a page meant to be terminal. Excluding it keeps the state genuinely terminal.
+
+> **Post-implementation correction (Fix pass 1, plan defect, Critical).** The
+> matcher below originally excluded only `api/auth`, not `api` wholesale. That
+> left `/api/dev-jwks` guarded: a `GET` to it was redirected 307 to `/signin`
+> instead of returning the JWKS. `apps/api` is configured with
+> `JWKS_URI=http://localhost:3000/api/dev-jwks` and validates tokens via
+> `jose`'s `createRemoteJWKSet`, which fetches with `redirect: 'manual'` and
+> throws on any non-200 response (`jose/dist/webapi/jwks/remote.js`) — so
+> every dev-minted token failed validation and dev sign-in was broken end to
+> end. This regression had no prior instance to break, since no middleware
+> existed before this task. The fix excludes `api` wholesale instead of
+> growing the exclusion list one route at a time: redirecting *any* API
+> route to an HTML sign-in page is wrong on principle (a machine caller can't
+> consume HTML), and `apps/api` is the actual security boundary for `/api/*`
+> regardless. The code block and test block below are corrected to match
+> what was actually committed.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2591,6 +2607,12 @@ describe("middleware matcher", () => {
       expect(matches(path)).toBe(false);
     }
   });
+
+  it("does not guard any /api route, including dev-jwks — jose's createRemoteJWKSet fetches with redirect: 'manual' and throws on any non-200 response, so a redirected JWKS endpoint breaks dev sign-in end to end", () => {
+    expect(matches("/api/dev-jwks")).toBe(false);
+    expect(matches("/api/auth/signin")).toBe(false);
+    expect(matches("/api/anything-else")).toBe(false);
+  });
 });
 ```
 
@@ -2622,7 +2644,17 @@ import { authConfig } from "./auth.config";
 export const { auth: middleware } = NextAuth(authConfig);
 
 export const config = {
-  matcher: ["/((?!api/auth|signin|not-registered|_next/static|_next/image|favicon.ico).*)"],
+  // `api` is excluded wholesale, not just `api/auth`. Redirecting *any* API
+  // route to an HTML sign-in page is wrong on principle: a machine caller
+  // (fetch/curl/jose's JWKS client) cannot consume a sign-in page, and
+  // apps/api is the actual security boundary for /api/* anyway — it runs its
+  // own fail-closed auth check. Excluding only `api/auth` (as originally
+  // written here) left `/api/dev-jwks` guarded: middleware redirected it to
+  // /signin (307), createRemoteJWKSet's fetch (redirect: 'manual') threw on
+  // the non-200 response, and every dev-minted token failed validation —
+  // dev sign-in was broken end to end. See "Post-implementation correction"
+  // above.
+  matcher: ["/((?!api|signin|not-registered|_next/static|_next/image|favicon.ico).*)"],
 };
 ```
 
@@ -2680,7 +2712,7 @@ pnpm typecheck
 pnpm lint
 ```
 
-Expected: 5 middleware tests PASS; typecheck and lint exit 0.
+Expected: 6 middleware-matcher tests PASS (5 original + the `/api` wholesale-exclusion test added in the Fix pass 1 correction above); typecheck and lint exit 0.
 
 - [ ] **Step 6: Commit**
 

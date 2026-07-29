@@ -9,8 +9,15 @@ import { config } from "@/middleware";
 // the one Next.js's actual middleware runtime never uses — and fail on
 // mismatched member types. This local alias asserts the one shape Next.js
 // really invokes: `(request: NextRequest, event: NextFetchEvent) =>
-// Promise<Response | undefined>`, per the exported `NextAuthMiddleware`
-// type this same package declares.
+// Promise<Response | undefined>`, matching the shape of next-auth's own
+// `NextAuthMiddleware` type (lib/index.d.ts) structurally.
+//
+// `NextAuthMiddleware` itself is NOT reachable: next-auth@5.0.0-beta.32's
+// public entry (index.d.ts) re-exports only `NextAuthConfig` and
+// `NextAuthRequest` as types — confirmed by probing
+// `import type { NextAuthMiddleware } from "next-auth"`, which fails with
+// TS2614 ("has no exported member"). So this local alias is the closest
+// available substitute, not an import of the real thing.
 type MiddlewareInvocation = (
   request: NextRequest,
   event: NextFetchEvent,
@@ -38,6 +45,12 @@ describe("middleware matcher", () => {
   it("does not guard the Auth.js routes, or sign-in would be unreachable", () => {
     expect(matches("/api/auth/signin")).toBe(false);
     expect(matches("/api/auth/callback/dev-identity")).toBe(false);
+  });
+
+  it("does not guard any /api route, including dev-jwks — jose's createRemoteJWKSet fetches with redirect: 'manual' and throws on any non-200 response, so a redirected JWKS endpoint breaks dev sign-in end to end", () => {
+    expect(matches("/api/dev-jwks")).toBe(false);
+    expect(matches("/api/auth/signin")).toBe(false);
+    expect(matches("/api/anything-else")).toBe(false);
   });
 
   it("does not guard /signin", () => {
@@ -71,6 +84,19 @@ describe("middleware behavior", () => {
     // look like a false pass/fail unrelated to the redirect behavior under
     // test.
     const request = new NextRequest("http://localhost:3000/");
+    // Unavoidable double assertion, not a stylistic one: `auth`'s declared
+    // type is an intersection of five overload branches (NextApiRequest/
+    // NextApiResponse, no-args, GetServerSidePropsContext, an
+    // AppRouteHandlerFn wrapper, and a NextAuthMiddleware wrapper), and none
+    // of them structurally matches `(NextRequest, NextFetchEvent) =>
+    // Promise<Response | undefined>` closely enough for a direct `as
+    // MiddlewareInvocation` — tsc rejects it with TS2352 ("neither type
+    // sufficiently overlaps with the other") and names the `unknown` hop
+    // itself as the fix. What this gives up: TypeScript will NOT catch a
+    // signature change to next-auth's `auth()` export (e.g. a reordered or
+    // added parameter, a changed return type) at this call site — the
+    // runtime assertions below (response.status, the redirect location) are
+    // the only thing standing in for that check.
     const response = await (middleware as unknown as MiddlewareInvocation)(
       request,
       {} as NextFetchEvent,
