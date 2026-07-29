@@ -68,6 +68,18 @@ jobs:
       - name: Generate the Prisma client
         run: pnpm --filter @irp/api exec prisma generate
 
+      - name: Build @irp/core
+        run: pnpm --filter @irp/core build
+
+      # Declaration-only emit. The runtime stays raw TypeScript for the bundler,
+      # but consumers resolve TYPES from dist/*.d.ts. Without this, apps/web's
+      # tsc pulls the generated runtime into its own program and re-checks it
+      # under apps/web's stricter options — which would force a strictness
+      # relaxation onto hand-written web code. Must run BEFORE Typecheck.
+      # See packages/client/tsconfig.build.json.
+      - name: Build @irp/client declarations
+        run: pnpm --filter @irp/client build
+
       - name: Fail if generated output is tracked or dirties the tree
         run: |
           # Two distinct failure modes. `git status --porcelain` catches only
@@ -90,10 +102,13 @@ jobs:
           # Both are whole-repo and unfiltered, so they must run after every
           # generation step in the job — including `prisma generate` above — or
           # the class of output produced last is never covered. Generate first,
-          # check once, for everything.
-          if [ -n "$(git ls-files packages/types/src packages/client/src apps/api/src/generated)" ]; then
+          # check once, for everything. That is also why this step now sits
+          # after `Build @irp/core` and `Build @irp/client declarations`: those
+          # two emit packages/core/dist and packages/client/dist, and a check
+          # run before them would never see that output.
+          if [ -n "$(git ls-files packages/types/src packages/client/src apps/api/src/generated packages/core/dist packages/client/dist)" ]; then
             echo "::error::Generated output is tracked in git — a second, hand-editable copy of the contract that can drift."
-            git ls-files packages/types/src packages/client/src apps/api/src/generated
+            git ls-files packages/types/src packages/client/src apps/api/src/generated packages/core/dist packages/client/dist
             exit 1
           fi
           if [ -n "$(git status --porcelain)" ]; then
@@ -101,18 +116,6 @@ jobs:
             git status --porcelain
             exit 1
           fi
-
-      - name: Build @irp/core
-        run: pnpm --filter @irp/core build
-
-      # Declaration-only emit. The runtime stays raw TypeScript for the bundler,
-      # but consumers resolve TYPES from dist/*.d.ts. Without this, apps/web's
-      # tsc pulls the generated runtime into its own program and re-checks it
-      # under apps/web's stricter options — which would force a strictness
-      # relaxation onto hand-written web code. Must run BEFORE Typecheck.
-      # See packages/client/tsconfig.build.json.
-      - name: Build @irp/client declarations
-        run: pnpm --filter @irp/client build
 
       - name: Typecheck
         run: pnpm -r typecheck
