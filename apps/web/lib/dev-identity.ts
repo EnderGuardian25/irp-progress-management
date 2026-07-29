@@ -1,6 +1,16 @@
-import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
+import "server-only";
+
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import type { JWK } from "jose";
 import Credentials from "next-auth/providers/credentials";
 import type { Provider } from "next-auth/providers";
+// Only subpaths of next-auth (./providers, ./providers/credentials) are
+// otherwise imported here. TypeScript's module augmentation below needs the
+// bare "next-auth" specifier registered as a resolved module in this file, or
+// it fails with TS2664 even though `declare module "next-auth"` resolves the
+// package fine on its own — an empty type-only import is enough to satisfy it.
+import type {} from "next-auth";
+import { DEV_IDENTITIES, DEV_ISSUER, type DevIdentity } from "@/lib/dev-identities";
 
 /**
  * The dev bypass. It swaps the token ISSUER; it does NOT skip authentication.
@@ -13,39 +23,42 @@ import type { Provider } from "next-auth/providers";
  * This module is imported ONLY when AUTH_DEV_BYPASS=true (see auth.ts), so it
  * is absent from a production bundle. auth.config.ts additionally refuses to
  * boot if the flag is set with NODE_ENV=production.
- */
-
-export interface DevIdentity {
-  id: string;
-  label: string;
-  /** Becomes the token's `oid`. apps/api matches it to User.externalId. */
-  oid: string;
-  email: string;
-  name: string;
-}
-
-/**
- * No `role` field, deliberately. Role lives in the User row and reaches the web
- * app only via GET /api/v1/me — see spec §4.1a. Switching identity switches the
- * oid; the role follows from the database.
  *
- * dev-unknown-1 has NO User row on purpose. It must produce a 403 and land on
- * /not-registered, turning the spec's most load-bearing authorization rule into
- * something clickable rather than something only a test knows about.
+ * `import "server-only"` above makes any accidental import from a Client
+ * Component (e.g. reaching for mintDevToken instead of the data-only
+ * lib/dev-identities.ts) a build-time error rather than a runtime leak.
  */
-export const DEV_IDENTITIES: readonly DevIdentity[] = [
-  { id: "mentor", label: "Mentor (Admin)", oid: "dev-admin-1", email: "mentor@dev.local", name: "Dev Mentor" },
-  { id: "student", label: "Student", oid: "dev-student-1", email: "student@dev.local", name: "Dev Student" },
-  { id: "unknown", label: "Unregistered user (expect 403)", oid: "dev-unknown-1", email: "nobody@dev.local", name: "Unregistered" },
-];
 
-export const DEV_ISSUER = "http://localhost:3000/api/dev-jwks";
+declare module "next-auth" {
+  interface User {
+    /**
+     * Set only by the dev identity provider. A Credentials sign-in produces no
+     * account.access_token, so the minted token travels on the user object to
+     * the jwt callback. Declared here, where it is invented, so producer and
+     * consumer typecheck against one declaration.
+     */
+    devAccessToken?: string;
+  }
+}
 
 const KID = "dev-key-1";
 
 // Generated once per process and held here. Restarting apps/web invalidates
 // outstanding sessions, which presents correctly as a 401 and a sign-out.
-const keyPair = await generateKeyPair("RS256", { extractable: true });
+//
+// generateKeyPair is called with NO second argument — the key is permitted
+// to leave the process in one direction only, as a public JWK below.
+// WebCrypto then refuses to export keyPair.privateKey as a JWK under any
+// circumstance — exportJWK(publicKey) still works, because a public RSA key
+// needs no such permission. This is a platform-enforced guarantee, not a
+// convention: even a future edit that mistakenly reaches for
+// keyPair.privateKey in an export path cannot publish private material,
+// because the runtime itself refuses. See test/dev-identity.test.ts's
+// "refuses to export the private key at all" case.
+const keyPair = await generateKeyPair("RS256");
+
+/** Test-only. Asserting the private key cannot be exported requires a handle to it. */
+export const devKeyPairForTest = keyPair;
 
 export async function devJwks(): Promise<{ keys: JWK[] }> {
   const jwk = await exportJWK(keyPair.publicKey);

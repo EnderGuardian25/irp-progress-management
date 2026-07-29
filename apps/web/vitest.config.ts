@@ -13,6 +13,12 @@ export default defineConfig({
       "next/font/google": fileURLToPath(
         new URL("./test/mocks/next-font-google.ts", import.meta.url),
       ),
+      // server-only's real index.js throws unconditionally; Next resolves it
+      // to a no-op via the react-server export condition, which Vitest does
+      // not implement. See test/mocks/server-only.ts for the full reason.
+      "server-only": fileURLToPath(
+        new URL("./test/mocks/server-only.ts", import.meta.url),
+      ),
     },
   },
   test: {

@@ -8,13 +8,9 @@
 // perfectly valid Uint8Array. This file does no DOM rendering, so running it
 // under the plain Node environment sidesteps the realm mismatch entirely.
 import { describe, expect, it } from "vitest";
-import { createLocalJWKSet, jwtVerify } from "jose";
-import {
-  DEV_IDENTITIES,
-  DEV_ISSUER,
-  devJwks,
-  mintDevToken,
-} from "@/lib/dev-identity";
+import { createLocalJWKSet, exportJWK, jwtVerify } from "jose";
+import { DEV_IDENTITIES, DEV_ISSUER } from "@/lib/dev-identities";
+import { devJwks, devKeyPairForTest, mintDevToken } from "@/lib/dev-identity";
 
 const AUD = "api://irp-progress-management";
 
@@ -84,5 +80,9 @@ describe("devJwks", () => {
     for (const priv of ["d", "p", "q", "dp", "dq", "qi"]) {
       expect(key).not.toHaveProperty(priv);
     }
+  });
+
+  it("refuses to export the private key at all — it is non-extractable", async () => {
+    await expect(exportJWK(devKeyPairForTest.privateKey)).rejects.toThrow();
   });
 });

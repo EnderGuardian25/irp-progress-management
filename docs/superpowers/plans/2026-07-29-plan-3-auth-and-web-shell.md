@@ -56,7 +56,9 @@ Every task's requirements implicitly include this section.
 | `apps/web/components/app-frame/topbar.tsx` | 56px topbar |
 | `apps/web/components/app-frame/sidebar.tsx` | 216px sidebar |
 | `apps/web/lib/api-client.ts` | `server-only`; cookie → token → per-request client |
-| `apps/web/lib/dev-identity.ts` | Dev identities + local keypair. Excluded from prod bundle |
+| `apps/web/lib/dev-identities.ts` | Dev identity data only — no `jose`/`next-auth` imports, safe for a Client Component |
+| `apps/web/lib/dev-identity.ts` | Local keypair, token minting, provider. `server-only`-guarded, excluded from prod bundle |
+| `apps/web/test/mocks/server-only.ts` | Vitest-only no-op alias for `server-only`, mirroring Next's `react-server` condition |
 | `apps/web/auth.config.ts` | Edge-safe provider list + guard |
 | `apps/web/auth.ts` | Full config, callbacks, prod guard |
 | `apps/web/middleware.ts` | Redirect guard — UX only |
@@ -1089,6 +1091,8 @@ navigations and its docs warn against relying on them for authorization."
 
 **`next-auth@5.0.0-beta.32` is a beta release.** That is deliberate — v4 is the `latest` tag but has no real App Router support. ADR-0010 (Task 14) records the acceptance.
 
+**Note for the implementer:** `jwtCallback` below reads `user.devAccessToken` directly, with no cast. That property does not exist on `next-auth`'s `User` type; it typechecks here only because Task 6's `lib/dev-identity.ts` carries a `declare module "next-auth" { interface User { devAccessToken?: string } }` augmentation, colocated with the provider that invents the field. Until Task 6 lands, `pnpm typecheck`/`pnpm lint` report this file as an error — expected, matching the pattern already noted in Task 4. Do not add a local cast here to paper over it; that is exactly the zero-compile-error rename hazard the augmentation exists to close.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `apps/web/test/prod-guard.test.ts`:
@@ -1171,6 +1175,15 @@ export function assertBypassNotInProduction(env: NodeJS.ProcessEnv): void {
  * Exported separately so it is directly testable — see Task 7's token-leak
  * test. Keeping it inline in a config literal would leave the invariant
  * assertable only end-to-end.
+ *
+ * `user.devAccessToken` typechecks directly — no cast — because Task 6's
+ * `lib/dev-identity.ts` carries a `declare module "next-auth" { interface
+ * User { devAccessToken?: string } }` augmentation, colocated with the
+ * provider that invents the field. `next-auth`'s own `User` type has no such
+ * property and excess-property checking does not fire through the
+ * `Awaitable<User | null>` union `authorize()` returns, so without that
+ * augmentation a rename of the field in dev-identity.ts would break this
+ * callback at runtime with zero compile error.
  */
 export const jwtCallback: NonNullable<NextAuthConfig["callbacks"]>["jwt"] = ({
   token,
@@ -1182,9 +1195,8 @@ export const jwtCallback: NonNullable<NextAuthConfig["callbacks"]>["jwt"] = ({
   }
   // The dev provider returns its minted token on the user object, because a
   // Credentials sign-in produces no account.access_token.
-  const devToken = (user as { devAccessToken?: string } | undefined)?.devAccessToken;
-  if (devToken !== undefined) {
-    token.accessToken = devToken;
+  if (user?.devAccessToken !== undefined) {
+    token.accessToken = user.devAccessToken;
   }
   return token;
 };
@@ -1345,19 +1357,51 @@ real App Router support. ADR-0010 records the acceptance."
 ## Task 6: The dev identity provider and its JWKS endpoint
 
 **Files:**
-- Create: `apps/web/lib/dev-identity.ts`, `apps/web/app/api/dev-jwks/route.ts`, `apps/web/test/dev-identity.test.ts`
+- Create: `apps/web/lib/dev-identities.ts`, `apps/web/lib/dev-identity.ts`, `apps/web/app/api/dev-jwks/route.ts`, `apps/web/test/dev-identity.test.ts`
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
   ```ts
+  // lib/dev-identities.ts — data only, no jose/next-auth imports, safe for a
+  // Client Component (Task 8's dev-identity-picker.tsx imports from here).
   export interface DevIdentity { id: string; label: string; oid: string; email: string; name: string; }
   export const DEV_IDENTITIES: readonly DevIdentity[];
   export const DEV_ISSUER = "http://localhost:3000/api/dev-jwks";
+
+  // lib/dev-identity.ts — the keypair, jose, next-auth. `import "server-only"`
+  // is its first line, so a Client Component importing it is a build-time error.
   export function devIdentityProvider(): Provider;
   export async function mintDevToken(identity: DevIdentity, audience: string): Promise<string>;
   export async function devJwks(): Promise<{ keys: JWK[] }>;
+  export const devKeyPairForTest: CryptoKeyPair; // test-only
   ```
+
+> **CORRECTED 2026-07-29 (fix pass 1).** The original version of this task put
+> everything — `DEV_IDENTITIES`, the keypair, `mintDevToken`, `devJwks`, and
+> `devIdentityProvider` — in one `lib/dev-identity.ts`, with a top-level
+> `await generateKeyPair(...)`. Task 8's `dev-identity-picker.tsx` is a
+> `"use client"` component that needs `DEV_IDENTITIES`, so as originally
+> structured it would have pulled `jose`, `next-auth/providers/credentials`,
+> and the top-level await keygen into the client bundle — executing keygen in
+> the browser and breaking the build on the top-level await. The module is
+> split: `lib/dev-identities.ts` holds the data (interface, array, issuer
+> constant), importable from anywhere; `lib/dev-identity.ts` keeps everything
+> that needs `jose`/`next-auth` and gains `import "server-only"` as its first
+> line, so a client import is a build-time error rather than a runtime leak.
+>
+> The original also generated the keypair with `{ extractable: true }`. That
+> option is the *only* thing that lets `exportJWK(privateKey)` succeed — it
+> buys nothing here (only the public key is ever exported) and discards a
+> platform-enforced guarantee that private key material can never leave the
+> process. Corrected to `await generateKeyPair("RS256")`, non-extractable, with
+> a `devKeyPairForTest` test-only export so the guarantee is asserted directly
+> rather than assumed. `server-only`'s real `index.js` throws unconditionally
+> outside Next's build (Next resolves it to a no-op via the `react-server`
+> export condition); Vitest has no such condition, so it needs a test-only
+> alias — see `apps/web/test/mocks/server-only.ts` and the `resolve.alias`
+> entry in `apps/web/vitest.config.ts`, added in this task alongside the
+> `server-only` import for exactly this reason.
 
 **The design in one line:** this mints a **real** RS256 JWT with a local key and serves the matching public key as a JWKS, so `apps/api` validates it through `createRemoteJWKSet` — the exact production mechanism. Dev therefore exercises the remote-JWKS path every day, not only in the dormant CI job.
 
@@ -1369,13 +1413,9 @@ Create `apps/web/test/dev-identity.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { createLocalJWKSet, jwtVerify } from "jose";
-import {
-  DEV_IDENTITIES,
-  DEV_ISSUER,
-  devJwks,
-  mintDevToken,
-} from "@/lib/dev-identity";
+import { createLocalJWKSet, exportJWK, jwtVerify } from "jose";
+import { DEV_IDENTITIES, DEV_ISSUER } from "@/lib/dev-identities";
+import { devJwks, devKeyPairForTest, mintDevToken } from "@/lib/dev-identity";
 
 const AUD = "api://irp-progress-management";
 
@@ -1446,6 +1486,15 @@ describe("devJwks", () => {
       expect(key).not.toHaveProperty(priv);
     }
   });
+
+  it("refuses to export the private key at all — it is non-extractable", async () => {
+    // The platform-level guarantee, not just an omitted field: WebCrypto
+    // itself refuses to export keyPair.privateKey as a JWK, because it was
+    // generated without { extractable: true }. Even a future edit that
+    // mistakenly reaches for the private key in an export path cannot
+    // publish it — the runtime throws before it can.
+    await expect(exportJWK(devKeyPairForTest.privateKey)).rejects.toThrow();
+  });
 });
 ```
 
@@ -1455,28 +1504,13 @@ describe("devJwks", () => {
 pnpm --filter @irp/web test dev-identity
 ```
 
-Expected: FAIL — cannot resolve `@/lib/dev-identity`.
+Expected: FAIL — cannot resolve `@/lib/dev-identities`.
 
-- [ ] **Step 3: Create `apps/web/lib/dev-identity.ts`**
+- [ ] **Step 3: Create `apps/web/lib/dev-identities.ts`**
+
+Data only. No imports from `jose` or `next-auth` — safe for a Client Component.
 
 ```ts
-import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
-import Credentials from "next-auth/providers/credentials";
-import type { Provider } from "next-auth/providers";
-
-/**
- * The dev bypass. It swaps the token ISSUER; it does NOT skip authentication.
- *
- * A real RS256 JWT is minted with a local key, and the matching public key is
- * published at /api/dev-jwks. apps/api validates it through createRemoteJWKSet
- * with its real jose code path — the exact production mechanism — so dev
- * exercises remote JWKS retrieval every day rather than only in CI.
- *
- * This module is imported ONLY when AUTH_DEV_BYPASS=true (see auth.ts), so it
- * is absent from a production bundle. auth.config.ts additionally refuses to
- * boot if the flag is set with NODE_ENV=production.
- */
-
 export interface DevIdentity {
   id: string;
   label: string;
@@ -1502,12 +1536,68 @@ export const DEV_IDENTITIES: readonly DevIdentity[] = [
 ];
 
 export const DEV_ISSUER = "http://localhost:3000/api/dev-jwks";
+```
+
+- [ ] **Step 4: Create `apps/web/lib/dev-identity.ts`**
+
+`import "server-only"` is the **first line** — it makes a Client Component import of this module a build-time error rather than a runtime leak. Everything that needs `jose`/`next-auth` lives here; `DEV_IDENTITIES`/`DEV_ISSUER` are re-imported from `lib/dev-identities.ts`, not redefined.
+
+The keypair is generated **without** `{ extractable: true }`. That option is the only thing that would let `exportJWK(keyPair.privateKey)` succeed — `exportJWK(keyPair.publicKey)` needs no such permission, so the option buys nothing here and discards a platform-enforced guarantee. Non-extractable means WebCrypto itself refuses to export the private key as a JWK, so even a future edit that mistakenly reaches for it in an export path cannot publish private material.
+
+```ts
+import "server-only";
+
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import type { JWK } from "jose";
+import Credentials from "next-auth/providers/credentials";
+import type { Provider } from "next-auth/providers";
+// Only subpaths of next-auth (./providers, ./providers/credentials) are
+// otherwise imported here. TypeScript's module augmentation below needs the
+// bare "next-auth" specifier registered as a resolved module in this file, or
+// it fails with TS2664 even though `declare module "next-auth"` resolves the
+// package fine on its own — an empty type-only import is enough to satisfy it.
+import type {} from "next-auth";
+import { DEV_IDENTITIES, DEV_ISSUER, type DevIdentity } from "@/lib/dev-identities";
+
+/**
+ * The dev bypass. It swaps the token ISSUER; it does NOT skip authentication.
+ *
+ * A real RS256 JWT is minted with a local key, and the matching public key is
+ * published at /api/dev-jwks. apps/api validates it through createRemoteJWKSet
+ * with its real jose code path — the exact production mechanism — so dev
+ * exercises remote JWKS retrieval every day rather than only in CI.
+ *
+ * This module is imported ONLY when AUTH_DEV_BYPASS=true (see auth.ts), so it
+ * is absent from a production bundle. auth.config.ts additionally refuses to
+ * boot if the flag is set with NODE_ENV=production.
+ *
+ * `import "server-only"` above makes any accidental import from a Client
+ * Component (e.g. reaching for mintDevToken instead of the data-only
+ * lib/dev-identities.ts) a build-time error rather than a runtime leak.
+ */
+
+declare module "next-auth" {
+  interface User {
+    /**
+     * Set only by the dev identity provider. A Credentials sign-in produces no
+     * account.access_token, so the minted token travels on the user object to
+     * the jwt callback. Declared here, where it is invented, so producer and
+     * consumer typecheck against one declaration.
+     */
+    devAccessToken?: string;
+  }
+}
 
 const KID = "dev-key-1";
 
 // Generated once per process and held here. Restarting apps/web invalidates
 // outstanding sessions, which presents correctly as a 401 and a sign-out.
-const keyPair = await generateKeyPair("RS256", { extractable: true });
+//
+// Deliberately NOT { extractable: true } — see the note above this block.
+const keyPair = await generateKeyPair("RS256");
+
+/** Test-only. Asserting the private key is non-extractable requires a handle to it. */
+export const devKeyPairForTest = keyPair;
 
 export async function devJwks(): Promise<{ keys: JWK[] }> {
   const jwk = await exportJWK(keyPair.publicKey);
@@ -1551,7 +1641,31 @@ export function devIdentityProvider(): Provider {
 }
 ```
 
-- [ ] **Step 4: Create `apps/web/app/api/dev-jwks/route.ts`**
+- [ ] **Step 5: Alias `server-only` for Vitest**
+
+`server-only`'s real `index.js` throws unconditionally when imported — that is the guard. Next resolves it to a no-op via the package's `react-server` export condition in a Server Component compilation; Vitest is a plain Vite/Node environment with no such condition, so every test that imports `lib/dev-identity.ts` (directly or transitively) would fail on the throw. This mirrors the existing `next/font/google` alias pattern in the same file.
+
+Create `apps/web/test/mocks/server-only.ts`:
+
+```ts
+// The real `server-only` package throws unconditionally when its index.js
+// runs — that IS the guard. Next's build resolves it through the
+// `react-server` package-export condition instead, which points at an empty
+// no-op module in a Server Component compilation. Vitest has no such
+// condition wired in, so importing the real package here would fail every
+// test that imports a server-only module. This mirrors Next's own empty.js
+// for the Vitest module graph only — next build/next dev still resolve the
+// real package and its real throw.
+export {};
+```
+
+Add to `apps/web/vitest.config.ts`'s `resolve.alias`:
+
+```ts
+"server-only": fileURLToPath(new URL("./test/mocks/server-only.ts", import.meta.url)),
+```
+
+- [ ] **Step 6: Create `apps/web/app/api/dev-jwks/route.ts`**
 
 ```ts
 import { NextResponse } from "next/server";
@@ -1575,18 +1689,18 @@ export async function GET() {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 ```powershell
 pnpm --filter @irp/web test dev-identity
 ```
 
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests (the six original plus the non-extractable guarantee).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add apps/web/lib/dev-identity.ts "apps/web/app/api/dev-jwks" apps/web/test/dev-identity.test.ts
+git add apps/web/lib/dev-identities.ts apps/web/lib/dev-identity.ts "apps/web/app/api/dev-jwks" apps/web/test/dev-identity.test.ts apps/web/test/mocks/server-only.ts apps/web/vitest.config.ts
 git commit -m "feat(web): dev identity provider minting real RS256 tokens
 
 Swaps the token issuer rather than skipping authentication. A real JWT is
@@ -1599,8 +1713,17 @@ Three identities. dev-unknown-1 has no User row on purpose, so the 403
 rule becomes clickable rather than test-only. None carries a role: role
 lives in the User row and arrives via GET /api/v1/me.
 
-A test asserts the JWKS publishes no private RSA material — publishing d,
-p or q would let anyone mint tokens our own API trusts."
+Data (DEV_IDENTITIES, DEV_ISSUER) lives in lib/dev-identities.ts, which
+imports neither jose nor next-auth, so Task 8's Client Component picker can
+use it without pulling the keypair or a top-level await into the browser
+bundle. lib/dev-identity.ts holds the keypair and token minting, guarded by
+`import "server-only"` as its first line.
+
+The keypair is generated without { extractable: true }, so WebCrypto itself
+refuses to export the private key as a JWK under any circumstance — a
+platform-enforced guarantee, not just an omitted field. A test asserts the
+JWKS publishes no private RSA material, and a second test asserts the
+private key cannot be exported at all."
 ```
 
 ---
@@ -1969,7 +2092,7 @@ Create `apps/web/app/(auth)/signin/dev-identity-picker.tsx`:
 "use client";
 
 import { signIn } from "next-auth/react";
-import { DEV_IDENTITIES } from "@/lib/dev-identity";
+import { DEV_IDENTITIES } from "@/lib/dev-identities";
 
 export function DevIdentityPicker() {
   return (
@@ -1994,7 +2117,14 @@ export function DevIdentityPicker() {
 }
 ```
 
-> **Note:** importing `DEV_IDENTITIES` into a Client Component ships the identity *list* to the browser — labels and oids, which are not secrets. The **private key never leaves the server**, because `keyPair` and `mintDevToken` are only ever called from `authorize()` on the server. Confirm this holds after Task 12's build: `grep -r "privateKey" apps/web/.next/static` must return nothing.
+> **Note:** importing `DEV_IDENTITIES` from `lib/dev-identities.ts` into a Client Component ships the identity *list* to the browser — labels and oids, which are not secrets. The **private key never leaves the server**, because `keyPair` and `mintDevToken` live in `lib/dev-identity.ts` and are only ever called from `authorize()` on the server.
+>
+> Do not confirm this with `grep -r "privateKey" apps/web/.next/static`. That proves nothing: the identifier `privateKey` minifies away in a production build, and the key was never a string literal to begin with — a clean grep result would be true whether or not the guarantee held. The real guarantee is structural, not textual, and checkable two ways:
+>
+> 1. `lib/dev-identity.ts` carries `import "server-only"` as its first line, so `next build` fails outright if any Client Component — this picker included — imports it.
+> 2. `lib/dev-identities.ts`, the module this picker *does* import, contains no key material at all: no `jose` import, no `generateKeyPair`, no `next-auth` import — only the `DevIdentity` interface, the `DEV_IDENTITIES` array, and `DEV_ISSUER`.
+>
+> Task 12's Step 6 verification below checks both directly.
 
 - [ ] **Step 4: Create the sign-in page**
 
@@ -2915,12 +3045,22 @@ Expected: 5 tests PASS.
 
 - [ ] **Step 6: Verify the private key never reached the browser**
 
+> **CORRECTED 2026-07-29 (fix pass 1).** The original check built the app and grepped the
+> output for the string `"privateKey"`. That proves nothing: a minifier renames identifiers
+> in a production build, and the key material was never a string literal to begin with — a
+> clean grep result would be true whether or not the guarantee actually held. The real
+> guarantee is structural: `lib/dev-identity.ts` (the keypair, `mintDevToken`, the provider)
+> carries `import "server-only"` as its first line, so `next build` fails outright if any
+> Client Component imports it; and `lib/dev-identities.ts` (the module the picker *does*
+> import) contains no key material at all to leak — check the source, not the bundle.
+
 ```powershell
+Select-String -Path apps/web/lib/dev-identity.ts -Pattern 'server-only' -List
+Select-String -Path apps/web/lib/dev-identities.ts -Pattern 'jose|next-auth|generateKeyPair' -List
 pnpm --filter @irp/web build
-Select-String -Path "apps/web/.next/static/**/*.js" -Pattern "privateKey|BEGIN RSA|\"d\":" -List
 ```
 
-Expected: **no matches.** If anything matches, the keypair leaked into a client bundle — stop and fix before committing.
+Expected: the first `Select-String` matches (confirming the guard is present); the second returns nothing (confirming the data module carries no key-capable imports); the build succeeds, which — given the `server-only` guard — is itself proof no Client Component reaches into `lib/dev-identity.ts`. If the second `Select-String` matches anything, stop and fix before committing.
 
 - [ ] **Step 7: Commit**
 
