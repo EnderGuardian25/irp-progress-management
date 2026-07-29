@@ -32,7 +32,7 @@ token.
 dev-minted token still goes through full signature verification, issuer/audience checks, and
 expiry checks against a real (if locally hosted) JWKS endpoint.
 
-### Two guards
+### Two guards, applied per entry point — not one gate covering everything
 
 1. **A startup throw** (`assertBypassNotInProduction`, `apps/web/auth.config.ts`) fires when
    `AUTH_DEV_BYPASS === "true"` and `NODE_ENV` case-insensitively equals `"production"`. The two
@@ -44,10 +44,11 @@ expiry checks against a real (if locally hosted) JWKS endpoint.
    `apps/web/middleware.ts` imports `auth.config.ts` directly (`auth.ts` is not Edge-safe), so
    invoking the guard only from `auth.ts` would let the Edge middleware path boot clean with the
    bypass live in a production build.
-2. **The dev module is never *evaluated* in production.** `apps/web/auth.ts` reaches
-   `lib/dev-identity.ts` only through a dynamic `await import("./lib/dev-identity")` gated on
-   `AUTH_DEV_BYPASS`, so with the flag off, the module's top-level `await generateKeyPair(...)`
-   never runs and no key is ever generated in a production process.
+2. **The dev module is never *evaluated* in production**, along whichever path reaches it.
+   `apps/web/auth.ts` reaches `lib/dev-identity.ts` only through a dynamic
+   `await import("./lib/dev-identity")` gated on `AUTH_DEV_BYPASS`, so with the flag off, the
+   module's top-level `await generateKeyPair(...)` never runs and no key is ever generated in a
+   process reached through that path.
 
 **This is NOT the module being "excluded from the production bundle."** That claim is false and
 was corrected during Task 5's review: a dynamic `import()` with a literal specifier is statically
@@ -71,6 +72,36 @@ exactly the two tests asserting it, and separately loosening the `AUTH_DEV_BYPAS
 `!== undefined` failed the other two tests in that suite, confirming all three conjuncts
 (`AUTH_DEV_BYPASS === "true"`, `NODE_ENV` case-insensitive `"production"`, and the throw itself)
 are each independently load-bearing.
+
+**Guard one's coverage is per entry point, not a single gate over the whole feature — and a
+whole-branch review found a third entry point neither guard reached.** `apps/web/app/api/dev-jwks
+/route.ts` imports `lib/dev-identity.ts` directly, on its own import path that goes through
+neither `auth.ts` nor `auth.config.ts`, and `apps/web/middleware.ts` excludes all of `/api`
+wholesale (see the note above `config.matcher` in that file), so nothing was calling the guard
+for this route at all. The review proved it by building with the flag off, then running
+`next start` (which sets `NODE_ENV=production`) with `AUTH_DEV_BYPASS=true`: `/` and
+`/api/auth/session` both correctly 500'd at the guard, but `GET /api/dev-jwks` returned **200**
+with a live JWKS containing a freshly generated RSA key. Nothing minted a token from it — sign-in
+itself still 500'd — but `generateKeyPair()` ran, unauthenticated, in a production process. Fixed
+by adding a third call site: `route.ts` now imports `assertBypassNotInProduction` from
+`auth.config.ts` and invokes it at its own module scope, the same pattern as `auth.config.ts`
+itself. There are now **three** entry points and three call sites — `auth.ts`, `middleware.ts`
+(via `auth.config.ts`'s own module scope), and `app/api/dev-jwks/route.ts` — and the durable rule
+is: **any module that imports `lib/dev-identity` directly must call
+`assertBypassNotInProduction(process.env)` itself**; do not assume that importing something which
+imports `auth.config.ts` is enough, because nothing enforces that transitively.
+
+**This was the third instance of the same overclaim pattern on this branch** — a reader should
+learn that *coverage claims about this bypass need checking, not trusting*, not just correct the
+specific wording below. The first: the guard was, in an earlier draft, called only from
+`auth.ts`, which would have left the Edge `middleware.ts` path unguarded (fixed by moving the call
+to `auth.config.ts`'s own module scope, per guard one above). The second: the claim that
+`lib/dev-identity.ts` is "excluded from the production bundle" (fixed by the correction earlier in
+this section — it is a lazy chunk, not an absent one). The third is this one: a passage asserting
+`auth.ts` and `middleware.ts` are "covered by the same single call" read as if that call's
+coverage were exhaustive, when a third module importing `lib/dev-identity` directly was never in
+scope for it. Each time, the fix was in wording that overclaimed completeness rather than in the
+underlying mechanism.
 
 ## Consequences
 

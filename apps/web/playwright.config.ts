@@ -6,7 +6,14 @@ export default defineConfig({
   // and this repo has been bitten twice by gates that looked green.
   retries: 0,
   fullyParallel: false,
-  reporter: process.env.CI ? "github" : "list",
+  // `github` alone writes NO files — it only emits inline PR annotations —
+  // so a CI failure produced an artifact upload with nothing in it (the
+  // "Upload the Playwright report on failure" step in ci.yml went green on
+  // an empty directory, because upload-artifact@v4 defaults to
+  // if-no-files-found: warn). `html` is added alongside it, with
+  // `open: "never"` so it does not try to launch a browser on a CI runner,
+  // to actually produce `playwright-report/` for that step to upload.
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
     // `localhost`, NOT 127.0.0.1 — and this is the one place in the repo where
     // the literal address is wrong. Next.js canonicalises loopback: NextURL's

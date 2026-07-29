@@ -151,15 +151,26 @@ statically analyzable, and Turbopack still emits it as a lazy chunk rather
 than removing it from the production bundle; do not write or repeat the
 claim that it is excluded from the bundle. The startup throw
 (`assertBypassNotInProduction`, in `apps/web/auth.config.ts`) is the guard
-that structurally enforces the block, and it runs at that module's own
-top level so both `apps/web/auth.ts` and `apps/web/middleware.ts` (which
-imports `auth.config.ts` directly, since it is not edge-safe to go through
-`auth.ts`) are covered by the same single call. **Never weaken either
-guard**, and never loosen the exact-match comparison on `AUTH_DEV_BYPASS` or
-the case-insensitivity of the `NODE_ENV` comparison — the two checks are
-intentionally asymmetric, one narrow and one broad, and both directions
-matter. Once the Entra directory exists, perform the cutover in the Plan 3
-spec §7 and remove the bypass. ADR-0012.
+that structurally enforces the block, but its coverage is **per entry
+point, not automatic**: it runs at `auth.config.ts`'s own top level, which
+covers `apps/web/auth.ts` and `apps/web/middleware.ts` (which imports
+`auth.config.ts` directly, since it is not edge-safe to go through
+`auth.ts`) — but a **third** entry point, `apps/web/app/api/dev-jwks/route.ts`,
+imports `apps/web/lib/dev-identity.ts` directly and does not pull in
+`auth.config.ts` by any other path, so it needed — and now has — its own
+explicit call to `assertBypassNotInProduction(process.env)` at module scope.
+A whole-branch review proved the gap before the fix: a production `next
+start` with the flag on correctly 500'd on `/` and `/api/auth/session`, but
+served a live, freshly generated JWKS with 200 from `/api/dev-jwks`. **The
+rule going forward: any new module that imports `lib/dev-identity` directly
+must call the guard itself** — do not assume importing something that
+imports `auth.config.ts` is enough, and do not assume the guard's coverage
+is exhaustive just because it is described as "the same call." **Never
+weaken either guard**, and never loosen the exact-match comparison on
+`AUTH_DEV_BYPASS` or the case-insensitivity of the `NODE_ENV` comparison —
+the two checks are intentionally asymmetric, one narrow and one broad, and
+both directions matter. Once the Entra directory exists, perform the
+cutover in the Plan 3 spec §7 and remove the bypass. ADR-0012.
 
 **Hard-won facts from Plan 3, worth not rediscovering:**
 

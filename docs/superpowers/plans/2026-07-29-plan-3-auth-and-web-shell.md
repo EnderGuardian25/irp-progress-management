@@ -1826,8 +1826,29 @@ Add to `apps/web/vitest.config.ts`'s `resolve.alias`:
 
 - [ ] **Step 6: Create `apps/web/app/api/dev-jwks/route.ts`**
 
+> **CORRECTED 2026-07-29 (whole-branch review, Important finding 1).** The
+> version below is what actually shipped after Task 6 first landed, and it
+> was wrong: it imported `lib/dev-identity` directly and never pulled in
+> `auth.config.ts` by any path, and `middleware.ts` excludes all of `/api`
+> wholesale (necessarily — see Task 8's middleware note), so **neither
+> guard covered this route**. A review built with the flag off, then ran
+> `next start` (which sets `NODE_ENV=production`) with
+> `AUTH_DEV_BYPASS=true`: `/` and `/api/auth/session` correctly 500'd at
+> the guard, but `GET /api/dev-jwks` returned **200** with a live JWKS
+> containing a freshly generated RSA key. The code block below now includes
+> the fix — an explicit `assertBypassNotInProduction(process.env)` call at
+> module scope, imported from `@/auth.config`, making this route a third,
+> independently-guarded entry point alongside `auth.ts` and `middleware.ts`.
+> **The rule for any future module that imports `lib/dev-identity`
+> directly: it must call the guard itself.** A fourth test file,
+> `apps/web/test/dev-jwks-route.test.ts`, pins this (404 when off, a valid
+> public-only JWKS when on outside production, and a throw-on-import when
+> the flag is set in production) — Task 6 as originally executed shipped
+> with no test at all for this route.
+
 ```ts
 import { NextResponse } from "next/server";
+import { assertBypassNotInProduction } from "@/auth.config";
 
 /**
  * Publishes the dev public key so apps/api can validate dev-minted tokens
@@ -1835,7 +1856,16 @@ import { NextResponse } from "next/server";
  *
  * Returns 404 when the bypass is off, so this endpoint does not exist in a
  * normal build.
+ *
+ * This is a THIRD entry point into the bypass, alongside auth.ts and
+ * middleware.ts (via auth.config.ts) — and it does not go through either of
+ * those, because it imports lib/dev-identity directly and middleware.ts
+ * excludes /api wholesale. The guard's coverage is per entry point, not
+ * automatic, so this call is required here even though auth.config.ts
+ * already calls it at its own module scope for a different reason.
  */
+assertBypassNotInProduction(process.env);
+
 export async function GET() {
   if (process.env.AUTH_DEV_BYPASS !== "true") {
     return new NextResponse(null, { status: 404 });
@@ -1852,14 +1882,18 @@ export async function GET() {
 
 ```powershell
 pnpm --filter @irp/web test dev-identity
+pnpm --filter @irp/web test dev-jwks-route
 ```
 
-Expected: PASS, 7 tests (the six original plus the non-extractable guarantee).
+Expected: PASS, 7 tests in `dev-identity.test.ts` (the six original plus the
+non-extractable guarantee) and 3 tests in `dev-jwks-route.test.ts` (404 when
+off; a valid public-only JWKS when on outside production; a throw on import
+when the flag is set in production).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add apps/web/lib/dev-identities.ts apps/web/lib/dev-identity.ts "apps/web/app/api/dev-jwks" apps/web/test/dev-identity.test.ts apps/web/test/mocks/server-only.ts apps/web/vitest.config.ts
+git add apps/web/lib/dev-identities.ts apps/web/lib/dev-identity.ts "apps/web/app/api/dev-jwks" apps/web/test/dev-identity.test.ts apps/web/test/dev-jwks-route.test.ts apps/web/test/mocks/server-only.ts apps/web/vitest.config.ts
 git commit -m "feat(web): dev identity provider minting real RS256 tokens
 
 Swaps the token issuer rather than skipping authentication. A real JWT is
@@ -3570,6 +3604,8 @@ The `verify` job's timezone matrix and Postgres service stay exactly as they are
 > 1. **The plan never added a `next build` step.** Plain `tsc` (the existing `Typecheck` step) does not run Next's own checks — it missed both a `typedRoutes` error and a middleware export error that broke the production build for four tasks in this plan. Only `pnpm --filter @irp/web build` catches those, so it is now its own gate, placed after `Typecheck`/`Lint`. It must run with `AUTH_DEV_BYPASS` **unset** — with the flag set, `next build` sets `NODE_ENV=production` and `auth.config.ts`'s `assertBypassNotInProduction` correctly refuses to build. The job-level env added in Step 1 below deliberately omits it for exactly this reason.
 > 2. **Step 2's suggested `JWKS_URI` for the e2e step (`http://localhost:3000/api/dev-jwks`) does not match what `apps/web/playwright.config.ts` actually sets** for the `api` webServer (`http://127.0.0.1:3000/api/dev-jwks` — deliberately `127.0.0.1` because it is fetched over the network, per that file's own comment; `localhost` is reserved for `JWT_ISSUER`, which is only ever string-compared). The code block below now matches `playwright.config.ts`'s real values.
 > 3. **The four env vars this step sets (`AUTH_DEV_BYPASS`, `JWKS_URI`, `JWT_ISSUER`, `JWT_AUDIENCE`) have no effect on either spawned webServer today.** Playwright merges each webServer's environment as `{ ...process.env, ...webServer.env }` (`playwright/lib/runner/index.js`), and `playwright.config.ts` sets all four of these unconditionally in its own `webServer.env` blocks — so the config-level value always wins over whatever this CI step exports. They are kept anyway, corrected per point 2, as documentation of the same contract `playwright.config.ts` already enforces, and so they take effect immediately if that file is ever changed to read from `process.env` with a fallback the way its `DATABASE_URL` and `AUTH_SECRET` already do.
+>
+> **CORRECTED 2026-07-29 (whole-branch review, Important finding 2).** The "Upload the Playwright report on failure" step below uploaded `apps/web/playwright-report/`, but `apps/web/playwright.config.ts` set `reporter: "github"` under CI, and the `github` reporter writes **no files at all** — only inline PR annotations. `playwright-report/` is produced solely by the `html` reporter, and `trace: "retain-on-failure"` writes to `test-results/`, which was never uploaded either. `upload-artifact@v4` defaults to `if-no-files-found: warn`, so the step went green on an empty artifact and an e2e failure in CI shipped zero diagnostics — a gate that did nothing, by this repo's own standard. Fixed two ways: `apps/web/playwright.config.ts`'s CI reporter is now `[["github"], ["html", { open: "never" }]]` (kept `github` for inline annotations, added `html` so files actually exist to upload; `open: "never"` so it never tries to launch a browser on a runner), and the upload step below now uploads **both** `apps/web/playwright-report/` and `apps/web/test-results/`, so traces come too. `if-no-files-found` was deliberately left at its default (`warn`), not hardened to `error`: this step's `if` also fires when some *other* step failed on the UTC leg before Playwright ever ran, in which case both directories legitimately don't exist, and `error` would turn an unrelated failure into a second, misleading one. Proven locally: with `CI=1` set and one assertion in `apps/web/e2e/signin.spec.ts` temporarily broken, both directories filled with real files (an `index.html` report, a `trace.zip`, an `error-context.md`) after the run.
 
 - [ ] **Step 1: Add web env and Playwright to the `verify` job**
 
@@ -3614,12 +3650,28 @@ In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
           JWT_AUDIENCE: api://irp-progress-management
         run: pnpm --filter @irp/web e2e
 
+      # playwright.config.ts's CI reporter is [["github"], ["html", { open:
+      # "never" }]], not bare "github" — the github reporter alone writes NO
+      # files (only inline PR annotations), so this step used to upload an
+      # empty playwright-report/ and go green on an e2e failure with zero
+      # diagnostics attached. test-results/ is uploaded too: that is where
+      # `trace: "retain-on-failure"` writes, and traces are the actually
+      # useful artifact for debugging a CI-only failure.
+      #
+      # Deliberately NOT setting if-no-files-found: error. This step's `if`
+      # also fires when some OTHER step on the UTC leg failed before
+      # Playwright ever ran — in that case both directories legitimately
+      # don't exist, and hardening this into a hard failure would turn an
+      # unrelated failure into a second, misleading one. Leave the default
+      # (`warn`) so that scenario stays a warning, not a red X.
       - name: Upload the Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.timezone }}
-          path: apps/web/playwright-report/
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
           retention-days: 7
 ```
 

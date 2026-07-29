@@ -201,12 +201,29 @@ jobs:
           JWT_AUDIENCE: api://irp-progress-management
         run: pnpm --filter @irp/web e2e
 
+      # playwright.config.ts's CI reporter is now `[["github"], ["html", {
+      # open: "never" }]]`, not bare "github" — the github reporter alone
+      # writes NO files (only inline PR annotations), so this step used to
+      # upload an empty playwright-report/ and go green on an e2e failure
+      # with zero diagnostics attached. test-results/ is uploaded too: that
+      # is where `trace: "retain-on-failure"` writes, and traces are the
+      # actually useful artifact for debugging a CI-only failure.
+      #
+      # Deliberately NOT setting if-no-files-found: error. This step's `if`
+      # also fires when some OTHER step on the UTC leg failed before
+      # Playwright ever ran (e.g. Lint, or the DB migration step) — in that
+      # case both directories legitimately don't exist, and hardening this
+      # into a hard failure would turn an unrelated failure into a second,
+      # misleading one. Leave the default (`warn`) so that scenario stays a
+      # warning, not a red X.
       - name: Upload the Playwright report on failure
         if: failure() && matrix.timezone == 'UTC'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.timezone }}
-          path: apps/web/playwright-report/
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
           retention-days: 7
 
   # The Entra path, proven against a real token. Dormant until the tenant
