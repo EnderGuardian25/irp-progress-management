@@ -25,6 +25,17 @@ export const authPlugin = fp<AuthOptions>(
     app.decorateRequest("user", null);
 
     app.decorate("authenticate", async (req: FastifyRequest) => {
+      // Both the global fail-closed hook (plugins/require-auth.ts) and a
+      // route's own preHandler call this. Verifying twice would mean two JWT
+      // verifications and two findByExternalId round-trips per request, which
+      // bears directly on NFR-1 (p95 < 250 ms at 50 RPS) and NFR-2's burst
+      // target. req.user is per-request state, so an already-populated value
+      // means this request has already authenticated successfully.
+      //
+      // A FAILED authentication throws, so it never reaches this line — there
+      // is no path where a rejected request is later treated as authenticated.
+      if (req.user !== null) return;
+
       const header = req.headers.authorization;
       if (!header?.startsWith("Bearer ")) {
         throw new UnauthorizedError("No bearer token was supplied.");
