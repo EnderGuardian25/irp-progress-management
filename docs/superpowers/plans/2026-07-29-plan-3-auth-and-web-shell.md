@@ -1077,6 +1077,49 @@ export function assertBypassNotInProduction(env: NodeJS.ProcessEnv): void {
   }
 }
 
+/**
+ * Goes into the ENCRYPTED, HTTP-ONLY cookie. Server-only.
+ *
+ * Exported separately so it is directly testable — see Task 7's token-leak
+ * test. Keeping it inline in a config literal would leave the invariant
+ * assertable only end-to-end.
+ */
+export const jwtCallback: NonNullable<NextAuthConfig["callbacks"]>["jwt"] = ({
+  token,
+  account,
+  user,
+}) => {
+  if (account?.access_token !== undefined) {
+    token.accessToken = account.access_token;
+  }
+  // The dev provider returns its minted token on the user object, because a
+  // Credentials sign-in produces no account.access_token.
+  const devToken = (user as { devAccessToken?: string } | undefined)?.devAccessToken;
+  if (devToken !== undefined) {
+    token.accessToken = devToken;
+  }
+  return token;
+};
+
+/**
+ * This return value is what auth() gives a Server Component AND what the
+ * browser's GET /api/auth/session returns.
+ *
+ * The access token is deliberately ABSENT — exposing it here would hand the
+ * browser a bearer credential and destroy the whole design (spec §4.1).
+ *
+ * `role` is absent too, on purpose: it would be a second source of truth
+ * competing with the User row. The authoritative role comes from
+ * GET /api/v1/me (spec §4.1a).
+ *
+ * It takes `token` and deliberately copies NOTHING off it. That is the
+ * invariant Task 7 tests: given a token carrying accessToken and role, the
+ * session must carry neither.
+ */
+export const sessionCallback: NonNullable<NextAuthConfig["callbacks"]>["session"] = ({
+  session,
+}) => session;
+
 export const authConfig: NextAuthConfig = {
   providers: [
     MicrosoftEntraId({
@@ -1095,6 +1138,8 @@ export const authConfig: NextAuthConfig = {
     authorized({ auth: session }) {
       return session?.user != null;
     },
+    jwt: jwtCallback,
+    session: sessionCallback,
   },
 };
 ```
@@ -1117,38 +1162,12 @@ const devProviders: Provider[] = bypassEnabled
   ? [(await import("./lib/dev-identity")).devIdentityProvider()]
   : [];
 
+// The callbacks live in auth.config.ts and are shared by both configs, so the
+// invariant Task 7 tests is the same one production uses. Do not re-declare
+// them here — a second copy is a second thing to keep in step.
 const config: NextAuthConfig = {
   ...authConfig,
   providers: [...authConfig.providers, ...devProviders],
-  callbacks: {
-    ...authConfig.callbacks,
-
-    // Goes into the ENCRYPTED, HTTP-ONLY cookie. Server-only.
-    async jwt({ token, account, user }) {
-      if (account?.access_token !== undefined) {
-        token.accessToken = account.access_token;
-      }
-      // The dev provider returns its minted token on the user object, because
-      // Credentials sign-in produces no `account.access_token`.
-      const devToken = (user as { devAccessToken?: string } | undefined)?.devAccessToken;
-      if (devToken !== undefined) {
-        token.accessToken = devToken;
-      }
-      return token;
-    },
-
-    // This return value is what auth() gives a Server Component AND what the
-    // browser's GET /api/auth/session returns. The access token is deliberately
-    // ABSENT — exposing it here would hand the browser a bearer token and
-    // destroy the "no token in the browser" property.
-    //
-    // `role` is absent too, on purpose: it would be a second source of truth
-    // competing with the User row. The authoritative role comes from
-    // GET /api/v1/me. See spec §4.1a.
-    session({ session }) {
-      return session;
-    },
-  },
 };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(config);
@@ -1567,35 +1586,89 @@ Create `apps/web/test/token-leak.test.ts`. This is what turns "the token never r
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { authConfig } from "@/auth.config";
+import { authConfig, jwtCallback, sessionCallback } from "@/auth.config";
+
+// A token that carries BOTH secrets the session must never surface. If the
+// session callback ever copies from the token, these tests go red.
+const LOADED_TOKEN = {
+  sub: "dev-admin-1",
+  name: "Dev Mentor",
+  email: "mentor@dev.local",
+  accessToken: "eyJhbGciOiJSUzI1NiJ9.super-secret-bearer-token.sig",
+  role: "ADMIN",
+};
+
+const BARE_SESSION = {
+  user: { name: "Dev Mentor", email: "mentor@dev.local" },
+  expires: "2026-08-01T00:00:00.000Z",
+};
+
+function invokeSession(token: Record<string, unknown>): unknown {
+  // The callback's real signature carries more fields than we supply; the cast
+  // narrows to what this invariant depends on.
+  return (sessionCallback as (args: unknown) => unknown)({
+    session: structuredClone(BARE_SESSION),
+    token,
+    user: undefined,
+    newSession: undefined,
+    trigger: "update",
+  });
+}
 
 describe("the browser-visible session", () => {
-  it("does not expose an access token", () => {
-    // The session callback's return value is what GET /api/auth/session sends
-    // to the browser. Anything token-shaped here is a credential leak.
-    const session = {
-      user: { name: "Dev Mentor", email: "mentor@dev.local" },
-      expires: "2026-08-01T00:00:00.000Z",
-    };
-
-    const serialised = JSON.stringify(session);
+  it("does not surface the access token even when the token carries one", () => {
+    const serialised = JSON.stringify(invokeSession(LOADED_TOKEN));
     expect(serialised).not.toMatch(/accessToken/i);
     expect(serialised).not.toMatch(/\beyJ[A-Za-z0-9_-]{8,}/); // a JWT
+    expect(serialised).not.toContain("super-secret-bearer-token");
   });
 
-  it("does not expose a role — the User row is the only source of truth", () => {
-    const serialised = JSON.stringify({
-      user: { name: "Dev Mentor", email: "mentor@dev.local" },
-      expires: "2026-08-01T00:00:00.000Z",
-    });
+  it("does not surface a role — the User row is the only source of truth", () => {
+    const serialised = JSON.stringify(invokeSession(LOADED_TOKEN));
     expect(serialised).not.toMatch(/role/i);
+    expect(serialised).not.toContain("ADMIN");
   });
 
+  it("still returns the user identity the app needs to render", () => {
+    const result = invokeSession(LOADED_TOKEN) as typeof BARE_SESSION;
+    expect(result.user.name).toBe("Dev Mentor");
+    expect(result.user.email).toBe("mentor@dev.local");
+  });
+});
+
+describe("the jwt callback", () => {
+  it("stores a provider access token on the encrypted token", () => {
+    const result = (jwtCallback as (args: unknown) => Record<string, unknown>)({
+      token: { sub: "u1" },
+      account: { access_token: "from-entra" },
+      user: undefined,
+    });
+    expect(result.accessToken).toBe("from-entra");
+  });
+
+  it("stores the dev provider's minted token, which arrives on user not account", () => {
+    const result = (jwtCallback as (args: unknown) => Record<string, unknown>)({
+      token: { sub: "u1" },
+      account: null,
+      user: { devAccessToken: "from-dev-provider" },
+    });
+    expect(result.accessToken).toBe("from-dev-provider");
+  });
+});
+
+describe("authConfig", () => {
   it("keeps the sign-in page pointed at our own route, not a provider URL", () => {
     expect(authConfig.pages?.signIn).toBe("/signin");
   });
 });
 ```
+
+> **Why this shape:** an earlier draft of this plan asserted against a
+> hand-written literal — `JSON.stringify({user:{...}})` checked for a key the
+> literal never had — which could not fail regardless of what the callback did.
+> These tests invoke the **real** callback with a token that carries both
+> secrets, so copying token→session turns them red. Caught in the pre-flight
+> plan review, 2026-07-29.
 
 - [ ] **Step 3: Run both to make sure they fail**
 
@@ -2202,8 +2275,40 @@ describe("the global fail-closed hook", () => {
     expect(body.type).toContain("unauthorized");
     expect(body.traceId).toBeTypeOf("string");
   });
+
+  it("authenticates ONCE per request, not once per layer", async () => {
+    // /api/v1/me sits behind BOTH the global hook and its own preHandler. Both
+    // call app.authenticate. Without idempotency that is two JWT verifications
+    // and two findByExternalId round-trips per request — a measurable cost
+    // against NFR-1 (p95 < 250 ms at 50 RPS) and NFR-2's burst target.
+    const spy = vi.spyOn(prisma.user, "findFirst");
+    spy.mockClear();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${await signToken({ oid: "dev-admin-1" })}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
 });
 ```
+
+Add to the imports at the top of this test file:
+
+```ts
+import { vi } from "vitest";
+import { signToken } from "./helpers/keys.js";
+```
+
+> **Note on `findFirst`:** `createUserRepo`'s `findByExternalId` uses a soft-delete
+> filter, so confirm which Prisma method it actually calls by reading
+> `apps/api/src/db/user-repo.ts`, and spy on that one. If it is `findUnique`,
+> spy on `prisma.user.findUnique` instead. The assertion is "exactly one
+> database round-trip", not the method name.
 
 - [ ] **Step 2: Run it and CONFIRM IT FAILS**
 
@@ -2273,6 +2378,27 @@ Then register it **after** `authPlugin` and **before** the routes:
   await app.register(meRoutes);
 ```
 
+- [ ] **Step 4a: Make `authenticate` idempotent per request**
+
+`/api/v1/me` sits behind both the global hook and its own `preHandler`, and both call `app.authenticate`. Without this, every protected request pays two JWT verifications and two database round-trips.
+
+Keeping both layers is deliberate: the global hook is the structural guarantee, and Plan 2B's route-discovery test asserts the `preHandler` is present. Idempotency is how we keep both without paying twice.
+
+In `apps/api/src/plugins/auth.ts`, add this as the **first** statement inside the `app.decorate("authenticate", ...)` callback, before the `authorization` header is read:
+
+```ts
+      // Both the global fail-closed hook (plugins/require-auth.ts) and a
+      // route's own preHandler call this. Verifying twice would mean two JWT
+      // verifications and two findByExternalId round-trips per request, which
+      // bears directly on NFR-1 (p95 < 250 ms at 50 RPS) and NFR-2's burst
+      // target. req.user is per-request state, so an already-populated value
+      // means this request has already authenticated successfully.
+      //
+      // A FAILED authentication throws, so it never reaches this line — there
+      // is no path where a rejected request is later treated as authenticated.
+      if (req.user !== null) return;
+```
+
 - [ ] **Step 5: Run the tests to verify they pass**
 
 ```powershell
@@ -2280,9 +2406,9 @@ $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
 pnpm --filter @irp/api test
 ```
 
-Expected: PASS. 4 new tests; the existing 48 still green, 52 total in `apps/api`.
+Expected: PASS. 5 new tests; the existing 48 still green, 53 total in `apps/api`.
 
-> The per-route `preHandler: [app.authenticate]` on `/api/v1/me` now runs after the global hook. `authenticate` is idempotent — it re-verifies and re-assigns `req.user`. Leave it: it is belt and braces, and Plan 2B's route-discovery test asserts it is present.
+If "authenticates ONCE per request" still fails, check that `app.decorateRequest("user", null)` gives each request its own `null` rather than a shared reference, and that the early return is before the header read.
 
 - [ ] **Step 6: Commit**
 
