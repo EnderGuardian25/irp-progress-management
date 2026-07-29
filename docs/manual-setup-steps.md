@@ -68,9 +68,20 @@ Then: `az login --tenant <new-tenant-id> --allow-no-subscriptions`
 **If tenant creation is blocked** (some directories restrict non-admins from creating tenants),
 say so — the fallback is the mentor ask in §3, with the design unchanged either way.
 
-### 1.2 Install the Azure CLI — ✅ DONE
+### 1.2 Install the Azure CLI — ✅ on machine 1, ⬅ **TODO on machine 2**
 
-Installed and working, version **2.88.0**. Nothing to do.
+Installed and working on the original dev machine, version **2.88.0**.
+
+**On the second machine (2026-07-29) it is absent and I cannot install it for you.** The Azure CLI
+ships as a machine-scope MSI, so `winget` needs elevation, and a UAC prompt cannot be answered from
+a non-interactive session — the attempt hung and was killed with nothing installed. Run this
+yourself **from an elevated terminal**:
+
+```powershell
+winget install -e --id Microsoft.AzureCLI
+```
+
+Then, in a fresh terminal: `az login`. Every `az` step in this document depends on it.
 
 Note for later: `az` reaches **Azure Resource Manager fine** but is repeatedly challenged on
 **Microsoft Graph** in the `bisteccare.lk` tenant (`InteractionRequired` /
@@ -79,25 +90,37 @@ conditional-access policy, not a broken install — and it is the reason for §1
 
 ### 1.2a Register the Azure resource providers
 
-All five are currently `NotRegistered`. Bicep fails with a confusing error rather than a clear one
-if they aren't registered first, so do this before Plan 4.
+**Four** are needed and all are currently `NotRegistered`. Bicep fails with a confusing error
+rather than a clear one if they aren't registered first, so do this before Plan 4.
 
 ```powershell
 az provider register --namespace Microsoft.App
 az provider register --namespace Microsoft.DBforPostgreSQL
 az provider register --namespace Microsoft.Insights
 az provider register --namespace Microsoft.OperationalInsights
-az provider register --namespace Microsoft.ContainerRegistry
 ```
 
-Free, reversible, creates nothing, takes a few minutes in the background. I can run these for you
-— just say so.
+`Microsoft.ContainerRegistry` was on this list and **is no longer needed** — images go to GHCR, not
+ACR (see §1.5).
+
+Free, reversible, creates nothing, takes a few minutes in the background. **I cannot run these for
+you** — they need an authenticated `az` session, and `az login` is an interactive browser flow.
+Run `az login` yourself, then either run the four lines above or tell me and I will.
 
 ### 1.3 Grant admin consent for the Entra app registrations
 
-The app registrations themselves are created by a committed bootstrap script, not by hand.
+The app registrations themselves are created by **`infra/entra.bicep`** (`Microsoft.Graph/
+applications@v1.0`), not by hand and not by a checked-in script — see `handoff.md` §3 decision 4.
 But **granting admin consent requires a human click in the portal** — that is a deliberate
 Microsoft safeguard and cannot be scripted away.
+
+Two other things in this area are also human-only, for the same reason:
+
+- **Minting the client secret.** Bicep cannot emit one — `passwordCredentials.secretText` is
+  read-only. Auth.js needs a secret for the confidential-client code flow, so it is created once
+  with `az ad app credential reset` and lands in `apps/web/.env.local` plus a GitHub Actions secret.
+- **Assigning the k6 service principal its app role**, which needs elevated consent with no
+  narrower permission available.
 
 I will tell you exactly which app and which permissions when Plan 3 reaches that point.
 
@@ -110,9 +133,44 @@ when Plan 4 generates them; the names will be:
 - `AZURE_SUBSCRIPTION_ID`
 - `POSTGRES_ADMIN_PASSWORD`
 - `APPLICATIONINSIGHTS_CONNECTION_STRING`
+- `AUTH_SECRET` — Auth.js cookie encryption key (`openssl rand -base64 32`)
+- `ENTRA_CLIENT_SECRET` — the one from §1.3, since Bicep cannot emit it
+- `GHCR_PAT` — **only if the images stay private**; see §1.5
 
 **Never paste any of these into the chat.** Put them straight into GitHub. If one is ever
 exposed, rotate it rather than hoping.
+
+### 1.5 Decide whether the container images are public — one question, then it's automated
+
+Images go to **GitHub Container Registry**, not ACR (decided 2026-07-29; ~$5/mo saved, and it
+keeps everything in one place). That leaves exactly one choice for you:
+
+| Option | What it costs you |
+|---|---|
+| **Packages public** | Nothing. No credential at all — Container Apps pulls anonymously, no `GHCR_PAT`, nothing to rotate. The images become world-readable. They contain no secrets (all config is env-injected at runtime), so the exposure is the source code itself |
+| **Packages private** | A PAT with `read:packages`, stored as `GHCR_PAT` and referenced as a Container Apps registry secret. One more long-lived credential to rotate |
+
+Tell me which and the Bicep follows. **Default if you say nothing: private with a PAT**, because it
+is the reversible direction — making a package public later is a click, un-publishing something the
+internet has already pulled is not.
+
+### 1.6 Hosting shape, for reference — nothing to do here
+
+Settled 2026-07-29, recorded so you are not re-deciding it at deploy time. Full reasoning in
+`docs/adr/0009-hosting-topology.md`.
+
+| Choice | Value |
+|---|---|
+| Region | **Southeast Asia** (Singapore) — lowest latency to Sri Lanka, ~50 ms, and the p95 < 250 ms target is measured over it |
+| Registry | GHCR |
+| Postgres reachability | Public endpoint + firewall + `sslmode=require`. Not VNet-private — that needs a VNet-injected Container Apps environment and a /23 subnet |
+| Migrations | A **Container Apps Job** inside the environment, so no firewall hole is ever opened for a GitHub runner's dynamic IP |
+| `apps/web` scaling | Min replicas **0**. Cold start is acceptable for a demo |
+| `apps/api` scaling | Min replicas 0 normally, **≥1 during the k6 run** — a scale-from-zero cold start alone would miss p95 < 250 ms |
+
+**Two dates that matter:** the $200 credit expires around **2026-08-27** (30 days from account
+creation), so the load test belongs inside that window; and the free Postgres B1ms allowance is
+750 h/month **for 12 months**, from 2026-07-28.
 
 ---
 
@@ -195,6 +253,6 @@ Listed so you do not waste time on it:
 
 - **No portal clicks for infrastructure.** Everything except Entra admin consent comes from `infra/main.bicep`.
 - **No manual deploys.** GitHub Actions handles it on merge to `main`.
-- **No manual app registration.** A committed, re-runnable script creates it; you only consent.
-- **No database setup.** Bicep provisions Postgres; migrations run from CI.
+- **No manual app registration.** `infra/entra.bicep` declares them and is idempotent on `uniqueName`; you only consent and mint the secret (§1.3).
+- **No database setup.** Bicep provisions Postgres; migrations run as a Container Apps Job, not from a CI runner.
 - **No local `.env` juggling for CI.** Secrets live in GitHub.

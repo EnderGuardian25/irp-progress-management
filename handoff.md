@@ -35,9 +35,16 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
-**Last updated:** 2026-07-28, **Plan 2B merged as PR #5**. Plan 3 is in the design phase on
+**Last updated:** 2026-07-29, **Plan 2B merged as PR #5**. Plan 3 is in the design phase on
 `feat/plan-3-auth-and-web-shell` — the brainstorm is partly done and its settled decisions are
 recorded in §3. No Plan 3 code exists yet.
+
+**Machine change, 2026-07-29.** Development moved to a second machine. It is fully provisioned and
+verified: install → generate → prisma generate → core build → `pnpm typecheck` clean, and
+**160 tests / 16 files green against real Postgres** (112 core + 48 api). Docker server 29.6.1,
+Postgres on host port **5433** as on machine 1. **The Azure CLI is NOT installed here** — it needs
+an elevated MSI install, see `docs/manual-setup-steps.md` §1.2. The hosting topology was settled
+this session and is ADR-0009.
 
 ### Done
 
@@ -45,11 +52,14 @@ recorded in §3. No Plan 3 code exists yet.
 - **Stakeholder interview** — `docs/stakeholder-interview.md`.
 - **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-13.
 - **`docs/design-system.md`** — visual system. Palette verified by script: 35 pairs across light and dark pass WCAG AA, all tokens in sRGB gamut.
-- **Eight ADRs** — `docs/adr/0001`–`0008`. Each names at least two rejected alternatives.
+- **Nine ADRs** — `docs/adr/0001`–`0009`. Each names at least two rejected alternatives.
   **0007** hand-written tracing plugin over auto-instrumentation (Plan 2B Task 3);
   **0008** Prisma driver adapter (`@prisma/adapter-pg`) over Accelerate (Plan 2B Task 5) —
   Accelerate was rejected partly because student submissions are personal data and it is a
-  third-party proxy they would transit, the same concern class as O-5.
+  third-party proxy they would transit, the same concern class as O-5;
+  **0009** hosting topology (2026-07-29) — GHCR over ACR, public-with-firewall Postgres over a
+  VNet private endpoint, migrations as a Container Apps Job, Southeast Asia, and scale-to-zero
+  with the API's replica floor raised only for the k6 run.
 - **`docs/manual-setup-steps.md`** — everything needing a human. **Start here if you are Damian.**
 
 **Code — merged to `main`**
@@ -319,9 +329,31 @@ because this is the plan that makes it real.
    §6 (the auth shape and its "Known gap") and §7, and
    `docs/superpowers/specs/2026-07-28-plan-2-api-contract-design.md` §7 (the 403 rule) and §9
    (error handling) for what the API already guarantees.
-2. Run `pnpm install && pnpm generate && pnpm --filter @irp/api exec prisma generate && pnpm --filter @irp/core build`
-   — the Prisma client is a third git-ignored generated package, so a fresh clone will not
-   typecheck until it exists.
+2. Bring the clone up. **`prisma generate` needs `DATABASE_URL` in the shell environment first** —
+   Prisma 7 dropped implicit `.env` loading, and `prisma.config.ts` resolves `env("DATABASE_URL")`
+   from the real process env, so a bare `prisma generate` fails `PrismaConfigEnvError` on a fresh
+   clone. The value only has to *parse*; `generate` never connects.
+
+   ```powershell
+   pnpm install
+   pnpm generate
+   Copy-Item apps/api/.env.example apps/api/.env      # git-ignored
+   $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+   pnpm --filter @irp/api exec prisma generate         # third generated package
+   pnpm --filter @irp/core build
+   pnpm typecheck                                      # should be clean, 4 projects
+   ```
+
+   To run the database-backed tests as well:
+
+   ```powershell
+   $env:IRP_DB_PORT = "5433"
+   docker compose -f apps/api/docker-compose.yml up -d
+   pnpm --filter @irp/api exec prisma migrate deploy
+   pnpm test        # expect 160 tests / 16 files, zero skipped
+   ```
+
+   Verified end to end on a second machine on 2026-07-29: 112 core + 48 api, all green.
 3. **Plan 3 is mid-brainstorm.** Section 1 is approved; Sections 2 and 3 are not written. Resume
    with `superpowers:brainstorming` — present the remaining sections, then write the spec to
    `docs/superpowers/specs/2026-07-28-plan-3-auth-and-web-shell-design.md`, then `writing-plans`,
