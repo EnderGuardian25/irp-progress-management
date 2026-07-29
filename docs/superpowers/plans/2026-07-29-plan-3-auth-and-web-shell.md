@@ -3565,6 +3565,12 @@ retries: 0. A flaky e2e test that passes on retry teaches nothing."
 
 The `verify` job's timezone matrix and Postgres service stay exactly as they are.
 
+> **CORRECTED 2026-07-29 (Task 13 execution).** Three defects found while wiring this, now folded into the steps below:
+>
+> 1. **The plan never added a `next build` step.** Plain `tsc` (the existing `Typecheck` step) does not run Next's own checks — it missed both a `typedRoutes` error and a middleware export error that broke the production build for four tasks in this plan. Only `pnpm --filter @irp/web build` catches those, so it is now its own gate, placed after `Typecheck`/`Lint`. It must run with `AUTH_DEV_BYPASS` **unset** — with the flag set, `next build` sets `NODE_ENV=production` and `auth.config.ts`'s `assertBypassNotInProduction` correctly refuses to build. The job-level env added in Step 1 below deliberately omits it for exactly this reason.
+> 2. **Step 2's suggested `JWKS_URI` for the e2e step (`http://localhost:3000/api/dev-jwks`) does not match what `apps/web/playwright.config.ts` actually sets** for the `api` webServer (`http://127.0.0.1:3000/api/dev-jwks` — deliberately `127.0.0.1` because it is fetched over the network, per that file's own comment; `localhost` is reserved for `JWT_ISSUER`, which is only ever string-compared). The code block below now matches `playwright.config.ts`'s real values.
+> 3. **The four env vars this step sets (`AUTH_DEV_BYPASS`, `JWKS_URI`, `JWT_ISSUER`, `JWT_AUDIENCE`) have no effect on either spawned webServer today.** Playwright merges each webServer's environment as `{ ...process.env, ...webServer.env }` (`playwright/lib/runner/index.js`), and `playwright.config.ts` sets all four of these unconditionally in its own `webServer.env` blocks — so the config-level value always wins over whatever this CI step exports. They are kept anyway, corrected per point 2, as documentation of the same contract `playwright.config.ts` already enforces, and so they take effect immediately if that file is ever changed to read from `process.env` with a fallback the way its `DATABASE_URL` and `AUTH_SECRET` already do.
+
 - [ ] **Step 1: Add web env and Playwright to the `verify` job**
 
 In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
@@ -3577,9 +3583,22 @@ In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
       API_BASE_URL: http://localhost:3001
 ```
 
-- [ ] **Step 2: Add a Playwright step after the existing `Test` step**
+- [ ] **Step 2: Add `next build`, then a Playwright step, after the existing `Test` step**
 
 ```yaml
+      # Plain tsc (Typecheck, above) does not run Next's own checks — it
+      # missed both a typedRoutes error and a middleware export error that
+      # broke the production build for four tasks. Only `next build` catches
+      # those, so it runs as its own gate rather than being folded into
+      # Typecheck. AUTH_DEV_BYPASS is unset at job level for this step on
+      # purpose: with it set, `next build` sets NODE_ENV=production and
+      # auth.config.ts's assertBypassNotInProduction correctly refuses to
+      # build — see apps/web/auth.config.ts.
+      - name: Build @irp/web
+        run: pnpm --filter @irp/web build
+
+      # (existing "Apply database migrations" and "Test" steps stay where they are)
+
       - name: Install the Playwright browser
         run: pnpm --filter @irp/web exec playwright install --with-deps chromium
 
@@ -3590,7 +3609,7 @@ In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
       - name: End-to-end smoke test
         env:
           AUTH_DEV_BYPASS: "true"
-          JWKS_URI: http://localhost:3000/api/dev-jwks
+          JWKS_URI: http://127.0.0.1:3000/api/dev-jwks
           JWT_ISSUER: http://localhost:3000/api/dev-jwks
           JWT_AUDIENCE: api://irp-progress-management
         run: pnpm --filter @irp/web e2e
@@ -3604,7 +3623,7 @@ In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
           retention-days: 7
 ```
 
-> These env values **override** the job-level `JWKS_URI: https://jwks.invalid/keys` for this step only. The job-level value stays deliberately unresolvable so the unit suite cannot depend on reaching the network.
+> These env values are inert today (see the correction note above) — `playwright.config.ts` overrides all four unconditionally for its own webServers. They are kept, corrected to match `playwright.config.ts`'s real values, as documentation and as a forward guard. The job-level `JWKS_URI: https://jwks.invalid/keys` remains deliberately unresolvable for every other step; the unit suite must never depend on reaching the network.
 
 - [ ] **Step 3: Add the dormant real-token job**
 
