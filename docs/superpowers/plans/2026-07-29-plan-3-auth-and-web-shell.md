@@ -1035,6 +1035,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 ```
 
 > **Note for the implementer:** `getCurrentUserOrRedirect` lands in Task 7. This layout will not typecheck until then. That is expected — do **not** stub it. Run only the component tests in this task; the full typecheck gate is Task 7's Step 8.
+>
+> **Correction (found executing Task 4):** root `pnpm lint` also fails until Task 7, for the
+> same reason — not just `tsc`. `eslint.config.mjs` runs typescript-eslint's type-aware rules,
+> and an unresolved import types as `error`/`any`, which cascades into
+> `@typescript-eslint/no-unsafe-assignment`, `no-unsafe-call`, and `no-unsafe-member-access` on
+> `user` and `user.displayName` in this file (4 errors). This is expected and resolves itself
+> once Task 7 adds the real `lib/api-client.ts` — no eslint-disable is needed or wanted here,
+> matching the "do not stub it" rule above. Both gates are deferred to Task 7's Step 8.
 
 - [ ] **Step 6: Run the component tests to verify they pass**
 
