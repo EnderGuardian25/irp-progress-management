@@ -25,9 +25,23 @@ const devProviders: Provider[] = bypassEnabled
 // The callbacks live in auth.config.ts and are shared by both configs, so the
 // invariant Task 7 tests is the same one production uses. Do not re-declare
 // them here — a second copy is a second thing to keep in step.
-const config: NextAuthConfig = {
-  ...authConfig,
-  providers: [...authConfig.providers, ...devProviders],
-};
+const providers: Provider[] = [...authConfig.providers, ...devProviders];
+
+// Fail loudly rather than mysteriously. authConfig omits the Entra provider
+// when it is not configured (see isEntraConfigured — registering it with an
+// empty issuer makes Auth.js throw InvalidEndpoints on EVERY auth request,
+// which is how CI broke). Combined with the bypass being off, that can leave
+// ZERO providers, and Auth.js's own failure for that is an opaque
+// "problem with the server configuration" on first sign-in. Say what is
+// actually wrong, at startup.
+if (providers.length === 0) {
+  throw new Error(
+    "No auth providers are configured. Either set the three " +
+      "AUTH_MICROSOFT_ENTRA_ID_* variables, or set AUTH_DEV_BYPASS=true for " +
+      "local development. See apps/web/.env.example.",
+  );
+}
+
+const config: NextAuthConfig = { ...authConfig, providers };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(config);
