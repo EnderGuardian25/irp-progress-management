@@ -905,7 +905,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/web/auth.ts` (comment reference only)
 - Modify: `apps/web/app/(app)/layout.tsx`, `apps/web/app/(auth)/not-registered/page.tsx`,
   `apps/web/lib/api-client.ts`, `apps/web/test/dev-jwks-route.test.ts`,
-  `apps/web/.env.example` (comment/prose references only)
+  `apps/web/test/prod-guard.test.ts`, `apps/web/.env.example` (comment/prose references only)
 
 **Interfaces:**
 - Consumes: `authConfig` from `apps/web/auth.config.ts` (unchanged).
@@ -1146,7 +1146,7 @@ Expected: PASS.
 
 - [ ] **Step 6: Update the stale comment references**
 
-Eight files refer to `middleware.ts` in prose. Update each to say `proxy.ts`, keeping the meaning
+Nine files refer to `middleware.ts` in prose. Update each to say `proxy.ts`, keeping the meaning
 intact. Do **not** restrict the grep to `.ts`/`.tsx` — that filter cannot match `.env.example`,
 which is exactly how the first pass over this step missed a hit:
 
@@ -1157,7 +1157,8 @@ grep -rn "middleware" apps/web | grep -v node_modules
 Files to fix: `apps/web/auth.config.ts` (lines ~44–46), `apps/web/auth.ts` (~9),
 `apps/web/app/api/dev-jwks/route.ts` (~12–14), `apps/web/app/(app)/layout.tsx` (~12),
 `apps/web/app/(auth)/not-registered/page.tsx` (~5), `apps/web/lib/api-client.ts` (~131),
-`apps/web/test/dev-jwks-route.test.ts` (~9, ~15, ~58), `apps/web/.env.example` (~17–18 — this one
+`apps/web/test/dev-jwks-route.test.ts` (~9, ~15, ~58), `apps/web/test/prod-guard.test.ts` (~49–54),
+`apps/web/.env.example` (~17–18 — this one
 also states a false count, "three separate calls"; there are two calls covering three entry
 points, one of them transitively via `auth.ts`'s import of `auth.config.ts` — correct the wording,
 not just the filename).
