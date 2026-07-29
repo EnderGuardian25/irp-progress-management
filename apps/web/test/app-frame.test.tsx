@@ -28,12 +28,21 @@ describe("Sidebar", () => {
     expect(screen.getByRole("navigation")).toHaveStyle({ width: "216px" });
   });
 
-  it("renders every destination as a non-interactive item — none has a page yet", () => {
-    // "/" has no page.tsx either (only apps/web/app/(app)/layout.tsx exists;
-    // Task 9 adds the page). typedRoutes rejects a Link to any of the five,
-    // so none render as links until their task lands.
+  it("renders Today as a real link now that / has a page", () => {
+    // Task 9 added apps/web/app/(app)/page.tsx, so "/" is a route typedRoutes
+    // accepts. Today is a link; it carries no aria-disabled.
     render(<Sidebar />);
-    for (const item of ["Today", "Roster", "Review", "Cycles", "Students"]) {
+    const today = screen.getByRole("link", { name: /Today/ });
+    expect(today).toHaveAttribute("href", "/");
+    expect(today).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("renders the remaining four destinations as non-interactive items — none has a page yet", () => {
+    // Roster and Students land in Plan 6, Review and Cycles in Plan 7.
+    // typedRoutes rejects a Link to any of the four, so they stay
+    // non-interactive until their own task lands.
+    render(<Sidebar />);
+    for (const item of ["Roster", "Review", "Cycles", "Students"]) {
       expect(screen.queryByRole("link", { name: new RegExp(item) })).not.toBeInTheDocument();
       const el = screen.getByText(new RegExp(item));
       expect(el).toHaveAttribute("aria-disabled", "true");
