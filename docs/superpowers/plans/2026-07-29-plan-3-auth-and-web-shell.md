@@ -3640,7 +3640,12 @@ In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
 
       - name: Seed the dev users the e2e test expects
         run: |
-          psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+          # DATABASE_URL ends in `?schema=public` — a PRISMA extension, not a libpq
+          # parameter. Passing it straight to psql fails with `invalid URI query
+          # parameter: "schema"`, which is exactly how the seed step failed on its
+          # first real CI run, before the e2e suite ran at all. Strip the query.
+          PSQL_URL="${DATABASE_URL%%?*}"
+          psql "$PSQL_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
 
       - name: End-to-end smoke test
         env:
@@ -3786,7 +3791,12 @@ Append as a sibling of `verify`:
           # object id. A User row must exist for it, or the API correctly 403s.
           oid=$(echo "$ACCESS_TOKEN" | cut -d. -f2 \
             | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r '.oid')
-          psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), '${oid}', 'k6@ci.local', 'k6 Load Principal', 'ADMIN', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+          # DATABASE_URL ends in `?schema=public` — a PRISMA extension, not a libpq
+          # parameter. Passing it straight to psql fails with `invalid URI query
+          # parameter: "schema"`, which is exactly how the seed step failed on its
+          # first real CI run, before the e2e suite ran at all. Strip the query.
+          PSQL_URL="${DATABASE_URL%%?*}"
+          psql "$PSQL_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), '${oid}', 'k6@ci.local', 'k6 Load Principal', 'ADMIN', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
 
           pnpm --filter @irp/api dev &
           for _ in $(seq 1 30); do

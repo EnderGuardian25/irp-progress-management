@@ -35,9 +35,19 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
-**Last updated:** 2026-07-29, **Plan 2B merged as PR #5**. Plan 3 is in the design phase on
-`feat/plan-3-auth-and-web-shell` — the brainstorm is partly done and its settled decisions are
-recorded in §3. No Plan 3 code exists yet.
+**Last updated:** 2026-07-29, **Plan 3 merged as PR #6**. Slice 1 needs only Plan 4 (infra,
+deploy, observability) to be complete.
+
+**Plan 3 shipped a working web app.** A browser signs in, a real RS256 JWT is minted, `apps/api`
+validates it through `createRemoteJWKSet` with its genuine `jose` path, and the real user renders
+from `GET /api/v1/me`. Proven end to end by a Playwright suite, not asserted.
+
+**It also shipped a dev auth bypass, and that is the thing to know before touching anything.**
+Damian has no Entra admin access, so `AUTH_DEV_BYPASS=true` makes `apps/web` mint tokens with a
+local key and publish the matching JWKS. **It swaps the token issuer; it does not skip
+authentication** — `apps/api` has no bypass branch. **It must be deleted, not left dormant.** The
+cutover is four config steps with no code change (Plan 3 spec §7). ADR-0012, and a house rule in
+`CLAUDE.md`.
 
 **Machine change, 2026-07-29.** Development moved to a second machine. It is fully provisioned and
 verified: install → generate → prisma generate → core build → `pnpm typecheck` clean, and
@@ -52,7 +62,12 @@ this session and is ADR-0009.
 - **Stakeholder interview** — `docs/stakeholder-interview.md`.
 - **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-13.
 - **`docs/design-system.md`** — visual system. Palette verified by script: 35 pairs across light and dark pass WCAG AA, all tokens in sRGB gamut.
-- **Nine ADRs** — `docs/adr/0001`–`0009`. Each names at least two rejected alternatives.
+- **Twelve ADRs** — `docs/adr/0001`–`0012`. Each names at least two rejected alternatives.
+  **0010** Auth.js v5 over MSAL — records that `next-auth` is pinned to `5.0.0-beta.32`, a beta,
+  because `latest` is `4.24.15`, an *older* major with no App Router support;
+  **0011** Microsoft Graph Bicep extension over a committed bootstrap script — supersedes slice-1
+  spec §7, and the file moves to Plan 4;
+  **0012** the dev auth bypass by issuer swap — **read this one before touching auth.**
   **0007** hand-written tracing plugin over auto-instrumentation (Plan 2B Task 3);
   **0008** Prisma driver adapter (`@prisma/adapter-pg`) over Accelerate (Plan 2B Task 5) —
   Accelerate was rejected partly because student submissions are personal data and it is a
@@ -107,20 +122,31 @@ apps/api/prisma/         schema.prisma (User + Role) + committed migration
 apps/api/prisma.config.ts    Prisma 7 CLI datasource config (the schema block cannot hold `url`)
 apps/api/src/generated/prisma/   GENERATED, git-ignored — a THIRD generated package
 apps/api/docker-compose.yml  local Postgres 16, host port ${IRP_DB_PORT:-5432}
+apps/web/                Next.js 16 — Auth.js v5, route groups ((auth) bare, (app) framed),
+                         verified design tokens, app frame, CycleRibbon, server-only API client
+                         factory, middleware guard. 63 unit tests + 5 Playwright specs
+apps/web/lib/dev-identity.ts     THE DEV BYPASS. server-only. Mints RS256 tokens with a local
+                         key. Guarded at three entry points — see ADR-0012
+apps/web/e2e/            Playwright. The only test proving the whole sign-in chain
+packages/client/dist/    GENERATED declarations, git-ignored. Consumers resolve TYPES from here
+                         so apps/web keeps full strictness
 redocly.yaml             recommended-strict + a custom four-response assertion
 eslint.config.mjs        type-aware, generated dirs ignored
-.github/workflows/ci.yml 3-timezone matrix + Postgres service, prisma generate/migrate
+.github/workflows/ci.yml 3-timezone matrix + Postgres, generation and tamper gates, next build,
+                         Playwright on the UTC leg, and a dormant real-token job
 ```
+
+Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwright.**
 
 ### Not started
 
-`apps/web`, `infra/`, `tests/load/`. **Plan 3 is in design, not blocked.** Plan 4 needs the Entra
-directory below before its Bicep can deploy from CI.
+`infra/`, `tests/load/`. Plan 4 needs the Entra directory below before its Graph Bicep can deploy
+from CI — but note the dev bypass means **nothing is blocked on it for building or demoing**.
 
 ### Blocked / needs the stakeholder
 | # | Item | Blocks |
 |---|---|---|
-| **—** | **A dedicated Entra directory.** The Azure *subscription* now exists and hosting works; **Entra is the remaining gap** — see §3 "Azure and Entra: the real state" | Creating the app registrations, and Plan 4's Graph Bicep deploying from CI. `docs/manual-setup-steps.md` §1 |
+| **—** | **A dedicated Entra directory.** The Azure *subscription* exists and hosting works; **Entra is the remaining gap** — see §3 "Azure and Entra: the real state". **Damian's work account has no Entra admin access**, so tenant creation may be restricted; the fallback is a free tenant created from a personal Microsoft account, with a native `admin@<name>.onmicrosoft.com` for all CLI and Bicep work | **No longer blocks building or demoing** — Plan 3's dev bypass removed that dependency. Still blocks: real Microsoft sign-in, `infra/entra.bicep` (now Plan 4's), and waking the dormant real-token CI job. `docs/manual-setup-steps.md` §1.1a |
 | O-5 | **AI provider + data-processing approval.** Student submissions are personal data leaving the tenant | The whole AI slice (Plan 9, FR-22 to FR-26). Needs an ADR and escalation to leadership |
 | O-6 | Exact wording of the five rubric criteria | The evaluation schema and screen |
 | O-10 | FR-13 and FR-15 conflict on the Monday grace window | Implemented on the FR-15 reading, marked `// ASSUMPTION: O-10`. Blocks nothing |
@@ -161,8 +187,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | **1 — Deployed integration skeleton** | 1 · Foundation + cycle engine | T-01, T-03, T-06 | D2 | ✅ **Merged, PR #2** |
 | | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
 | | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | ✅ **Merged, PR #5** |
-| | 3 · Auth + web shell | T-11 | D3 | **In design** — branch `feat/plan-3-auth-and-web-shell`. Decisions in §3 |
-| | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Needs the Entra directory (§3) before Graph Bicep can deploy from CI |
+| | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
+| | 4 · Infra, deploy, observability | T-19 – T-23, plus `infra/entra.bicep` moved here from Plan 3 | D3 | **Next.** Needs the Entra directory (§3) before Graph Bicep can deploy from CI |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
@@ -238,7 +264,32 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/plan-3-auth-and-web-shell` · **Next:** finish the Plan 3 **brainstorm** (Sections 2–3), write the spec, then `writing-plans` · **Ledger:** none yet — Plan 2B's workspace was deleted at merge, and Plan 3's is created by `sdd-workspace` when execution starts
+**Branch:** `main` — Plan 3 merged as PR #6 · **Next:** Plan 4 (infra, deploy, observability), which
+now also owns `infra/entra.bicep` · **Ledger:** Plan 3's is at `.superpowers/sdd/progress.md` and is
+worth reading before Plan 4 — it records every defect the review loop caught and why
+
+**Start Plan 4 with `brainstorming`**, then a spec, then `writing-plans`, then
+`subagent-driven-development`. Before its first task, **archive Plan 3's SDD workspace** per the
+correction below.
+
+### What Plan 3 cost, and the one lesson worth carrying
+
+Fourteen tasks, 35 commits, twelve fix passes. **Every defect the reviews found originated in the
+plan, not in an implementation.** The two most serious were a design-system colour set I asserted
+was "verified" without having read §3.3, and a `DayMark` union that conflated status with "is
+today" so that today-with-zero-submissions would have rendered as solid full green to a mentor.
+
+Three claims about the dev bypass's guard coverage turned out to be false in sequence — the guard
+called only from `auth.ts`; "excluded from the production bundle"; and coverage being exhaustive
+"because it is the same call". The third was found by the whole-branch review serving a live JWKS
+with 200 from `/api/dev-jwks` in a real production build. **The lesson: coverage claims about that
+bypass need checking, not trusting**, which is why `CLAUDE.md` now states it as a rule — any new
+module importing `lib/dev-identity` directly must call the guard itself.
+
+Sixty unit tests passed while the end-to-end chain was broken four independent ways. That is the
+argument for `apps/web/e2e/` existing, and for `next build` being a required gate — plain `tsc`
+misses `typedRoutes` and middleware export-shape errors, and one of those broke the production
+build for four tasks unnoticed.
 
 > **Correction, 2026-07-29 (Plan 3 Task 14): the claim below is wrong.** The installed
 > `scripts/sdd-workspace` **ignores its argument** and returns the flat `.superpowers/sdd/` path
@@ -253,8 +304,31 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 > — so plans no longer overwrite each other's records and the old manual archiving step is
 > obsolete. The flat `.superpowers/sdd/progress.md` path referenced by older notes is dead.
 
-**Plan 2B is merged (PR #5).** Its SDD workspace was deleted at merge, per the skill — git history
-and the PR description are the record now.
+**Plan 3 is merged (PR #6).** Its SDD ledger is **kept** at `.superpowers/sdd/progress.md` rather
+than deleted, because it is the only record of what the review loop caught and why several
+decisions changed mid-plan. Archive it into `.superpowers/sdd/plan-3/` before Plan 4's first task.
+
+### Plan 4's inherited obligations — all four are recorded, none are optional
+
+1. **`infra/entra.bicep`** — moved here from Plan 3 (ADR-0011). Decision 4's premise, "Plan 3
+   cannot work without the registrations", became false once the bypass existed.
+2. **A `SIGTERM`/`SIGINT` handler in `apps/api`.** None exists. Container Apps sends `SIGTERM` on
+   every scale-down and redeploy, so in-flight requests are dropped — and scale-to-zero (ADR-0009)
+   makes that routine rather than deploy-only. Bears directly on NFR-2's "200 RPS burst, zero 5xx".
+3. **The `middleware.ts` → `proxy.ts` migration, with an ADR.** Next 16 deprecates `middleware.ts`,
+   but this is **not a rename**: `isProxyFile` routes to `onServer()` while `isMiddlewareFile`
+   routes to `onEdgeServer()`, so it moves the auth guard from Edge to Node, and Next hard-errors
+   if both files exist. Container Apps runs Node in a container with no Edge network, so the deploy
+   target settles it — but it changes a runtime on the auth path, so it needs the ADR.
+4. **`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`** — if
+   `buildServer` itself rejects, the client leaks. Low stakes since the process exits.
+
+Plus four Minors the whole-branch review triaged as safe to carry: a gratuitous
+`{ extractable: true }` in `apps/api/test/auth-jwks-failure.test.ts`; `devKeyPairForTest` exporting
+a `CryptoKeyPair` from production source; no unit test that `app/(app)/page.tsx` sources role from
+the API rather than `auth()` (covered in substance by Playwright, since `DEV_IDENTITIES` carries no
+role); and `packages/client/dist` deliberately outside the determinism checksum, documented with
+the trigger that would change that answer.
 
 ### Azure and Entra: the real state
 
@@ -332,11 +406,11 @@ because this is the plan that makes it real.
 
 ### Starting a fresh session
 
-1. Read `CLAUDE.md`, then this file — **§3's "Azure and Entra: the real state" and "Plan 3 design
-   decisions" are the resume map.** Then `docs/superpowers/specs/2026-07-28-slice-1-integration-skeleton-design.md`
-   §6 (the auth shape and its "Known gap") and §7, and
-   `docs/superpowers/specs/2026-07-28-plan-2-api-contract-design.md` §7 (the 403 rule) and §9
-   (error handling) for what the API already guarantees.
+1. Read `CLAUDE.md` — especially its **hard-won facts** list and the **dev auth bypass** house rule
+   — then this file. **§3's "Azure and Entra: the real state" and Plan 4's inherited obligations are
+   the resume map.** Then **`docs/adr/0012-dev-auth-bypass-by-issuer-swap.md`**, which is the single
+   most important document for anyone touching auth, and
+   `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md` §7 for the Entra cutover.
 2. Bring the clone up. **`prisma generate` needs `DATABASE_URL` in the shell environment first** —
    Prisma 7 dropped implicit `.env` loading, and `prisma.config.ts` resolves `env("DATABASE_URL")`
    from the real process env, so a bare `prisma generate` fails `PrismaConfigEnvError` on a fresh
@@ -349,7 +423,11 @@ because this is the plan that makes it real.
    $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
    pnpm --filter @irp/api exec prisma generate         # third generated package
    pnpm --filter @irp/core build
-   pnpm typecheck                                      # should be clean, 4 projects
+   pnpm --filter @irp/client build                     # declaration-only emit; apps/web
+                                                       # resolves TYPES from dist/ so it can
+                                                       # stay fully strict. REQUIRED before
+                                                       # typecheck on a fresh clone
+   pnpm typecheck                                      # clean, 5 projects
    ```
 
    To run the database-backed tests as well:
@@ -358,26 +436,36 @@ because this is the plan that makes it real.
    $env:IRP_DB_PORT = "5433"
    docker compose -f apps/api/docker-compose.yml up -d
    pnpm --filter @irp/api exec prisma migrate deploy
-   pnpm test        # expect 160 tests / 16 files, zero skipped
+   pnpm test        # @irp/core 112 · apps/api 59 · apps/web 63, zero skipped
    ```
 
-   Verified end to end on a second machine on 2026-07-29: 112 core + 48 api, all green.
-3. **Plan 3's brainstorm is complete and the spec is written** —
-   `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md`. Next is
-   `writing-plans`, then `subagent-driven-development`.
+   To run the Playwright suite, copy `apps/web/.env.example` to `.env.local`, set
+   `AUTH_DEV_BYPASS=true`, point `apps/api/.env`'s `JWKS_URI`/`JWT_ISSUER` at
+   `http://localhost:3000/api/dev-jwks`, then **seed the dev users** — `apps/web/e2e/README.md` has
+   the exact SQL. The API suites `TRUNCATE` the `User` table, so re-seed after running them.
 
-   **Three things in that spec change previously-settled ground, all recorded in its §2:**
-   a **dev auth bypass** (issuer swap, not an auth skip) so Plan 3 no longer depends on Entra
-   existing; **`infra/entra.bicep` moved to Plan 4**, because decision 4's stated premise — "Plan 3
-   cannot work without the registrations" — is now false; and the sign-in page takes the
-   split-with-ribbon treatment, which pulls a **real** `CycleRibbon` forward from Plan 7 (extended
-   there, not replaced).
-4. The settled decisions in §3 are approved — build on them, do not re-open them. What is *not*
-   settled: the web shell's file layout, the sign-in page's visual treatment, how Auth.js session
-   config is tested, and the CI job's exact shape.
-5. **Blocked on Damian:** the dedicated Entra directory (§3) must exist before any of Plan 3's
-   auth can be wired against something real. Everything else in the plan — the Next.js scaffold,
-   the design-system frame, the `transpilePackages` wiring — proceeds without it.
+   ```powershell
+   pnpm --filter @irp/web exec playwright install chromium
+   Set-Location apps/web; pnpm exec playwright test    # 5 specs
+   ```
+
+   **`pnpm --filter @irp/web build` needs `AUTH_DEV_BYPASS=false`** locally, because `.env.local`
+   supplies the flag and `next build` sets `NODE_ENV=production`, so the guard correctly refuses.
+   A local build succeeding with the flag **true** means guard one has broken — investigate at once.
+3. **Plan 3 is merged.** Next is Plan 4: `brainstorming` → spec → `writing-plans` →
+   `subagent-driven-development`. Its four inherited obligations are listed in §3 and none are
+   optional. Read `.superpowers/sdd/progress.md` first — it is Plan 3's execution record and
+   explains why several decisions changed mid-plan.
+4. **The dev bypass is live and must be deleted, not left dormant.** Its guard covers **three**
+   entry points and coverage is per-entry-point, not automatic: any new module importing
+   `apps/web/lib/dev-identity.ts` directly must call `assertBypassNotInProduction` itself. Three
+   successive claims that coverage was complete turned out to be false during Plan 3 — treat any
+   such claim as needing a check.
+5. **Waiting on Damian**, none of it blocking: the Entra directory (§3, and his work account has no
+   Entra admin access); an elevated `winget install -e --id Microsoft.AzureCLI` on machine 2;
+   registering the four Azure resource providers; whether the GHCR packages are public or private
+   (`docs/manual-setup-steps.md` §1.5); and the batched mentor message in §3 of that file — O-10,
+   O-11 and O-12 still need sign-off, and O-12 (Next.js 16) is now well past free reversal.
 6. **Correction:** the installed `scripts/sdd-workspace` ignores its argument and always returns
    the flat `.superpowers/sdd/` path — it does **not** create a per-plan workspace. Before the
    first task of a new plan, manually archive per `CLAUDE.md`: move everything except
