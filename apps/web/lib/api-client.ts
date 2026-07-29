@@ -7,26 +7,43 @@ import { createClient, createConfig, type Client } from "@irp/client/client";
 import { getCurrentUser } from "@irp/client";
 
 /**
- * Auth.js derives the __Secure- prefix from the URL PROTOCOL, never from
- * NODE_ENV — see @auth/core/lib/init.js:
- *   defaultCookies(config.useSecureCookies ?? url.protocol === "https:")
+ * Both names Auth.js may write. The __Secure- prefix is only ever set over
+ * https, so if the prefixed cookie exists it is authoritative — check it first.
  *
- * Matching on NODE_ENV diverges from that. A production build served over
- * http — a local `next start` with AUTH_URL=http://localhost:3000, the value
- * in .env.example — has Auth.js write the bare name while a NODE_ENV check
- * reads the prefixed one, so every authenticated request 500s with
- * "No session cookie" for a correctly signed-in user.
+ * We deliberately do NOT derive the name from an env var. Auth.js resolves
+ * AUTH_URL ?? NEXTAUTH_URL and falls back to `x-forwarded-proto` and then to
+ * "https" (@auth/core/lib/utils/env.js). Any local re-derivation is a guess
+ * that can disagree with what Auth.js actually wrote, and a disagreement means
+ * every signed-in user gets a 500. Reading the jar removes the guess.
  */
-export function deriveSessionCookieName(authUrl: string | undefined): string {
-  return authUrl?.startsWith("https:") === true
-    ? "__Secure-authjs.session-token"
-    : "authjs.session-token";
+export const SESSION_COOKIE_NAMES = [
+  "__Secure-authjs.session-token",
+  "authjs.session-token",
+] as const;
+
+export type SessionCookieName = (typeof SESSION_COOKIE_NAMES)[number];
+
+const NO_SESSION_COOKIE_MESSAGE = "No session cookie — the caller is not signed in.";
+
+interface CookieJar {
+  get(name: string): { value: string } | undefined;
 }
 
 /**
- * In Auth.js v5 the session cookie's name IS the encryption salt.
+ * Finds whichever of Auth.js's two possible session cookies is actually
+ * present, checking the __Secure- prefixed name first. Auth.js writes exactly
+ * one of the two per request depending on the resolved protocol, so this is
+ * the lookup, not a guess about which one it picked.
  */
-export const SESSION_COOKIE_NAME = deriveSessionCookieName(process.env.AUTH_URL);
+function findSessionCookie(
+  jar: CookieJar,
+): { name: SessionCookieName; value: string } | undefined {
+  for (const name of SESSION_COOKIE_NAMES) {
+    const cookie = jar.get(name);
+    if (cookie !== undefined) return { name, value: cookie.value };
+  }
+  return undefined;
+}
 
 /**
  * Reads the access token out of the ENCRYPTED, HTTP-ONLY session cookie.
@@ -37,10 +54,16 @@ export const SESSION_COOKIE_NAME = deriveSessionCookieName(process.env.AUTH_URL)
  *
  * Throws rather than returning undefined. A caller that silently proceeded
  * without a token would call the API unauthenticated and get a confusing 401.
+ *
+ * The cookie name IS the HKDF salt in Auth.js v5, so `salt` must be the name
+ * the value was actually read from — never a separately-derived constant.
  */
-export async function readAccessToken(cookieValue: string | undefined): Promise<string> {
+export async function readAccessToken(
+  cookieValue: string | undefined,
+  salt: string,
+): Promise<string> {
   if (cookieValue === undefined || cookieValue === "") {
-    throw new Error("No session cookie — the caller is not signed in.");
+    throw new Error(NO_SESSION_COOKIE_MESSAGE);
   }
 
   const secret = process.env.AUTH_SECRET;
@@ -51,7 +74,7 @@ export async function readAccessToken(cookieValue: string | undefined): Promise<
   const payload = await decode({
     token: cookieValue,
     secret,
-    salt: SESSION_COOKIE_NAME,
+    salt,
   });
 
   const accessToken = payload?.accessToken;
@@ -62,6 +85,21 @@ export async function readAccessToken(cookieValue: string | undefined): Promise<
 }
 
 /**
+ * Resolves the caller's access token by checking the cookie jar for whichever
+ * of Auth.js's two possible session-cookie names is actually present, then
+ * decrypting with that same name as the salt. Exported so the prefixed/bare
+ * lookup and the salt-agreement invariant are directly testable against a
+ * fake jar, without mocking next/headers's `cookies()`.
+ */
+export async function resolveSessionToken(jar: CookieJar): Promise<string> {
+  const found = findSessionCookie(jar);
+  if (found === undefined) {
+    throw new Error(NO_SESSION_COOKIE_MESSAGE);
+  }
+  return readAccessToken(found.value, found.name);
+}
+
+/**
  * A FRESH client per request. The generated @irp/client exports a module-level
  * singleton; attaching a per-user token to it would leak tokens across
  * concurrent requests in a Next.js server process. Building a new one makes
@@ -69,7 +107,7 @@ export async function readAccessToken(cookieValue: string | undefined): Promise<
  */
 export async function apiClient(): Promise<Client> {
   const jar = await cookies();
-  const token = await readAccessToken(jar.get(SESSION_COOKIE_NAME)?.value);
+  const token = await resolveSessionToken(jar);
 
   const baseUrl = process.env.API_BASE_URL;
   if (baseUrl === undefined || baseUrl === "") {

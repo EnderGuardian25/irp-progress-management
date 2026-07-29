@@ -90,7 +90,7 @@ From `handoff.md` §3. Not re-opened.
   │ Microsoft     │───▶│ Auth.js: MicrosoftEntraId    │
   │ sign-in       │    │   oid = Entra object id      │
   └───────────────┘    └──────────────┬───────────────┘
-                                      │ getToken() — server only
+                                      │ decode() — server only
                                       │ per-request createClient()
                                       ▼
                        ┌──────────────────────────────┐
@@ -108,7 +108,7 @@ This makes slice-1 spec §6's promise — *"pointing at a real Bistec training t
 issuer and app-registration swap, not a rewrite"* — **demonstrated rather than asserted**, because
 by shipping two issuers we will have performed the swap.
 
-### 4.1 Why the token is fetched with `getToken`, not from the session
+### 4.1 Why the token is read with `decode`, not from the session
 
 In Auth.js v5 the `session` callback's return value is what `auth()` gives a Server Component **and**
 what the client-side `GET /api/auth/session` endpoint returns to the browser. Putting `accessToken`
@@ -118,7 +118,10 @@ So:
 
 - the **`jwt` callback** stores `access_token` on the token → encrypted, HTTP-only, server-only;
 - the **`session` callback** deliberately exposes only `name` and `email`;
-- `lib/api-client.ts` reads the raw JWE with `getToken()` from `next-auth/jwt`, passing `cookies()`.
+- `lib/api-client.ts` reads the raw JWE with `decode()` from `next-auth/jwt`, passing the session
+  cookie's value and the cookie name it was read under (the HKDF salt). `decode` takes
+  `{ token, secret, salt }` — three values we control — where `getToken()` instead needs a
+  request-shaped argument coupled to Auth.js internals that have churned across betas.
 
 Decision 3 then becomes a **test** (§10), not an intention.
 
@@ -164,7 +167,7 @@ apps/web/
 │  ├─ cycle-ribbon/                 real component — Plan 7 extends
 │  └─ ui/                           shadcn primitives (ADR-0001)
 ├─ lib/
-│  ├─ api-client.ts                 server-only; getToken → createClient
+│  ├─ api-client.ts                 server-only; decode → createClient
 │  └─ dev-identity.ts               NEVER EVALUATED in production (not bundle-excluded)
 ├─ auth.ts                          full Auth.js config
 ├─ auth.config.ts                   edge-safe subset for middleware
@@ -426,7 +429,7 @@ guards, and the exact cutover in §7.
 |---|---|
 | **The bypass reaches production** | Two independent guards, one demonstrated red. §6.3 |
 | The bypass becomes permanent because Entra never arrives | The cutover is 4 config steps (§7) and the dormant CI job proves the Entra path when woken. FR-1 remains partially satisfied and that is already recorded |
-| `getToken()` in a Server Component is awkward | Isolated to one file, `lib/api-client.ts`, behind one function |
+| `decode()` needs the cookie name it was read under as the salt | Isolated to one file, `lib/api-client.ts`, behind one function |
 | `CycleRibbon` drifts from Plan 7's needs | It is the real component, extended not replaced. §5.3 |
 | Playwright flakes and erodes trust in CI | One spec, no timing-dependent assertions; failures block rather than retry |
 | Plan 3 is now larger than "thin" | `entra.bicep` moved out. If task count still runs long at planning, split the API-side changes (§9) into their own plan — they are independent of the web work |

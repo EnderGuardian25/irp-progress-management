@@ -6,65 +6,84 @@
 // test/dev-identity.test.ts.
 import { describe, expect, it } from "vitest";
 import { encode } from "next-auth/jwt";
-import { SESSION_COOKIE_NAME, deriveSessionCookieName, readAccessToken } from "@/lib/api-client";
+import { SESSION_COOKIE_NAMES, readAccessToken, resolveSessionToken } from "@/lib/api-client";
 
 const SECRET = "test-secret-at-least-32-bytes-long-xx";
+const [PREFIXED_NAME, BARE_NAME] = SESSION_COOKIE_NAMES;
 
-async function makeCookie(payload: Record<string, unknown>): Promise<string> {
-  return encode({ token: payload, secret: SECRET, salt: SESSION_COOKIE_NAME });
+async function makeCookie(payload: Record<string, unknown>, salt: string): Promise<string> {
+  return encode({ token: payload, secret: SECRET, salt });
+}
+
+// A fake jar backed by a plain map — no need to mock next/headers's
+// `cookies()` to exercise the lookup.
+function jarWith(entries: Record<string, string>): { get(name: string): { value: string } | undefined } {
+  return {
+    get(name: string) {
+      const value = entries[name];
+      return value === undefined ? undefined : { value };
+    },
+  };
 }
 
 describe("readAccessToken", () => {
   it("recovers the access token from an encrypted session cookie", async () => {
     process.env.AUTH_SECRET = SECRET;
-    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" });
-    await expect(readAccessToken(cookie)).resolves.toBe("the-bearer-token");
+    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, BARE_NAME)).resolves.toBe("the-bearer-token");
   });
 
   it("throws when there is no cookie at all", async () => {
     process.env.AUTH_SECRET = SECRET;
-    await expect(readAccessToken(undefined)).rejects.toThrow(/no session/i);
+    await expect(readAccessToken(undefined, BARE_NAME)).rejects.toThrow(/no session/i);
   });
 
   it("throws when the cookie decrypts but carries no access token", async () => {
     process.env.AUTH_SECRET = SECRET;
-    const cookie = await makeCookie({ sub: "u1" });
-    await expect(readAccessToken(cookie)).rejects.toThrow(/no access token/i);
+    const cookie = await makeCookie({ sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, BARE_NAME)).rejects.toThrow(/no access token/i);
   });
 
   it("throws rather than proceeding unauthenticated when the cookie is corrupt", async () => {
     process.env.AUTH_SECRET = SECRET;
-    await expect(readAccessToken("not-a-jwe")).rejects.toThrow();
+    await expect(readAccessToken("not-a-jwe", BARE_NAME)).rejects.toThrow();
+  });
+
+  it("fails when the cookie was encrypted under a different name than it is read with", async () => {
+    // Proves salt and cookie name genuinely have to agree: the HKDF salt is
+    // the cookie name, so decrypting under the wrong name must not succeed.
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, PREFIXED_NAME)).rejects.toThrow();
   });
 });
 
-describe("deriveSessionCookieName", () => {
-  // Vitest runs with NODE_ENV=test, so the readAccessToken tests above only
-  // ever exercise the bare-name branch. These pin the prefix derivation
-  // directly against the URL protocol, independent of NODE_ENV.
-
-  it("uses the __Secure- prefix for an https AUTH_URL", () => {
-    expect(deriveSessionCookieName("https://irp.example.com")).toBe(
-      "__Secure-authjs.session-token",
-    );
+describe("resolveSessionToken", () => {
+  it("uses the prefixed cookie when only it is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "prefixed-token" }, PREFIXED_NAME);
+    const jar = jarWith({ [PREFIXED_NAME]: cookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("prefixed-token");
   });
 
-  it("uses the bare name for an http AUTH_URL", () => {
-    expect(deriveSessionCookieName("http://localhost:3000")).toBe("authjs.session-token");
+  it("uses the bare cookie when only it is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "bare-token" }, BARE_NAME);
+    const jar = jarWith({ [BARE_NAME]: cookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("bare-token");
   });
 
-  it("fails safe to the bare name when AUTH_URL is unset", () => {
-    expect(deriveSessionCookieName(undefined)).toBe("authjs.session-token");
+  it("prefers the prefixed cookie when both are present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const prefixedCookie = await makeCookie({ accessToken: "prefixed-token" }, PREFIXED_NAME);
+    const bareCookie = await makeCookie({ accessToken: "bare-token" }, BARE_NAME);
+    const jar = jarWith({ [PREFIXED_NAME]: prefixedCookie, [BARE_NAME]: bareCookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("prefixed-token");
   });
 
-  // A naive `startsWith("https")` without the colon would wrongly treat
-  // "httpsomething://" as secure. These prove the check is on the `https:`
-  // scheme, not a loose prefix match.
-  it("does not treat a bare 'https' string as secure", () => {
-    expect(deriveSessionCookieName("https")).toBe("authjs.session-token");
-  });
-
-  it("does not treat a non-https protocol that merely starts with 'https' as secure", () => {
-    expect(deriveSessionCookieName("httpsomething://x")).toBe("authjs.session-token");
+  it("throws when neither cookie is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const jar = jarWith({});
+    await expect(resolveSessionToken(jar)).rejects.toThrow(/no session/i);
   });
 });

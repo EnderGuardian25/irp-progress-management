@@ -1843,9 +1843,9 @@ private key cannot be exported at all."
 - Consumes: `@irp/client/client` (Task 1), `auth.ts` (Task 5).
 - Produces:
   ```ts
-  export function deriveSessionCookieName(authUrl: string | undefined): string;
-  export const SESSION_COOKIE_NAME: string;
-  export async function readAccessToken(cookieValue: string | undefined): Promise<string>;
+  export const SESSION_COOKIE_NAMES: readonly [string, string];
+  export async function readAccessToken(cookieValue: string | undefined, salt: string): Promise<string>;
+  export async function resolveSessionToken(jar: { get(name: string): { value: string } | undefined }): Promise<string>;
   export async function apiClient(): Promise<Client>;
   export async function getCurrentUserOrRedirect(): Promise<{ id: string; email: string; displayName: string; role: "Admin" | "Student" }>;
   ```
@@ -1856,7 +1856,11 @@ First, **the token is read from the encrypted cookie, never from the session.** 
 
 > **Why `decode` and not `getToken`:** `getToken` needs a request-like object whose shape is coupled to Auth.js internals and has churned across betas. `decode` takes `{ token, secret, salt }` — three values we control. The cookie name **is** the salt in Auth.js v5.
 
-> **Correction, post-implementation review:** the first draft of this task derived the `__Secure-` prefix from `NODE_ENV === "production"`. That is the wrong signal — Auth.js derives it from the URL **protocol** (`@auth/core/lib/init.js`: `defaultCookies(config.useSecureCookies ?? url.protocol === "https:")`), never from `NODE_ENV`. The two diverge concretely for a production build served over plain http, e.g. `next start` with `AUTH_URL=http://localhost:3000` (the value in `.env.example`): Auth.js writes the bare cookie name while a `NODE_ENV` check reads the prefixed one, so `readAccessToken` throws "No session cookie" for a correctly signed-in user and every `(app)` page 500s. Step 4 below derives the name from `AUTH_URL`'s protocol via a standalone, directly-testable `deriveSessionCookieName` function instead.
+> **Correction, post-implementation review (fix pass 1):** the first draft of this task derived the `__Secure-` prefix from `NODE_ENV === "production"`. That is the wrong signal — Auth.js derives it from the URL **protocol** (`@auth/core/lib/init.js`: `defaultCookies(config.useSecureCookies ?? url.protocol === "https:")`), never from `NODE_ENV`. Fix pass 1 replaced the `NODE_ENV` check with a standalone `deriveSessionCookieName(authUrl)` reading `AUTH_URL`'s protocol.
+>
+> **Correction, post-implementation review (fix pass 2): env-derived cookie names were themselves the wrong approach, not just the first attempt at one.** `deriveSessionCookieName` had two more gaps, found by a second review pass directly against `@auth/core@0.41.3/lib/utils/env.js:66-86`: (1) it never read `NEXTAUTH_URL` — Auth.js resolves `AUTH_URL ?? NEXTAUTH_URL`, so a deployed config carrying only the v4 name derives the bare name locally while Auth.js resolves https and writes `__Secure-`; (2) Auth.js's own fallback when neither env var is set is `x-forwarded-proto ?? protocol ?? "https"` — its floor is **https**, so the "fails safe to the bare name when unset" test encoded the opposite of what Auth.js actually does, and Azure Container Apps terminates TLS at ingress and sets `x-forwarded-proto: https` regardless. Any local re-derivation is a guess that can disagree with what Auth.js actually wrote, and every such disagreement means every signed-in user gets a 500.
+>
+> Fix pass 2 removes the derivation entirely. `lib/api-client.ts` now holds both names Auth.js may write in `SESSION_COOKIE_NAMES`, checks the cookie jar for whichever is actually present (prefixed first, since it can only exist over https), and threads that same name through as the decryption salt — `readAccessToken(cookieValue, salt)` takes the salt as a parameter instead of reading a module constant, because salt and cookie name must always agree. `deriveSessionCookieName` and `SESSION_COOKIE_NAME` are gone; nothing derives a name from an env var anymore.
 
 Second, **a fresh client per request.** `packages/client/src/client.gen.ts` creates a module-level singleton at import time; attaching a per-user token to it would leak tokens across concurrent requests in a Next.js server process.
 
@@ -1867,66 +1871,85 @@ Create `apps/web/test/api-client.test.ts`:
 ```ts
 import { describe, expect, it } from "vitest";
 import { encode } from "next-auth/jwt";
-import { SESSION_COOKIE_NAME, deriveSessionCookieName, readAccessToken } from "@/lib/api-client";
+import { SESSION_COOKIE_NAMES, readAccessToken, resolveSessionToken } from "@/lib/api-client";
 
 const SECRET = "test-secret-at-least-32-bytes-long-xx";
+const [PREFIXED_NAME, BARE_NAME] = SESSION_COOKIE_NAMES;
 
-async function makeCookie(payload: Record<string, unknown>): Promise<string> {
-  return encode({ token: payload, secret: SECRET, salt: SESSION_COOKIE_NAME });
+async function makeCookie(payload: Record<string, unknown>, salt: string): Promise<string> {
+  return encode({ token: payload, secret: SECRET, salt });
+}
+
+// A fake jar backed by a plain map — no need to mock next/headers's
+// `cookies()` to exercise the lookup.
+function jarWith(entries: Record<string, string>): { get(name: string): { value: string } | undefined } {
+  return {
+    get(name: string) {
+      const value = entries[name];
+      return value === undefined ? undefined : { value };
+    },
+  };
 }
 
 describe("readAccessToken", () => {
   it("recovers the access token from an encrypted session cookie", async () => {
     process.env.AUTH_SECRET = SECRET;
-    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" });
-    await expect(readAccessToken(cookie)).resolves.toBe("the-bearer-token");
+    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, BARE_NAME)).resolves.toBe("the-bearer-token");
   });
 
   it("throws when there is no cookie at all", async () => {
     process.env.AUTH_SECRET = SECRET;
-    await expect(readAccessToken(undefined)).rejects.toThrow(/no session/i);
+    await expect(readAccessToken(undefined, BARE_NAME)).rejects.toThrow(/no session/i);
   });
 
   it("throws when the cookie decrypts but carries no access token", async () => {
     process.env.AUTH_SECRET = SECRET;
-    const cookie = await makeCookie({ sub: "u1" });
-    await expect(readAccessToken(cookie)).rejects.toThrow(/no access token/i);
+    const cookie = await makeCookie({ sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, BARE_NAME)).rejects.toThrow(/no access token/i);
   });
 
   it("throws rather than proceeding unauthenticated when the cookie is corrupt", async () => {
     process.env.AUTH_SECRET = SECRET;
-    await expect(readAccessToken("not-a-jwe")).rejects.toThrow();
+    await expect(readAccessToken("not-a-jwe", BARE_NAME)).rejects.toThrow();
+  });
+
+  it("fails when the cookie was encrypted under a different name than it is read with", async () => {
+    // Proves salt and cookie name genuinely have to agree: the HKDF salt is
+    // the cookie name, so decrypting under the wrong name must not succeed.
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, PREFIXED_NAME)).rejects.toThrow();
   });
 });
 
-describe("deriveSessionCookieName", () => {
-  // Vitest runs with NODE_ENV=test, so the readAccessToken tests above only
-  // ever exercise the bare-name branch. These pin the prefix derivation
-  // directly against the URL protocol, independent of NODE_ENV.
-
-  it("uses the __Secure- prefix for an https AUTH_URL", () => {
-    expect(deriveSessionCookieName("https://irp.example.com")).toBe(
-      "__Secure-authjs.session-token",
-    );
+describe("resolveSessionToken", () => {
+  it("uses the prefixed cookie when only it is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "prefixed-token" }, PREFIXED_NAME);
+    const jar = jarWith({ [PREFIXED_NAME]: cookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("prefixed-token");
   });
 
-  it("uses the bare name for an http AUTH_URL", () => {
-    expect(deriveSessionCookieName("http://localhost:3000")).toBe("authjs.session-token");
+  it("uses the bare cookie when only it is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "bare-token" }, BARE_NAME);
+    const jar = jarWith({ [BARE_NAME]: cookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("bare-token");
   });
 
-  it("fails safe to the bare name when AUTH_URL is unset", () => {
-    expect(deriveSessionCookieName(undefined)).toBe("authjs.session-token");
+  it("prefers the prefixed cookie when both are present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const prefixedCookie = await makeCookie({ accessToken: "prefixed-token" }, PREFIXED_NAME);
+    const bareCookie = await makeCookie({ accessToken: "bare-token" }, BARE_NAME);
+    const jar = jarWith({ [PREFIXED_NAME]: prefixedCookie, [BARE_NAME]: bareCookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("prefixed-token");
   });
 
-  // A naive `startsWith("https")` without the colon would wrongly treat
-  // "httpsomething://" as secure. These prove the check is on the `https:`
-  // scheme, not a loose prefix match.
-  it("does not treat a bare 'https' string as secure", () => {
-    expect(deriveSessionCookieName("https")).toBe("authjs.session-token");
-  });
-
-  it("does not treat a non-https protocol that merely starts with 'https' as secure", () => {
-    expect(deriveSessionCookieName("httpsomething://x")).toBe("authjs.session-token");
+  it("throws when neither cookie is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const jar = jarWith({});
+    await expect(resolveSessionToken(jar)).rejects.toThrow(/no session/i);
   });
 });
 ```
@@ -2041,26 +2064,43 @@ import { createClient, createConfig, type Client } from "@irp/client/client";
 import { getCurrentUser } from "@irp/client";
 
 /**
- * Auth.js derives the __Secure- prefix from the URL PROTOCOL, never from
- * NODE_ENV — see @auth/core/lib/init.js:
- *   defaultCookies(config.useSecureCookies ?? url.protocol === "https:")
+ * Both names Auth.js may write. The __Secure- prefix is only ever set over
+ * https, so if the prefixed cookie exists it is authoritative — check it first.
  *
- * Matching on NODE_ENV diverges from that. A production build served over
- * http — a local `next start` with AUTH_URL=http://localhost:3000, the value
- * in .env.example — has Auth.js write the bare name while a NODE_ENV check
- * reads the prefixed one, so every authenticated request 500s with
- * "No session cookie" for a correctly signed-in user.
+ * We deliberately do NOT derive the name from an env var. Auth.js resolves
+ * AUTH_URL ?? NEXTAUTH_URL and falls back to `x-forwarded-proto` and then to
+ * "https" (@auth/core/lib/utils/env.js). Any local re-derivation is a guess
+ * that can disagree with what Auth.js actually wrote, and a disagreement means
+ * every signed-in user gets a 500. Reading the jar removes the guess.
  */
-export function deriveSessionCookieName(authUrl: string | undefined): string {
-  return authUrl?.startsWith("https:") === true
-    ? "__Secure-authjs.session-token"
-    : "authjs.session-token";
+export const SESSION_COOKIE_NAMES = [
+  "__Secure-authjs.session-token",
+  "authjs.session-token",
+] as const;
+
+export type SessionCookieName = (typeof SESSION_COOKIE_NAMES)[number];
+
+const NO_SESSION_COOKIE_MESSAGE = "No session cookie — the caller is not signed in.";
+
+interface CookieJar {
+  get(name: string): { value: string } | undefined;
 }
 
 /**
- * In Auth.js v5 the session cookie's name IS the encryption salt.
+ * Finds whichever of Auth.js's two possible session cookies is actually
+ * present, checking the __Secure- prefixed name first. Auth.js writes exactly
+ * one of the two per request depending on the resolved protocol, so this is
+ * the lookup, not a guess about which one it picked.
  */
-export const SESSION_COOKIE_NAME = deriveSessionCookieName(process.env.AUTH_URL);
+function findSessionCookie(
+  jar: CookieJar,
+): { name: SessionCookieName; value: string } | undefined {
+  for (const name of SESSION_COOKIE_NAMES) {
+    const cookie = jar.get(name);
+    if (cookie !== undefined) return { name, value: cookie.value };
+  }
+  return undefined;
+}
 
 /**
  * Reads the access token out of the ENCRYPTED, HTTP-ONLY session cookie.
@@ -2071,10 +2111,16 @@ export const SESSION_COOKIE_NAME = deriveSessionCookieName(process.env.AUTH_URL)
  *
  * Throws rather than returning undefined. A caller that silently proceeded
  * without a token would call the API unauthenticated and get a confusing 401.
+ *
+ * The cookie name IS the HKDF salt in Auth.js v5, so `salt` must be the name
+ * the value was actually read from — never a separately-derived constant.
  */
-export async function readAccessToken(cookieValue: string | undefined): Promise<string> {
+export async function readAccessToken(
+  cookieValue: string | undefined,
+  salt: string,
+): Promise<string> {
   if (cookieValue === undefined || cookieValue === "") {
-    throw new Error("No session cookie — the caller is not signed in.");
+    throw new Error(NO_SESSION_COOKIE_MESSAGE);
   }
 
   const secret = process.env.AUTH_SECRET;
@@ -2085,7 +2131,7 @@ export async function readAccessToken(cookieValue: string | undefined): Promise<
   const payload = await decode({
     token: cookieValue,
     secret,
-    salt: SESSION_COOKIE_NAME,
+    salt,
   });
 
   const accessToken = payload?.accessToken;
@@ -2096,6 +2142,21 @@ export async function readAccessToken(cookieValue: string | undefined): Promise<
 }
 
 /**
+ * Resolves the caller's access token by checking the cookie jar for whichever
+ * of Auth.js's two possible session-cookie names is actually present, then
+ * decrypting with that same name as the salt. Exported so the prefixed/bare
+ * lookup and the salt-agreement invariant are directly testable against a
+ * fake jar, without mocking next/headers's `cookies()`.
+ */
+export async function resolveSessionToken(jar: CookieJar): Promise<string> {
+  const found = findSessionCookie(jar);
+  if (found === undefined) {
+    throw new Error(NO_SESSION_COOKIE_MESSAGE);
+  }
+  return readAccessToken(found.value, found.name);
+}
+
+/**
  * A FRESH client per request. The generated @irp/client exports a module-level
  * singleton; attaching a per-user token to it would leak tokens across
  * concurrent requests in a Next.js server process. Building a new one makes
@@ -2103,7 +2164,7 @@ export async function readAccessToken(cookieValue: string | undefined): Promise<
  */
 export async function apiClient(): Promise<Client> {
   const jar = await cookies();
-  const token = await readAccessToken(jar.get(SESSION_COOKIE_NAME)?.value);
+  const token = await resolveSessionToken(jar);
 
   const baseUrl = process.env.API_BASE_URL;
   if (baseUrl === undefined || baseUrl === "") {
@@ -2147,7 +2208,7 @@ export async function getCurrentUserOrRedirect(): Promise<WebUser> {
 pnpm --filter @irp/web test api-client token-leak
 ```
 
-Expected: PASS, 7 tests.
+Expected: PASS, 15 tests (9 in `api-client.test.ts`, 6 in `token-leak.test.ts`).
 
 - [ ] **Step 6: Verify the whole workspace typechecks**
 
@@ -3646,7 +3707,7 @@ from being weakened."
 | §2.2 `entra.bicep` → Plan 4 | 14 (ADR-0011 records it) |
 | §2.3 split sign-in | 8 |
 | §4 two token sources | 5, 6, 7 |
-| §4.1 `getToken` not session | 7 |
+| §4.1 `decode` not session | 7 |
 | §4.1a one source of truth for role | 5 (session callback), 9 (renders from API) |
 | §4.2 per-request client + subpath export | 1, 7 |
 | §5 layout, §5.1 route groups | 1, 4 |
@@ -3664,11 +3725,11 @@ from being weakened."
 
 **2. Placeholder scan** — no `TBD`, no "add error handling", no "similar to Task N". Every code step carries complete code. Task 14's ADR steps specify required *content* rather than full prose, which is the intended granularity for a document whose value is the argument, not the boilerplate — the house format is pinned by reference to `docs/adr/0008`.
 
-**3. Type consistency** — verified across tasks: `RibbonDay`/`DayMark`/`RibbonProps` (Task 3) match their use in Task 8. `DevIdentity`/`DEV_IDENTITIES`/`mintDevToken`/`devJwks`/`DEV_ISSUER` (Task 6) match Tasks 5, 8 and their tests. `SESSION_COOKIE_NAME`/`readAccessToken`/`apiClient`/`getCurrentUserOrRedirect`/`WebUser` (Task 7) match Tasks 4 and 9. `assertBypassNotInProduction`/`authConfig` (Task 5) match Tasks 7 and 9. `requireAuthPlugin` (Task 10) matches the `server.ts` edit. `ServiceUnavailableError` (Task 11) is defined before use.
+**3. Type consistency** — verified across tasks: `RibbonDay`/`DayMark`/`RibbonProps` (Task 3) match their use in Task 8. `DevIdentity`/`DEV_IDENTITIES`/`mintDevToken`/`devJwks`/`DEV_ISSUER` (Task 6) match Tasks 5, 8 and their tests. `SESSION_COOKIE_NAMES`/`readAccessToken`/`resolveSessionToken`/`apiClient`/`getCurrentUserOrRedirect`/`WebUser` (Task 7) match Tasks 4 and 9. `assertBypassNotInProduction`/`authConfig` (Task 5) match Tasks 7 and 9. `requireAuthPlugin` (Task 10) matches the `server.ts` edit. `ServiceUnavailableError` (Task 11) is defined before use.
 
 **Two known integration risks**, flagged rather than hidden:
 
-1. **`decode` from `next-auth/jwt` and the cookie-name-as-salt convention** (Task 7) are v5-beta internals. If `readAccessToken`'s tests fail at Step 5 in a way that suggests the salt or cookie name is wrong, log the actual cookie name from `document.cookie` after a dev sign-in and adjust `SESSION_COOKIE_NAME`. The tests pin the behaviour either way.
+1. **`decode` from `next-auth/jwt` and the cookie-name-as-salt convention** (Task 7) are v5-beta internals. If `readAccessToken`'s tests fail at Step 5 in a way that suggests the salt or cookie name is wrong, log the actual cookie name from `document.cookie` after a dev sign-in. Fix pass 2 removed the env-derived guess entirely: `apiClient` now looks the cookie up in the jar under both possible names (`SESSION_COOKIE_NAMES`) and uses whichever it actually finds as the salt, so there is no derived constant left to adjust — the tests pin the lookup-and-decrypt behaviour together.
 2. **`generateKeyPair` at module scope** (Task 6) uses top-level `await`, matching the existing `apps/api/test/helpers/keys.ts` pattern. If Next's bundler objects, move it behind a memoised `getKeyPair()` and adjust the three call sites.
 
 **Scope note:** 14 tasks. The spec's §15 anticipated this and named the split: **Tasks 10 and 11 are `apps/api`-only and independent of all web work.** If execution runs long, they lift cleanly into their own plan without reordering anything else.
