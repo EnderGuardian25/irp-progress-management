@@ -714,19 +714,35 @@ function ExtraSlot({ after }: { after: string }) {
   // Half-width, and distinguished by FORM not colour. A sixth status colour was
   // tried and rejected: a teal at hue 200 lands within 1.01:1 luminance of the
   // ok green, indistinguishable in a dense ribbon for a colour-vision-deficient
-  // user. docs/design-system.md §3.2.
+  // user. docs/design-system.md §3.2 specifies the exact treatment: "a
+  // half-width slot in --ink-muted carrying a + glyph" — both the glyph and the
+  // bar below use --ink-muted, never a status colour.
   return (
-    <li
-      aria-label={`Extra work after ${after}`}
-      className="flex h-11 w-1 items-end"
-    >
+    <li aria-label={`Extra work after ${after}`} className="relative flex h-11 w-1 items-end">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] leading-none"
+        style={{ color: "var(--ink-muted)" }}
+      >
+        +
+      </span>
       <span
         className="block w-full rounded-[2px]"
-        style={{ height: "60%", borderLeft: "1px dotted var(--line-strong)" }}
+        style={{ height: "60%", background: "var(--ink-muted)" }}
       />
     </li>
   );
 }
+```
+
+> **CORRECTED 2026-07-29 during execution.** The original version of this block used a
+> dotted `--line-strong` left border and **no `+` glyph**, which contradicts
+> `docs/design-system.md` §3.2: *"a half-width slot in `--ink-muted` carrying a `+`
+> glyph."* The doc governs. This is the second place the plan diverged from the
+> design-system doc while claiming to follow it — see also Task 2's dark neutrals.
+> **Read §3.2 and §7 directly rather than trusting this block.**
+
+```tsx
 
 /**
  * The signature element (docs/design-system.md §7, FR-28). One bar per REQUIRED
