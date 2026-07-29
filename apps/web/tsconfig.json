@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "JSON has no comment syntax, so the rationale lives in this key. tsc ignores unknown top-level keys.",
+    "exactOptionalPropertyTypes: false — @irp/client ships packages/client/src as raw, un-emitted TypeScript (see next.config.ts's transpilePackages comment), so importing it here pulls that generated source into THIS program under THIS project's compiler options. skipLibCheck (inherited from tsconfig.base.json) only exempts .d.ts files; these are .ts, so they are fully re-typechecked. @hey-api/client-fetch's generated runtime assigns `undefined` to optional properties explicitly, exactly the pattern packages/client/tsconfig.json already relaxes this same setting for, for the same generated code, under its own standalone typecheck. Without repeating the relaxation here, `pnpm --filter @irp/web typecheck` fails on packages/client/src files this project does not own and cannot edit."
+  ],
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "noEmit": true,
+    "declaration": false,
+    "allowJs": true,
+    "incremental": true,
+    "resolveJsonModule": true,
+    "exactOptionalPropertyTypes": false,
+    "paths": { "@/*": ["./*"] },
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "e2e"]
+}

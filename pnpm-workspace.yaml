@@ -5,6 +5,7 @@ allowBuilds:
   '@prisma/engines': true
   esbuild: true
   prisma: true
+  sharp: true
 # pnpm auto-generated this during install to exempt this specific,
 # just-published package version from its supply-chain minimum-release-age
 # freshness gate. Kept for reproducible installs; not something to prune.
@@ -21,3 +22,4 @@ minimumReleaseAgeExclude:
   - prisma@7.9.1
   - '@prisma/adapter-pg@7.9.1'
   - '@prisma/driver-adapter-utils@7.9.1'
+  - jsdom@30.0.1
