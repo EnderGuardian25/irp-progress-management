@@ -1,7 +1,7 @@
 import fp from "fastify-plugin";
 import { jwtVerify, type JWTVerifyGetKey } from "jose";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { UnauthorizedError, ForbiddenError } from "../errors.js";
+import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from "../errors.js";
 import type { UserRecord, UserRepo } from "../db/user-repo.js";
 
 export interface AuthOptions {
@@ -43,8 +43,22 @@ export const authPlugin = fp<AuthOptions>(
       const token = header.slice("Bearer ".length);
 
       let oid: unknown;
+      // The key-getter is a separate failure domain from the token. A JWKS
+      // endpoint outage is OUR fault (5xx); an unverifiable token is the
+      // caller's (401). One catch around both reports an outage as "your token
+      // is invalid", which is actively misleading during an incident.
+      let keyRetrievalFailed = false;
+      const trackingGetKey: JWTVerifyGetKey = async (header, input) => {
+        try {
+          return await opts.getKey(header, input);
+        } catch (cause) {
+          keyRetrievalFailed = true;
+          throw cause;
+        }
+      };
+
       try {
-        const { payload } = await jwtVerify(token, opts.getKey, {
+        const { payload } = await jwtVerify(token, trackingGetKey, {
           issuer: opts.issuer,
           audience: opts.audience,
           // Entra signs with RS256. Stating it means the accepted set is a
@@ -58,7 +72,13 @@ export const authPlugin = fp<AuthOptions>(
           clockTolerance: "60s",
         });
         oid = payload.oid;
-      } catch {
+      } catch (cause) {
+        if (keyRetrievalFailed) {
+          req.log.error({ err: cause }, "JWKS key retrieval failed");
+          throw new ServiceUnavailableError(
+            "Could not retrieve the signing keys needed to verify your session. Please retry.",
+          );
+        }
         // Malformed, bad signature, wrong issuer/audience, or expired.
         throw new UnauthorizedError("The bearer token is invalid or has expired.");
       }
