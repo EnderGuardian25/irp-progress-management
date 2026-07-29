@@ -102,17 +102,53 @@ export const sessionCallback: NonNullable<NextAuthConfig["callbacks"]>["session"
   session,
 }) => session;
 
+/**
+ * Is the Entra provider actually configured?
+ *
+ * This has to be checked, and the provider omitted when it is not, because
+ * registering MicrosoftEntraId with an empty `issuer` makes Auth.js throw
+ * `InvalidEndpoints` on EVERY auth request — including requests targeting a
+ * completely different provider. So an unconfigured Entra provider does not
+ * merely fail to work: it takes the whole auth handler down with it, dev
+ * bypass included.
+ *
+ * That is exactly how it failed on the first CI run after Plan 3 merged. It
+ * passed locally only because `.env.example`'s placeholder
+ * `AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0`
+ * is NON-EMPTY, which satisfied the validation with a bogus value. CI has no
+ * `.env.local`, so the issuer was "" and every sign-in returned
+ * "There was a problem with the server configuration".
+ *
+ * The premise of the dev bypass is that it works with no Entra configuration
+ * at all. This is what makes that true, and it mirrors how the dev provider is
+ * itself conditional — neither provider is registered unless it can work.
+ */
+export function isEntraConfigured(env: Partial<Record<string, string>>): boolean {
+  // Trimmed, so a variable left as whitespace in a .env file counts as unset
+  // rather than as a configured-but-broken issuer.
+  const present = (v: string | undefined): boolean => (v ?? "").trim() !== "";
+  return (
+    present(env.AUTH_MICROSOFT_ENTRA_ID_ID) &&
+    present(env.AUTH_MICROSOFT_ENTRA_ID_SECRET) &&
+    present(env.AUTH_MICROSOFT_ENTRA_ID_ISSUER)
+  );
+}
+
 export const authConfig: NextAuthConfig = {
-  providers: [
-    MicrosoftEntraId({
-      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? "",
-      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? "",
-      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER ?? "",
-      authorization: {
-        params: { scope: `openid profile email ${process.env.API_SCOPE ?? ""}`.trim() },
-      },
-    }),
-  ],
+  providers: isEntraConfigured(process.env)
+    ? [
+        MicrosoftEntraId({
+          // Non-null assertions are safe: isEntraConfigured just proved all
+          // three are present and non-empty.
+          clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
+          clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
+          issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER!,
+          authorization: {
+            params: { scope: `openid profile email ${process.env.API_SCOPE ?? ""}`.trim() },
+          },
+        }),
+      ]
+    : [],
   pages: { signIn: "/signin" },
   session: { strategy: "jwt" },
   callbacks: {

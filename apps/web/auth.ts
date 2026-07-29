@@ -25,9 +25,29 @@ const devProviders: Provider[] = bypassEnabled
 // The callbacks live in auth.config.ts and are shared by both configs, so the
 // invariant Task 7 tests is the same one production uses. Do not re-declare
 // them here — a second copy is a second thing to keep in step.
-const config: NextAuthConfig = {
-  ...authConfig,
-  providers: [...authConfig.providers, ...devProviders],
-};
+const providers: Provider[] = [...authConfig.providers, ...devProviders];
+
+// WARN, do not throw. authConfig omits the Entra provider when it is not
+// configured (see isEntraConfigured — registering it with an empty issuer makes
+// Auth.js throw InvalidEndpoints on EVERY auth request, which is how CI broke).
+// Combined with the bypass being off, that leaves ZERO providers, and Auth.js's
+// own failure for that is an opaque "problem with the server configuration" on
+// first sign-in. This says what is actually wrong.
+//
+// It must NOT throw, though: `next build` prerenders /api/auth/[...nextauth],
+// which evaluates this module, and a build legitimately has no secrets — they
+// are supplied at runtime. An earlier version threw here and broke the build on
+// all three CI legs with "Failed to collect page data". Module evaluation is the
+// wrong place to enforce a runtime requirement.
+if (providers.length === 0) {
+  console.warn(
+    "[auth] No auth providers are configured, so every sign-in will fail. " +
+      "Set the three AUTH_MICROSOFT_ENTRA_ID_* variables, or AUTH_DEV_BYPASS=true " +
+      "for local development. See apps/web/.env.example. " +
+      "(Expected during `next build`, which has no secrets.)",
+  );
+}
+
+const config: NextAuthConfig = { ...authConfig, providers };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(config);

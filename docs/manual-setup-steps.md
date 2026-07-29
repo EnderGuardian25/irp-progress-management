@@ -8,17 +8,19 @@ matters — start it now, because it gates two whole plans and takes real elapse
 
 ---
 
-## 1. Blocks Plan 3 and Plan 4 — start today
+## 1. Blocks Plan 4 — start today
 
-### 1.0 Read this first — nothing here blocks Plan 3 any more
+### 1.0 Read this first — none of this blocked Plan 3, and Plan 3 has merged
 
-Plan 3 ships a **dev auth bypass** (ADR-0012), so the whole application runs,
-tests and demos with no Entra directory at all. Everything in §1 is still
-needed to *deploy on Azure with real Microsoft sign-in*, but none of it blocks
-building or merging.
+Plan 3 shipped a **dev auth bypass** (ADR-0012), so the whole application runs,
+tests and demos with no Entra directory at all. **Plan 3 merged as PR #6 without
+any of §1 being done.**
+
+What §1 is still needed for: **Plan 4** — deploying on Azure with real Microsoft
+sign-in, `infra/entra.bicep`, and waking the dormant real-token CI job.
 
 **What the bypass does not excuse:** it must be deleted, not left dormant. The
-cutover is four config steps — see the Plan 3 spec §7.
+cutover is four config steps — see the Plan 3 spec §7 and §1.3b below.
 
 ### 1.1 Create an Azure free account — ✅ DONE, 2026-07-28
 
@@ -47,11 +49,23 @@ Plus $200 credit for 30 days as headroom if load testing needs a bigger tier bri
 > 50 of the 75 remaining graded points sit behind having something deployed. This unblocks
 > today. Ask the mentor for Bistec tenant access anyway — see §3 — but nothing waits on it.
 
-### 1.1a Create a dedicated Entra directory — ⬅ **THE BLOCKER. Do this next.**
+### 1.1a Create a dedicated Entra directory — ⬅ **Plan 4's blocker. Do this next.**
 
 **Why, in one line:** the users are in `bistecglobal.com` (where you have no account), the
 subscription is in `bisteccare.lk` (where Graph is blocked by conditional access), so neither
 directory can host the app registrations. See `handoff.md` §3 for the full reasoning.
+
+**Known complication, 2026-07-29:** your **work account has no Entra admin access**. That does not
+necessarily prevent creating a *new* tenant — creating one makes you its Global Administrator
+regardless of your rights in the current directory — but some directories restrict it. Try the flow
+below first. If it is refused, the fallback is a free tenant created from a **personal Microsoft
+account**, then a native `admin@<name>.onmicrosoft.com` inside it for all CLI and Bicep work. The
+"do not use a personal Microsoft account" warning further down applies to the identity that
+*deploys Graph resources*, not the one that creates the tenant — so that fallback is sound.
+
+One consequence to expect if you take the fallback: the subscription stays in `bisteccare.lk` while
+the Entra objects live elsewhere, so `main.bicep` and `entra.bicep` become **two deployments with
+two credentials** rather than one. Manageable, but it is real extra work in Plan 4.
 
 Roughly 5 minutes.
 
