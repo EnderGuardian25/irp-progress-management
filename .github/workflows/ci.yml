@@ -155,7 +155,20 @@ jobs:
       - name: Test
         run: pnpm -r test
 
+      # The four e2e steps below run on the UTC leg ONLY.
+      #
+      # The timezone matrix exists to catch reliance on server local time
+      # (NFR-12), and that risk is fully covered by the unit suites, which DO
+      # run on all three legs — @irp/core's 112 date-engine tests are the ones
+      # that matter there. The e2e spec asserts sign-in identity and rendering
+      # and contains no date or timezone assertion at all, so running it three
+      # times buys no extra coverage while paying three browser installs and
+      # three full app builds against the under-8-minute deploy target (NFR-5).
+      #
+      # If an e2e spec ever gains a date-sensitive assertion, drop this
+      # condition — do not work around it.
       - name: Install the Playwright browser
+        if: matrix.timezone == 'UTC'
         run: pnpm --filter @irp/web exec playwright install --with-deps chromium
 
       # Must run AFTER `pnpm -r test`, never before: apps/api's suites
@@ -163,6 +176,7 @@ jobs:
       # this step runs. The unit suite itself must never depend on this seed
       # (Task 10) — that is why it is not seeded any earlier in the job.
       - name: Seed the dev users the e2e test expects
+        if: matrix.timezone == 'UTC'
         run: |
           psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
 
@@ -179,6 +193,7 @@ jobs:
       # take effect immediately if that config ever changes to read from
       # process.env the way its DATABASE_URL and AUTH_SECRET already do.
       - name: End-to-end smoke test
+        if: matrix.timezone == 'UTC'
         env:
           AUTH_DEV_BYPASS: "true"
           JWKS_URI: http://127.0.0.1:3000/api/dev-jwks
@@ -187,7 +202,7 @@ jobs:
         run: pnpm --filter @irp/web e2e
 
       - name: Upload the Playwright report on failure
-        if: failure()
+        if: failure() && matrix.timezone == 'UTC'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.timezone }}
