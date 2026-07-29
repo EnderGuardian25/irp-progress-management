@@ -57,7 +57,7 @@ Every task's requirements implicitly include this section.
 | `apps/web/components/app-frame/sidebar.tsx` | 216px sidebar |
 | `apps/web/lib/api-client.ts` | `server-only`; cookie → token → per-request client |
 | `apps/web/lib/dev-identities.ts` | Dev identity data only — no `jose`/`next-auth` imports, safe for a Client Component |
-| `apps/web/lib/dev-identity.ts` | Local keypair, token minting, provider. `server-only`-guarded, excluded from prod bundle |
+| `apps/web/lib/dev-identity.ts` | Local keypair, token minting, provider. `server-only`-guarded, never evaluated in prod (not bundle-excluded) |
 | `apps/web/test/mocks/server-only.ts` | Vitest-only no-op alias for `server-only`, mirroring Next's `react-server` condition |
 | `apps/web/auth.config.ts` | Edge-safe provider list + guard |
 | `apps/web/auth.ts` | Full config, callbacks, prod guard |
@@ -1082,12 +1082,19 @@ navigations and its docs warn against relying on them for authorization."
   ```ts
   // auth.config.ts
   export const authConfig: NextAuthConfig;
-  export function assertBypassNotInProduction(env: NodeJS.ProcessEnv): void;
+  type BypassGuardEnv = Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>;
+  export function assertBypassNotInProduction(env: BypassGuardEnv): void;
   // auth.ts
   export const { handlers, auth, signIn, signOut }: NextAuthResult;
   ```
 
 **This task carries the most dangerous thing in the plan.** A bypass reaching production is unauthenticated access to student personal data, not a recoverable bug. Both guards go in here, and **the runtime throw must be demonstrated red before it is made green.**
+
+> **CORRECTED 2026-07-29 (fix pass 1).** A whole-branch review found three defects below, now folded into the steps that follow:
+>
+> 1. **The "excluded from the production bundle" claim was false.** A dynamic `await import()` with a literal specifier is statically analyzable; Turbopack emits it as a lazy chunk and does not remove it. `import "server-only"` does not change server-bundle inclusion either — it only turns a *Client Component* import into a build error via the `react-server` condition. What is actually guaranteed: `lib/dev-identity.ts` is never **evaluated** in production, because the branch that imports it is never taken — its top-level `generateKeyPair()` call never runs. `assertBypassNotInProduction` (guard one) is the guard that structurally enforces the block; guard two only keeps the module's side effects from executing. Every occurrence of "excluded from the production bundle" below is reworded to this accurate claim.
+> 2. **The guard was not invoked on every import path.** `middleware.ts` (Task 9) imports `auth.config.ts` directly, because `auth.ts` is not edge-safe. With the call living only in `auth.ts`, an edge-only import path (e.g. a health check hitting only middleware) would boot clean with a live bypass in production. `assertBypassNotInProduction(process.env)` now runs at **module scope in `auth.config.ts`**, immediately after the function definition — covering both import paths. The redundant call in `auth.ts` is removed rather than kept, since `auth.ts` already imports `auth.config.ts` and a second call there would be noise, not additional coverage. `process.env` reads are Edge-runtime-safe in Next 16: the Edge sandbox (`next/dist/server/web/sandbox/context.js`, `buildEnvironmentVariablesFrom`) mirrors the real `process.env` rather than restricting reads to statically-inlined names.
+> 3. **The two string comparisons need opposite strictness.** `AUTH_DEV_BYPASS === "true"` stays exact — only the literal string enables a bypass, so `"1"`/`"TRUE"`/`"yes"` must not trip the guard either. But `NODE_ENV === "production"` was too strict *for a guard*: a container setting `NODE_ENV=Production` would sail through with a live bypass. The environment check is now `env.NODE_ENV?.toLowerCase() === "production"` — case-insensitive, so the guard fires *more* often, not less. `NodeJS.ProcessEnv`'s `NODE_ENV` is typed as the literal union `'development' | 'production' | 'test'` (from `next/types/global.d.ts`), which would reject a test literal of `"Production"`; the parameter type is widened to `Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>` (the `| undefined` is required by `exactOptionalPropertyTypes`) so the case tests can actually be expressed, without changing what the real call site (`process.env`) is allowed to pass.
 
 **`next-auth@5.0.0-beta.32` is a beta release.** That is deliberate — v4 is the `latest` tag but has no real App Router support. ADR-0010 (Task 14) records the acceptance.
 
@@ -1098,7 +1105,7 @@ navigations and its docs warn against relying on them for authorization."
 Create `apps/web/test/prod-guard.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assertBypassNotInProduction } from "@/auth.config";
 
 describe("assertBypassNotInProduction", () => {
@@ -1115,7 +1122,7 @@ describe("assertBypassNotInProduction", () => {
   });
 
   it("permits the bypass outside production", () => {
-    for (const NODE_ENV of ["development", "test"]) {
+    for (const NODE_ENV of ["development", "test"] as const) {
       expect(() =>
         assertBypassNotInProduction({ NODE_ENV, AUTH_DEV_BYPASS: "true" }),
       ).not.toThrow();
@@ -1127,6 +1134,35 @@ describe("assertBypassNotInProduction", () => {
       expect(() =>
         assertBypassNotInProduction({ NODE_ENV: "production", AUTH_DEV_BYPASS }),
       ).not.toThrow();
+    }
+  });
+
+  // AUTH_DEV_BYPASS is exact (above); NODE_ENV must be the opposite — case
+  // insensitive — so the guard fires MORE often, not less.
+  it("throws when NODE_ENV is 'Production' (mixed case)", () => {
+    expect(() =>
+      assertBypassNotInProduction({ NODE_ENV: "Production", AUTH_DEV_BYPASS: "true" }),
+    ).toThrow(/AUTH_DEV_BYPASS/);
+  });
+
+  it("throws when NODE_ENV is 'PRODUCTION' (upper case)", () => {
+    expect(() =>
+      assertBypassNotInProduction({ NODE_ENV: "PRODUCTION", AUTH_DEV_BYPASS: "true" }),
+    ).toThrow(/AUTH_DEV_BYPASS/);
+  });
+
+  // middleware.ts imports auth.config.ts directly, never through auth.ts.
+  // The guard must fire as a module-scope side effect of the import itself.
+  it("throws merely by importing auth.config.ts when the bypass is set in production", async () => {
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_DEV_BYPASS", "true");
+
+    try {
+      await expect(import("@/auth.config")).rejects.toThrow(/AUTH_DEV_BYPASS/);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
     }
   });
 });
@@ -1151,23 +1187,54 @@ import type { NextAuthConfig } from "next-auth";
 import MicrosoftEntraId from "next-auth/providers/microsoft-entra-id";
 
 /**
- * Guard one of two. A bypass reaching production is unauthenticated access to
- * student personal data, so this refuses to boot rather than degrading.
+ * The enforcing guard. A bypass reaching production is unauthenticated access
+ * to student personal data, so this refuses to boot rather than degrading.
  *
- * Guard two is structural: lib/dev-identity.ts is excluded from the production
- * bundle (see auth.ts), so even a leaked env var has nothing to enable.
+ * Guard two, in lib/dev-identity.ts's docblock, is NOT bundle exclusion —
+ * that module is imported dynamically with a literal specifier, which is
+ * statically analyzable, so Turbopack still emits it as a lazy chunk rather
+ * than removing it. What guard two actually guarantees is that the module is
+ * never EVALUATED in production (its top-level key generation never runs),
+ * because the dynamic import is gated on this same flag. This function is the
+ * one that structurally enforces the block.
  *
- * Exact string comparison is deliberate — "1", "TRUE" and "yes" must NOT enable
- * a bypass, so they must not trip the guard either.
+ * Exact string comparison on AUTH_DEV_BYPASS is deliberate — "1", "TRUE" and
+ * "yes" must NOT enable a bypass, so they must not trip the guard either.
+ *
+ * The NODE_ENV comparison is deliberately the OPPOSITE: case-insensitive, so
+ * the guard fires MORE often, not less. A container that sets NODE_ENV to
+ * "Production" (capitalized) must still trip this guard — an exact-match
+ * comparison here would let a live bypass through on a technicality. The two
+ * checks have opposite risk profiles: the flag that enables the bypass must
+ * be matched exactly (narrow), and the check that blocks it must be matched
+ * loosely (broad).
  */
-export function assertBypassNotInProduction(env: NodeJS.ProcessEnv): void {
-  if (env.AUTH_DEV_BYPASS === "true" && env.NODE_ENV === "production") {
+// `| undefined` is explicit, not redundant with the optional `?` — the
+// tsconfig sets exactOptionalPropertyTypes, under which an optional property
+// accepts *omission* but not an explicitly-assigned `undefined` unless the
+// property's type says so. The existing "unset AUTH_DEV_BYPASS" test case
+// passes `undefined` as a value, so the type must allow that explicitly.
+type BypassGuardEnv = Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>;
+
+export function assertBypassNotInProduction(env: BypassGuardEnv): void {
+  if (env.AUTH_DEV_BYPASS === "true" && env.NODE_ENV?.toLowerCase() === "production") {
     throw new Error(
       "AUTH_DEV_BYPASS is set in a production build. Refusing to start. " +
         "This flag mints tokens with a local key and must never run in production.",
     );
   }
 }
+
+// Invoked here at module scope — not only from auth.ts — because
+// middleware.ts imports auth.config.ts directly (auth.ts is not edge-safe,
+// so middleware cannot go through it). Without this call living here, an
+// Edge health check that only loads middleware.ts would boot clean with
+// AUTH_DEV_BYPASS=true in production; only a page or route that also pulls
+// in @/auth would trip the guard. process.env reads are Edge-runtime-safe in
+// Next 16 — the Edge sandbox mirrors the real process.env, it does not
+// restrict reads to NEXT_PUBLIC_*-prefixed or statically inlined names — so
+// this call is safe on both the edge and the Node import path.
+assertBypassNotInProduction(process.env);
 
 /**
  * Goes into the ENCRYPTED, HTTP-ONLY cookie. Server-only.
@@ -1249,15 +1316,24 @@ export const authConfig: NextAuthConfig = {
 ```ts
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import type { Provider } from "next-auth/providers";
-import { assertBypassNotInProduction, authConfig } from "./auth.config";
+import { authConfig } from "./auth.config";
 
-assertBypassNotInProduction(process.env);
-
+// The guard (assertBypassNotInProduction) runs at auth.config.ts's module
+// scope, not here. This module already imports auth.config.ts below, so
+// that call has already executed by the time this line is reached — calling
+// it again here would be redundant, not additional coverage. auth.config.ts
+// is the one that must self-invoke, because middleware.ts imports it
+// directly without going through this file.
 const bypassEnabled = process.env.AUTH_DEV_BYPASS === "true";
 
-// Guard two, structural: the dev module is imported only under the flag, so a
-// production bundle does not contain it and a leaked env var has nothing to
-// enable. Keep this as a dynamic import — a static one would bundle it always.
+// Guard two: the dev module is imported only under the flag, so it is never
+// EVALUATED in production — its top-level generateKeyPair() call never runs.
+// This is NOT bundle exclusion: a dynamic import with a literal specifier is
+// statically analyzable, and Turbopack still emits it as a lazy chunk rather
+// than removing it. The guard that actually enforces the block is
+// auth.config.ts's assertBypassNotInProduction. Keep this as a dynamic
+// import anyway — a static one would evaluate the module (and its top-level
+// key generation) unconditionally at load time, bypass flag or not.
 const devProviders: Provider[] = bypassEnabled
   ? [(await import("./lib/dev-identity")).devIdentityProvider()]
   : [];
@@ -1298,9 +1374,16 @@ API_BASE_URL=http://localhost:3001
 # apps/api validates them with its real jose code path — this swaps the token
 # ISSUER, it does not skip authentication.
 #
-# Setting this with NODE_ENV=production makes the app REFUSE TO BOOT, and the
-# dev module is excluded from a production bundle regardless.
+# Setting this with NODE_ENV=production makes the app REFUSE TO BOOT
+# (case-insensitively — "Production" trips it too). That startup throw is the
+# enforcing guard: the dev module is still part of the production bundle (a
+# dynamic import does not remove it), it is just never evaluated when the
+# flag is off.
 AUTH_DEV_BYPASS=true
+
+# Audience claim on the token the dev provider mints. Must match what
+# apps/api expects. Defaults to api://irp-progress-management when unset.
+API_SCOPE_AUDIENCE=api://irp-progress-management
 
 # ── Microsoft Entra (unused while the bypass is on) ───────────────────────
 AUTH_MICROSOFT_ENTRA_ID_ID=
@@ -1315,19 +1398,27 @@ API_SCOPE=api://irp-progress-management/access_as_user
 pnpm --filter @irp/web test prod-guard
 ```
 
-Expected: PASS, 4 tests.
+Expected: PASS, 7 tests.
 
-- [ ] **Step 8: PROVE THE GATE FAILS — mandatory**
+- [ ] **Step 8: PROVE THE GATE FAILS — mandatory, two mutations**
 
-Comment out the `throw new Error(...)` block in `auth.config.ts`, leaving the `if` body empty. Re-run:
+**Mutation 1.** Comment out the `throw new Error(...)` block in `auth.config.ts`, leaving the `if` body empty. Re-run:
 
 ```powershell
 pnpm --filter @irp/web test prod-guard
 ```
 
-Expected: **FAIL**, 2 of 4 tests — "throws when the bypass is enabled in a production build" and "names the variable and refuses to start".
+Expected: **FAIL**, 5 of 7 tests — the two direct-throw assertions, both case-insensitivity assertions, and the import-path assertion. The two "permits ..." tests still pass, since they never expected a throw.
 
-If it passes with the throw removed, the test asserts nothing and must be rewritten. **Restore the throw** and confirm green again before committing. Record in your task report that you performed this step and what you observed.
+**Restore the throw**, confirm green (7/7), then run **mutation 2**: change the condition to `env.AUTH_DEV_BYPASS !== undefined` (loosen the exact-match check). Re-run:
+
+```powershell
+pnpm --filter @irp/web test prod-guard
+```
+
+Expected: **FAIL**, 1 of 7 tests — "permits production when the bypass is unset or not exactly 'true'" (now `"1"`/`"TRUE"`/`"yes"`/`""` incorrectly trip the guard).
+
+If either mutation passes clean, the corresponding assertion is not testing what it claims and must be rewritten. **Restore the exact condition** and confirm green (7/7) again before committing. Record in your task report that you performed both mutations and what you observed.
 
 - [ ] **Step 9: Commit**
 
@@ -1336,12 +1427,22 @@ git add apps/web/auth.config.ts apps/web/auth.ts "apps/web/app/api/auth" apps/we
 git commit -m "feat(web): Auth.js v5 config with two production bypass guards
 
 Guard one: a startup throw when AUTH_DEV_BYPASS=true meets
-NODE_ENV=production. Guard two: the dev module is dynamically imported
-under the flag, so a production bundle does not contain it.
+NODE_ENV=production (checked case-insensitively, so the guard fires more
+often rather than less). Guard two: the dev module is dynamically
+imported under the flag, so it is never evaluated in production — not
+excluded from the production bundle, which a dynamic import with a
+literal specifier does not achieve.
 
-Demonstrated red by removing the throw — 2 of 4 tests fail — then
-restored. Exact string comparison is deliberate: '1', 'TRUE' and 'yes'
-do not enable a bypass, so they must not trip the guard either.
+The guard runs at auth.config.ts's module scope so both import paths
+are covered: middleware.ts imports auth.config.ts directly (it is not
+edge-safe to go through auth.ts), so the guard must not depend on
+auth.ts being loaded.
+
+Demonstrated red by two mutations — removing the throw (5 of 7 tests
+fail) and loosening the AUTH_DEV_BYPASS comparison to !== undefined (1
+of 7 fails) — then restored both times. Exact string comparison on
+AUTH_DEV_BYPASS is deliberate: '1', 'TRUE' and 'yes' do not enable a
+bypass, so they must not trip the guard either.
 
 The session callback exposes neither the access token nor the role. Its
 return value is what the browser's /api/auth/session returns, so a token
@@ -1568,8 +1669,13 @@ import { DEV_IDENTITIES, DEV_ISSUER, type DevIdentity } from "@/lib/dev-identiti
  * exercises remote JWKS retrieval every day rather than only in CI.
  *
  * This module is imported ONLY when AUTH_DEV_BYPASS=true (see auth.ts), so it
- * is absent from a production bundle. auth.config.ts additionally refuses to
- * boot if the flag is set with NODE_ENV=production.
+ * is never EVALUATED in production — the top-level generateKeyPair() call
+ * below never runs when the flag is off. It is NOT excluded from the
+ * production bundle: a dynamic import with a literal specifier is statically
+ * analyzable, so Turbopack still emits it as a lazy chunk. The guard that
+ * actually enforces the block is auth.config.ts's
+ * assertBypassNotInProduction, which refuses to boot if the flag is set with
+ * NODE_ENV=production (case-insensitively).
  *
  * `import "server-only"` above makes any accidental import from a Client
  * Component (e.g. reaching for mintDevToken instead of the data-only
@@ -3335,7 +3441,7 @@ Content it must carry:
 
 - **Context:** Damian's work account has no Entra admin access, so the dedicated directory may not be creatable. 50 of 75 remaining graded points sit behind having something deployed, and slice 1 must be deployed and traced before slice 2 begins.
 - **Decision:** a dev-only Auth.js provider that mints a **real** RS256 JWT with a local key and publishes the matching public key at `/api/dev-jwks`. `apps/api` validates it through `createRemoteJWKSet` with its real `jose` code path. **The bypass swaps the token issuer; it does not skip authentication.**
-- **Two guards:** a startup throw when `AUTH_DEV_BYPASS=true` meets `NODE_ENV=production`, and exclusion of the dev module from the production bundle via dynamic import. The throw is demonstrated red.
+- **Two guards:** a startup throw when `AUTH_DEV_BYPASS=true` meets `NODE_ENV=production` (checked case-insensitively, so a container that sets `NODE_ENV=Production` still trips it — the two comparisons are deliberately asymmetric: `AUTH_DEV_BYPASS` must match `"true"` exactly, so `"1"`/`"TRUE"`/`"yes"` neither enable the bypass nor trip the guard, while `NODE_ENV` is matched loosely so the guard errs toward firing); and the dev module never being **evaluated** in production, because the dynamic import that loads it is gated on the same flag — this is not the module being excluded from the production bundle, which a dynamic import with a literal specifier does not achieve, since Turbopack still emits it as a lazy chunk. The throw is demonstrated red by two mutations: removing it, and loosening the `AUTH_DEV_BYPASS` comparison.
 - **Positive consequences:** the API has no mode branch, so the 403 rule, role handling and token validation are exercised identically in both modes; dev exercises `createRemoteJWKSet` — the production mechanism — every day rather than only in the dormant CI job; and the cutover is four config steps with no code change, which makes slice-1 §6's "issuer swap, not a rewrite" claim demonstrated rather than asserted.
 - **Negative consequences, stated plainly:** an auth bypass exists in the codebase, and that is a permanent liability requiring both guards to hold; a dev-signed token is not an Entra token, so app-role claim shapes remain unproven until the real-token job wakes; and restarting `apps/web` rotates the key and invalidates sessions.
 - **Rejected — a trusted header (`x-dev-user`) that skips JWT validation:** simplest possible bypass. Rejected because it would make the 403 rule, the role claims and token validation *production-only* code paths — the most security-critical logic in the system would become the least exercised, which is exactly backwards.
@@ -3361,9 +3467,24 @@ Also add a house-rules paragraph:
 `AUTH_DEV_BYPASS=true` makes `apps/web` mint tokens with a local key. It swaps
 the token *issuer* — `apps/api` still validates every token with its real `jose`
 path — so it is not an auth skip. Two guards keep it out of production: a
-startup throw when the flag meets `NODE_ENV=production`, and exclusion of
-`apps/web/lib/dev-identity.ts` from the production bundle. **Never weaken
-either.** Once the Entra directory exists, perform the cutover in the Plan 3
+startup throw when the flag meets `NODE_ENV=production` (matched
+case-insensitively, so the guard fires more often, not less — a container
+that sets `NODE_ENV=Production` must still trip it); and `apps/web/lib/dev-identity.ts`
+never being **evaluated** in production, because the dynamic import that
+loads it is gated on the same flag. **This second guard is not bundle
+exclusion** — a dynamic `await import()` with a literal specifier is
+statically analyzable, and Turbopack still emits it as a lazy chunk rather
+than removing it from the production bundle; do not write or repeat the
+claim that it is excluded from the bundle. The startup throw
+(`assertBypassNotInProduction`, in `apps/web/auth.config.ts`) is the guard
+that structurally enforces the block, and it runs at that module's own
+top level so both `apps/web/auth.ts` and `apps/web/middleware.ts` (which
+imports `auth.config.ts` directly, since it is not edge-safe to go through
+`auth.ts`) are covered by the same single call. **Never weaken either
+guard**, and never loosen the exact-match comparison on `AUTH_DEV_BYPASS` or
+the case-insensitivity of the `NODE_ENV` comparison — the two checks are
+intentionally asymmetric, one narrow and one broad, and both directions
+matter. Once the Entra directory exists, perform the cutover in the Plan 3
 spec §7 and remove the bypass. ADR-0012.
 ```
 

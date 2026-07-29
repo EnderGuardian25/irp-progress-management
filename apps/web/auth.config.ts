@@ -2,23 +2,54 @@ import type { NextAuthConfig } from "next-auth";
 import MicrosoftEntraId from "next-auth/providers/microsoft-entra-id";
 
 /**
- * Guard one of two. A bypass reaching production is unauthenticated access to
- * student personal data, so this refuses to boot rather than degrading.
+ * The enforcing guard. A bypass reaching production is unauthenticated access
+ * to student personal data, so this refuses to boot rather than degrading.
  *
- * Guard two is structural: lib/dev-identity.ts is excluded from the production
- * bundle (see auth.ts), so even a leaked env var has nothing to enable.
+ * Guard two, in lib/dev-identity.ts's docblock, is NOT bundle exclusion —
+ * that module is imported dynamically with a literal specifier, which is
+ * statically analyzable, so Turbopack still emits it as a lazy chunk rather
+ * than removing it. What guard two actually guarantees is that the module is
+ * never EVALUATED in production (its top-level key generation never runs),
+ * because the dynamic import is gated on this same flag. This function is the
+ * one that structurally enforces the block.
  *
- * Exact string comparison is deliberate — "1", "TRUE" and "yes" must NOT enable
- * a bypass, so they must not trip the guard either.
+ * Exact string comparison on AUTH_DEV_BYPASS is deliberate — "1", "TRUE" and
+ * "yes" must NOT enable a bypass, so they must not trip the guard either.
+ *
+ * The NODE_ENV comparison is deliberately the OPPOSITE: case-insensitive, so
+ * the guard fires MORE often, not less. A container that sets NODE_ENV to
+ * "Production" (capitalized) must still trip this guard — an exact-match
+ * comparison here would let a live bypass through on a technicality. The two
+ * checks have opposite risk profiles: the flag that enables the bypass must
+ * be matched exactly (narrow), and the check that blocks it must be matched
+ * loosely (broad).
  */
-export function assertBypassNotInProduction(env: NodeJS.ProcessEnv): void {
-  if (env.AUTH_DEV_BYPASS === "true" && env.NODE_ENV === "production") {
+// `| undefined` is explicit, not redundant with the optional `?` — the
+// tsconfig sets exactOptionalPropertyTypes, under which an optional property
+// accepts *omission* but not an explicitly-assigned `undefined` unless the
+// property's type says so. The existing "unset AUTH_DEV_BYPASS" test case
+// passes `undefined` as a value, so the type must allow that explicitly.
+type BypassGuardEnv = Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>;
+
+export function assertBypassNotInProduction(env: BypassGuardEnv): void {
+  if (env.AUTH_DEV_BYPASS === "true" && env.NODE_ENV?.toLowerCase() === "production") {
     throw new Error(
       "AUTH_DEV_BYPASS is set in a production build. Refusing to start. " +
         "This flag mints tokens with a local key and must never run in production.",
     );
   }
 }
+
+// Invoked here at module scope — not only from auth.ts — because
+// middleware.ts imports auth.config.ts directly (auth.ts is not edge-safe,
+// so middleware cannot go through it). Without this call living here, an
+// Edge health check that only loads middleware.ts would boot clean with
+// AUTH_DEV_BYPASS=true in production; only a page or route that also pulls
+// in @/auth would trip the guard. process.env reads are Edge-runtime-safe in
+// Next 16 — the Edge sandbox mirrors the real process.env, it does not
+// restrict reads to NEXT_PUBLIC_*-prefixed or statically inlined names — so
+// this call is safe on both the edge and the Node import path.
+assertBypassNotInProduction(process.env);
 
 /**
  * Goes into the ENCRYPTED, HTTP-ONLY cookie. Server-only.

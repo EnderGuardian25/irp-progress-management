@@ -165,7 +165,7 @@ apps/web/
 │  └─ ui/                           shadcn primitives (ADR-0001)
 ├─ lib/
 │  ├─ api-client.ts                 server-only; getToken → createClient
-│  └─ dev-identity.ts               EXCLUDED from the production bundle
+│  └─ dev-identity.ts               NEVER EVALUATED in production (not bundle-excluded)
 ├─ auth.ts                          full Auth.js config
 ├─ auth.config.ts                   edge-safe subset for middleware
 ├─ middleware.ts                    redirect guard — UX only
@@ -238,12 +238,36 @@ It does **not** skip the API's authentication. Rejected alternatives and why:
 Both, because a bypass reaching production is unauthenticated access to student personal data, not
 a recoverable bug.
 
-1. **Runtime:** `auth.ts` throws at startup if `AUTH_DEV_BYPASS=true` while
-   `NODE_ENV=production`. Refuses to boot.
-2. **Build-time:** `lib/dev-identity.ts` is excluded from the production bundle, so a leaked env var
-   has nothing to enable.
+1. **Runtime, the enforcing guard:** `assertBypassNotInProduction`, defined in `auth.config.ts`,
+   throws at startup if `AUTH_DEV_BYPASS=true` while `NODE_ENV=production`. It runs at
+   `auth.config.ts`'s own module scope — not only from `auth.ts` — because `middleware.ts` imports
+   `auth.config.ts` directly (`auth.ts` is not edge-safe, so middleware cannot go through it).
+   Without the call living in `auth.config.ts` itself, an edge-only import path would boot clean
+   with a live bypass in production; only a page or route that also pulls in `@/auth` would trip
+   it. `process.env` reads are Edge-runtime-safe in Next 16 — the Edge sandbox mirrors the real
+   `process.env` rather than restricting reads to statically inlined names.
 
-The runtime throw is tested, and **demonstrated red before it is trusted** (§10).
+   The two string comparisons inside the guard have **deliberately opposite strictness**:
+   `AUTH_DEV_BYPASS === "true"` is exact, so `"1"`/`"TRUE"`/`"yes"` must neither enable the bypass
+   nor trip the guard. `NODE_ENV` is compared case-insensitively
+   (`env.NODE_ENV?.toLowerCase() === "production"`), so the guard fires *more* often, not less — a
+   container that sets `NODE_ENV=Production` must still trip it. The flag that enables the bypass
+   is matched narrowly; the check that blocks it is matched broadly. Opposite risk profiles need
+   opposite strictness.
+
+2. **`lib/dev-identity.ts` is never EVALUATED in production — this is NOT bundle exclusion.** A
+   dynamic `await import()` with a literal specifier is statically analyzable; Turbopack emits it
+   as a lazy chunk and does not remove it from the production bundle. `import "server-only"`
+   doesn't change that either — it only turns a *Client Component* import into a build error via
+   the `react-server` condition, and has no bearing on server-bundle inclusion. What is actually
+   guaranteed: because the dynamic import in `auth.ts` is gated on `AUTH_DEV_BYPASS`, the module's
+   top-level `generateKeyPair()` call never runs when the flag is off — the module sits in the
+   bundle, unevaluated. Guard 1 above is the one that structurally enforces the block; this guard
+   only keeps the module's side effects from executing, and depends on guard 1 to matter.
+
+The runtime throw is tested, and **demonstrated red before it is trusted** (§10) — by two
+mutations: removing the throw, and loosening the `AUTH_DEV_BYPASS` comparison to `!== undefined`.
+Both must produce failures.
 
 ### 6.4 The three identities
 

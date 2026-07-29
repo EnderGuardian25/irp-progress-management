@@ -21,8 +21,13 @@ import { DEV_IDENTITIES, DEV_ISSUER, type DevIdentity } from "@/lib/dev-identiti
  * exercises remote JWKS retrieval every day rather than only in CI.
  *
  * This module is imported ONLY when AUTH_DEV_BYPASS=true (see auth.ts), so it
- * is absent from a production bundle. auth.config.ts additionally refuses to
- * boot if the flag is set with NODE_ENV=production.
+ * is never EVALUATED in production — the top-level generateKeyPair() call
+ * below never runs when the flag is off. It is NOT excluded from the
+ * production bundle: a dynamic import with a literal specifier is statically
+ * analyzable, so Turbopack still emits it as a lazy chunk. The guard that
+ * actually enforces the block is auth.config.ts's
+ * assertBypassNotInProduction, which refuses to boot if the flag is set with
+ * NODE_ENV=production (case-insensitively).
  *
  * `import "server-only"` above makes any accidental import from a Client
  * Component (e.g. reaching for mintDevToken instead of the data-only
