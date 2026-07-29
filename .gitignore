@@ -7,3 +7,8 @@ coverage/
 .env.local
 .DS_Store
 apps/api/src/generated/
+
+# Superpowers scratch: SDD task briefs, review diffs, progress ledgers, and
+# brainstorm mockups. CLAUDE.md already treats this as ignored — it was not,
+# so SDD artefacts and mockups were one `git add .` away from being committed.
+.superpowers/

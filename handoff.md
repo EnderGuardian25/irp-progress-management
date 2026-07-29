@@ -354,11 +354,16 @@ because this is the plan that makes it real.
    ```
 
    Verified end to end on a second machine on 2026-07-29: 112 core + 48 api, all green.
-3. **Plan 3 is mid-brainstorm.** Section 1 is approved; Sections 2 and 3 are not written. Resume
-   with `superpowers:brainstorming` — present the remaining sections, then write the spec to
-   `docs/superpowers/specs/2026-07-28-plan-3-auth-and-web-shell-design.md`, then `writing-plans`,
-   then `subagent-driven-development`. **Do not skip to implementation**; the brainstorm's
-   HARD-GATE requires an approved design first.
+3. **Plan 3's brainstorm is complete and the spec is written** —
+   `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md`. Next is
+   `writing-plans`, then `subagent-driven-development`.
+
+   **Three things in that spec change previously-settled ground, all recorded in its §2:**
+   a **dev auth bypass** (issuer swap, not an auth skip) so Plan 3 no longer depends on Entra
+   existing; **`infra/entra.bicep` moved to Plan 4**, because decision 4's stated premise — "Plan 3
+   cannot work without the registrations" — is now false; and the sign-in page takes the
+   split-with-ribbon treatment, which pulls a **real** `CycleRibbon` forward from Plan 7 (extended
+   there, not replaced).
 4. The settled decisions in §3 are approved — build on them, do not re-open them. What is *not*
    settled: the web shell's file layout, the sign-in page's visual treatment, how Auth.js session
    config is tested, and the CI job's exact shape.
