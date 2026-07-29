@@ -2,8 +2,10 @@
 # the build context it is not necessarily overwritten by regeneration — stale
 # extra files survive — and the image silently ships a different contract from
 # spec/openapi.yaml. The `generated` stage asserts the first two paths are
-# absent; the `build` stage asserts the third. This file is what makes both
-# assertions pass.
+# absent; the `build` stage asserts the third path's CONTENT IS UNCHANGED by
+# its COPYs (that path already legitimately exists before the build stage's
+# COPYs run, so an absence check can't apply there — see the Dockerfile's
+# `build`-stage comments). This file is what makes both assertions pass.
 packages/types/src
 packages/client/src
 apps/api/src/generated

@@ -1766,6 +1766,52 @@ sharper risk (a same-named stale host file silently overwriting a freshly genera
 presence check could never see either way. The FATAL message text is unchanged, so Step 3's
 three-outcome demonstration still applies verbatim.
 
+**Corrections found during review (fix pass, after the initial Task 6 commit):**
+
+1. **The Prisma `.ts`/extensionless import problem is not a Linux-vs-Windows quirk — it is
+   tsconfig discovery.** The original Task 6 report (and this plan's earlier draft, since
+   corrected) attributed Prisma emitting `./enums.ts` vs. `./enums` to the build OS. That is
+   false: `prisma-client`'s generator (`rBe`/`UBt` in the installed `prisma@7.9.1` CLI) picks the
+   extension based on whether it finds a tsconfig near the output directory — no tsconfig found
+   emits `.ts` (Docker's `generated` stage never copies `apps/api/tsconfig.json`, hitting this
+   branch); a tsconfig found with `moduleResolution: "Bundler"` emits extensionless (a local
+   `prisma generate`, which sees `tsconfig.base.json`, hits this branch instead). **Both variants
+   are equally unrunnable by plain `node`** — verified directly: rebuilding `apps/api/dist` against
+   the on-disk extensionless client and running `node apps/api/dist/index.js` reproduced
+   `ERR_MODULE_NOT_FOUND: Cannot find module '.../dist/generated/prisma/enums'`, the same failure
+   class as the `.ts` variant the original report captured in a Linux container. The
+   `allowImportingTsExtensions`/`rewriteRelativeImportExtensions` fix added to
+   `apps/api/tsconfig.json` also only rewrites specifiers that already carry a TS extension — it
+   does nothing for the extensionless variant, so the original report's claim that it fixed "any
+   future plain-`node` execution of `apps/api`'s compiled output" was not true either. **Fix:**
+   revert both compiler options from `apps/api/tsconfig.json`, and instead add
+   `importFileExtension = "js"` to the `generator client` block in `apps/api/prisma/schema.prisma`.
+   Prisma then emits `./enums.js` in every context — tsconfig visible or not — which
+   `moduleResolution: "Bundler"` resolves via TypeScript's `.js` → `.ts` substitution (what
+   `apps/api/src/db/client.ts:2` already relies on), and which is exactly what `tsc` leaves alone
+   on emit. This also makes Prisma generation deterministic across environments, closing a
+   contract-drift hazard the Dockerfile's own `generated`-stage comment already warns about.
+2. **`prod-deps`'s install must be filtered.** The step below originally ran an unfiltered
+   `pnpm install --frozen-lockfile --prod` over all five workspace manifests, so `api`'s
+   `COPY --from=prod-deps /repo/ ./` carried `apps/web`'s entire production dependency tree
+   (`next`, `next-auth`, `react`) into an image that never imports any of it — confirmed at
+   **1.38GB** for `irp-api` before the fix. **Fix:** `--filter @irp/api...` scopes the install to
+   `@irp/api` and its workspace dependencies. All five manifest `COPY`s stay (`--frozen-lockfile`
+   checks the whole workspace against the lockfile regardless of `--filter` scope and errors on a
+   missing manifest), with `apps/web/package.json` now noted as copied for lockfile completeness
+   only. This does not touch the whole-tree `COPY --from=prod-deps /repo/ ./` in the `api` stage —
+   that copy's symlink-safety property comes from copying the tree wholesale, not from the
+   install's scope, so it is unaffected by narrowing what's installed into that tree. Rebuilt size:
+   **917MB**.
+3. **The generated-manifest leak check (Defect 1's fix, above) widened to catch two more leak
+   shapes.** `find -type f | sha256sum` alone misses a leaked **empty directory** (nothing to hash)
+   and a leaked **symlink** (`sha256sum` only reads regular files). The manifest commands below now
+   also list directories and record each symlink's target, so either shape still changes the diff.
+   The two `/tmp/generated-src.{before,after}` scratch files are now removed at the end of the
+   second `RUN` (the one that consumes them) rather than left in the `build` layer.
+
+The Dockerfile code block below reflects all of the above as currently committed.
+
 Append to `Dockerfile`:
 
 ```dockerfile
@@ -1792,7 +1838,17 @@ ENV AUTH_SECRET=build-only-placeholder-not-a-runtime-secret
 # already here, generated in-image" — the actual risk this guards against is
 # a stale host copy silently overwriting a same-named freshly generated file,
 # which an existence check would never see either way.
-RUN find apps/api/src/generated -type f -exec sha256sum {} + | sort > /tmp/generated-src.before
+#
+# The manifest is more than `find -type f | sha256sum`: a bare file hash
+# misses two leak shapes entirely — a leaked EMPTY DIRECTORY has no file
+# inside to hash, and sha256sum only reads regular files, so a leaked
+# SYMLINK would not change a single hash either. Listing directories and
+# recording each symlink's target alongside the file hashes means either
+# shape still changes the diff below.
+RUN { find apps/api/src/generated -type f -exec sha256sum {} + | sort; \
+      find apps/api/src/generated -type d | sort; \
+      find apps/api/src/generated -type l -exec sh -c 'printf "%s -> %s\n" "$1" "$(readlink "$1")"' sh {} \; | sort; \
+    } > /tmp/generated-src.before
 
 COPY packages/core/ ./packages/core/
 COPY apps/api/ ./apps/api/
@@ -1804,13 +1860,17 @@ COPY apps/web/ ./apps/web/
 # first (and only) stage where a leak in it could actually reach an image,
 # so the comparison runs immediately after the COPY that could carry it.
 RUN set -eu; \
-    find apps/api/src/generated -type f -exec sha256sum {} + | sort > /tmp/generated-src.after; \
+    { find apps/api/src/generated -type f -exec sha256sum {} + | sort; \
+      find apps/api/src/generated -type d | sort; \
+      find apps/api/src/generated -type l -exec sh -c 'printf "%s -> %s\n" "$1" "$(readlink "$1")"' sh {} \; | sort; \
+    } > /tmp/generated-src.after; \
     if ! diff -q /tmp/generated-src.before /tmp/generated-src.after > /dev/null; then \
       echo "FATAL: apps/api/src/generated arrived from the build context."; \
       echo "Generated output must be produced in-image, never copied in."; \
       echo "Check .dockerignore — this is a regression, not a warning."; \
       exit 1; \
-    fi
+    fi; \
+    rm -f /tmp/generated-src.before /tmp/generated-src.after
 
 RUN pnpm --filter @irp/core build
 # Declaration-only emit. apps/web resolves TYPES from dist/*.d.ts so it can stay
@@ -1824,6 +1884,18 @@ RUN pnpm --filter @irp/web build
 # A second, production-only dependency tree. Kept separate from `deps` so the
 # api image never carries devDependencies — image size is cold-start time under
 # ADR-0009 D5's scale-to-zero.
+#
+# All five manifests are still copied — pnpm --frozen-lockfile checks the
+# whole workspace against pnpm-lock.yaml and complains about missing
+# manifests otherwise — but apps/web/package.json is copied for LOCKFILE
+# COMPLETENESS only, not because the api image needs anything web resolves.
+# --filter @irp/api... scopes the actual install to @irp/api and its
+# workspace dependencies (packages/core), so next/next-auth/react never
+# enter this stage's node_modules at all. Without the filter this install
+# pulled in apps/web's entire production dependency tree too, and the api
+# image it fed was 1.38GB — a filtered install brought it down without
+# touching the whole-tree COPY below, which is what actually protects the
+# pnpm symlinks (see the comment on that COPY in the `api` stage).
 FROM base AS prod-deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/api/package.json        ./apps/api/package.json
@@ -1832,7 +1904,7 @@ COPY packages/core/package.json   ./packages/core/package.json
 COPY packages/types/package.json  ./packages/types/package.json
 COPY packages/client/package.json ./packages/client/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --prod
+    pnpm install --frozen-lockfile --prod --filter @irp/api...
 
 ###############################  api  ###############################
 FROM base AS api
@@ -1939,11 +2011,14 @@ docker rm -f irp-api-test 2>$null
 - [ ] **Step 6: Check the image has no devDependencies**
 
 ```bash
-docker run --rm --entrypoint sh irp-api -c "ls node_modules | grep -E '^(vitest|tsx|prisma|typescript)$' || echo 'clean: no devDependencies'"
+docker run --rm --entrypoint sh irp-api -c "ls node_modules | grep -E '^(vitest|tsx|prisma|typescript|next)$' || echo 'clean: no devDependencies'"
 ```
 
 Expected: `clean: no devDependencies`. If `prisma` (the CLI) appears, `--prod` did not take effect
-and the image is carrying the whole toolchain — fix before committing.
+and the image is carrying the whole toolchain — fix before committing. `next` is in the pattern
+because the fix-pass `--filter @irp/api...` on `prod-deps`'s install (above) is specifically what
+keeps it out; its absence here is evidence the filter took effect, not just that devDependencies
+were excluded.
 
 - [ ] **Step 7: Commit**
 

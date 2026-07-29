@@ -115,7 +115,17 @@ ENV AUTH_SECRET=build-only-placeholder-not-a-runtime-secret
 # already here, generated in-image" — the actual risk this guards against is
 # a stale host copy silently overwriting a same-named freshly generated file,
 # which an existence check would never see either way.
-RUN find apps/api/src/generated -type f -exec sha256sum {} + | sort > /tmp/generated-src.before
+#
+# The manifest is more than `find -type f | sha256sum`: a bare file hash
+# misses two leak shapes entirely — a leaked EMPTY DIRECTORY has no file
+# inside to hash, and sha256sum only reads regular files, so a leaked
+# SYMLINK would not change a single hash either. Listing directories and
+# recording each symlink's target alongside the file hashes means either
+# shape still changes the diff below.
+RUN { find apps/api/src/generated -type f -exec sha256sum {} + | sort; \
+      find apps/api/src/generated -type d | sort; \
+      find apps/api/src/generated -type l -exec sh -c 'printf "%s -> %s\n" "$1" "$(readlink "$1")"' sh {} \; | sort; \
+    } > /tmp/generated-src.before
 
 COPY packages/core/ ./packages/core/
 COPY apps/api/ ./apps/api/
@@ -127,13 +137,17 @@ COPY apps/web/ ./apps/web/
 # first (and only) stage where a leak in it could actually reach an image,
 # so the comparison runs immediately after the COPY that could carry it.
 RUN set -eu; \
-    find apps/api/src/generated -type f -exec sha256sum {} + | sort > /tmp/generated-src.after; \
+    { find apps/api/src/generated -type f -exec sha256sum {} + | sort; \
+      find apps/api/src/generated -type d | sort; \
+      find apps/api/src/generated -type l -exec sh -c 'printf "%s -> %s\n" "$1" "$(readlink "$1")"' sh {} \; | sort; \
+    } > /tmp/generated-src.after; \
     if ! diff -q /tmp/generated-src.before /tmp/generated-src.after > /dev/null; then \
       echo "FATAL: apps/api/src/generated arrived from the build context."; \
       echo "Generated output must be produced in-image, never copied in."; \
       echo "Check .dockerignore — this is a regression, not a warning."; \
       exit 1; \
-    fi
+    fi; \
+    rm -f /tmp/generated-src.before /tmp/generated-src.after
 
 RUN pnpm --filter @irp/core build
 # Declaration-only emit. apps/web resolves TYPES from dist/*.d.ts so it can stay
@@ -147,6 +161,18 @@ RUN pnpm --filter @irp/web build
 # A second, production-only dependency tree. Kept separate from `deps` so the
 # api image never carries devDependencies — image size is cold-start time under
 # ADR-0009 D5's scale-to-zero.
+#
+# All five manifests are still copied — pnpm --frozen-lockfile checks the
+# whole workspace against pnpm-lock.yaml and complains about missing
+# manifests otherwise — but apps/web/package.json is copied for LOCKFILE
+# COMPLETENESS only, not because the api image needs anything web resolves.
+# --filter @irp/api... scopes the actual install to @irp/api and its
+# workspace dependencies (packages/core), so next/next-auth/react never
+# enter this stage's node_modules at all. Without the filter this install
+# pulled in apps/web's entire production dependency tree too, and the api
+# image it fed was 1.38GB — a filtered install brought it down without
+# touching the whole-tree COPY below, which is what actually protects the
+# pnpm symlinks (see the comment on that COPY in the `api` stage).
 FROM base AS prod-deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/api/package.json        ./apps/api/package.json
@@ -155,7 +181,7 @@ COPY packages/core/package.json   ./packages/core/package.json
 COPY packages/types/package.json  ./packages/types/package.json
 COPY packages/client/package.json ./packages/client/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --prod
+    pnpm install --frozen-lockfile --prod --filter @irp/api...
 
 ###############################  api  ###############################
 FROM base AS api
