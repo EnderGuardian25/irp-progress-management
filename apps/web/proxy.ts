@@ -41,5 +41,13 @@ export const config = {
   // `_next/image`: nothing under /_next is ever a route a human signs in to, so
   // enumerating subpaths only invites missing one (the dev HMR socket lives at
   // /_next/webpack-hmr, for instance).
+  //
+  // Honesty note for future readers: this was changed while chasing a
+  // hydration failure that broke the Playwright suite, and it was NOT the
+  // cause. The real cause was driving the browser at 127.0.0.1 — Next
+  // canonicalises loopback hostnames to `localhost`, so its dev server treated
+  // /_next/* requests as cross-origin and 403'd them. Fixed in
+  // playwright.config.ts, which documents it. This exclusion is kept because
+  // it is more correct, not because it fixed anything.
   matcher: ["/((?!api|signin|not-registered|_next|favicon.ico).*)"],
 };

@@ -43,7 +43,7 @@ export function assertBypassNotInProduction(env: BypassGuardEnv): void {
 // proxy.ts imports auth.config.ts directly. Without this call living here, a
 // request that only loads proxy.ts would boot clean with AUTH_DEV_BYPASS=true
 // in production; only a page or route that also pulls in @/auth would trip the
-// guard. Since Plan 4A (ADR-0013) proxy.ts runs on Node rather than the Edge,
+// guard. Since Plan 4A (ADR-0013), proxy.ts runs on Node rather than the Edge,
 // so process.env is plainly available — but this call must stay regardless:
 // its purpose is per-entry-point coverage, not runtime compatibility.
 assertBypassNotInProduction(process.env);

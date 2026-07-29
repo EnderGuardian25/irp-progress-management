@@ -904,7 +904,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/web/auth.config.ts` (comment references only)
 - Modify: `apps/web/auth.ts` (comment reference only)
 - Modify: `apps/web/app/(app)/layout.tsx`, `apps/web/app/(auth)/not-registered/page.tsx`,
-  `apps/web/lib/api-client.ts`, `apps/web/test/dev-jwks-route.test.ts` (comment references only)
+  `apps/web/lib/api-client.ts`, `apps/web/test/dev-jwks-route.test.ts`,
+  `apps/web/.env.example` (comment/prose references only)
 
 **Interfaces:**
 - Consumes: `authConfig` from `apps/web/auth.config.ts` (unchanged).
@@ -955,11 +956,13 @@ import { config, proxy } from "@/proxy";
 // the NextApiRequest/NextApiResponse tuple instead — the one Next.js's actual
 // runtime never uses — and fail on mismatched member types. This local alias
 // asserts the one shape Next.js really invokes, matching the shape of
-// next-auth's own `NextAuthMiddleware` type structurally.
+// next-auth's own `NextAuthMiddleware` type (lib/index.d.ts) structurally.
 //
 // `NextAuthMiddleware` itself is NOT reachable: next-auth@5.0.0-beta.32's
-// public entry re-exports only `NextAuthConfig` and `NextAuthRequest` as types
-// — `import type { NextAuthMiddleware } from "next-auth"` fails with TS2614.
+// public entry (index.d.ts) re-exports only `NextAuthConfig` and
+// `NextAuthRequest` as types — confirmed by probing
+// `import type { NextAuthMiddleware } from "next-auth"`, which fails with
+// TS2614.
 type ProxyInvocation = (
   request: NextRequest,
   event: NextFetchEvent,
@@ -1037,8 +1040,10 @@ describe("proxy behavior", () => {
     // crash before it reaches the authorized() check.
     const request = new NextRequest("http://localhost:3000/");
     // Unavoidable double assertion, not a stylistic one: `auth`'s declared type
-    // is an intersection of five overload branches and none structurally
-    // matches ProxyInvocation closely enough for a direct cast — tsc rejects it
+    // is an intersection of five overload branches (NextApiRequest/
+    // NextApiResponse, no-args, GetServerSidePropsContext, an AppRouteHandlerFn
+    // wrapper, and a NextAuthMiddleware wrapper), and none structurally matches
+    // ProxyInvocation closely enough for a direct cast — tsc rejects it
     // with TS2352 and names the `unknown` hop as the fix. What this gives up:
     // TypeScript will NOT catch a signature change to next-auth's `auth()`
     // export at this call site; the runtime assertions below are the only thing
@@ -1110,6 +1115,14 @@ export const config = {
   // `_next/image`: nothing under /_next is ever a route a human signs in to, so
   // enumerating subpaths only invites missing one (the dev HMR socket lives at
   // /_next/webpack-hmr, for instance).
+  //
+  // Honesty note for future readers: this was changed while chasing a
+  // hydration failure that broke the Playwright suite, and it was NOT the
+  // cause. The real cause was driving the browser at 127.0.0.1 — Next
+  // canonicalises loopback hostnames to `localhost`, so its dev server treated
+  // /_next/* requests as cross-origin and 403'd them. Fixed in
+  // playwright.config.ts, which documents it. This exclusion is kept because
+  // it is more correct, not because it fixed anything.
   matcher: ["/((?!api|signin|not-registered|_next|favicon.ico).*)"],
 };
 ```
@@ -1133,17 +1146,21 @@ Expected: PASS.
 
 - [ ] **Step 6: Update the stale comment references**
 
-Seven files refer to `middleware.ts` in prose. Update each to say `proxy.ts`, keeping the meaning
-intact:
+Eight files refer to `middleware.ts` in prose. Update each to say `proxy.ts`, keeping the meaning
+intact. Do **not** restrict the grep to `.ts`/`.tsx` — that filter cannot match `.env.example`,
+which is exactly how the first pass over this step missed a hit:
 
 ```bash
-grep -rn "middleware" --include=*.ts --include=*.tsx apps/web | grep -v node_modules
+grep -rn "middleware" apps/web | grep -v node_modules
 ```
 
 Files to fix: `apps/web/auth.config.ts` (lines ~44–46), `apps/web/auth.ts` (~9),
 `apps/web/app/api/dev-jwks/route.ts` (~12–14), `apps/web/app/(app)/layout.tsx` (~12),
 `apps/web/app/(auth)/not-registered/page.tsx` (~5), `apps/web/lib/api-client.ts` (~131),
-`apps/web/test/dev-jwks-route.test.ts` (~9, ~15, ~58).
+`apps/web/test/dev-jwks-route.test.ts` (~9, ~15, ~58), `apps/web/.env.example` (~17–18 — this one
+also states a false count, "three separate calls"; there are two calls covering three entry
+points, one of them transitively via `auth.ts`'s import of `auth.config.ts` — correct the wording,
+not just the filename).
 
 In `auth.config.ts`, the comment must also stop claiming the Edge runtime. Replace:
 
@@ -1164,7 +1181,7 @@ with:
 // proxy.ts imports auth.config.ts directly. Without this call living here, a
 // request that only loads proxy.ts would boot clean with AUTH_DEV_BYPASS=true
 // in production; only a page or route that also pulls in @/auth would trip the
-// guard. Since Plan 4A (ADR-0013) proxy.ts runs on Node rather than the Edge,
+// guard. Since Plan 4A (ADR-0013), proxy.ts runs on Node rather than the Edge,
 // so process.env is plainly available — but this call must stay regardless:
 // its purpose is per-entry-point coverage, not runtime compatibility.
 ```

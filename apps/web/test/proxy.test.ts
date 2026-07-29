@@ -8,11 +8,13 @@ import { config, proxy } from "@/proxy";
 // the NextApiRequest/NextApiResponse tuple instead — the one Next.js's actual
 // runtime never uses — and fail on mismatched member types. This local alias
 // asserts the one shape Next.js really invokes, matching the shape of
-// next-auth's own `NextAuthMiddleware` type structurally.
+// next-auth's own `NextAuthMiddleware` type (lib/index.d.ts) structurally.
 //
 // `NextAuthMiddleware` itself is NOT reachable: next-auth@5.0.0-beta.32's
-// public entry re-exports only `NextAuthConfig` and `NextAuthRequest` as types
-// — `import type { NextAuthMiddleware } from "next-auth"` fails with TS2614.
+// public entry (index.d.ts) re-exports only `NextAuthConfig` and
+// `NextAuthRequest` as types — confirmed by probing
+// `import type { NextAuthMiddleware } from "next-auth"`, which fails with
+// TS2614.
 type ProxyInvocation = (
   request: NextRequest,
   event: NextFetchEvent,
@@ -90,8 +92,10 @@ describe("proxy behavior", () => {
     // crash before it reaches the authorized() check.
     const request = new NextRequest("http://localhost:3000/");
     // Unavoidable double assertion, not a stylistic one: `auth`'s declared type
-    // is an intersection of five overload branches and none structurally
-    // matches ProxyInvocation closely enough for a direct cast — tsc rejects it
+    // is an intersection of five overload branches (NextApiRequest/
+    // NextApiResponse, no-args, GetServerSidePropsContext, an AppRouteHandlerFn
+    // wrapper, and a NextAuthMiddleware wrapper), and none structurally matches
+    // ProxyInvocation closely enough for a direct cast — tsc rejects it
     // with TS2352 and names the `unknown` hop as the fix. What this gives up:
     // TypeScript will NOT catch a signature change to next-auth's `auth()`
     // export at this call site; the runtime assertions below are the only thing
