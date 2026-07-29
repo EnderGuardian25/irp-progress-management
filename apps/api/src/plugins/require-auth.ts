@@ -16,11 +16,19 @@ import fp from "fastify-plugin";
  *
  * /health is deliberately outside /api/ — a container liveness probe that takes
  * no credentials.
+ *
+ * Matched against the path with the query string stripped, and the bare
+ * `/api` path (no trailing slash) is covered deliberately: `startsWith("/api/")`
+ * alone misses both `/api` and `/api?x=1`. No route is registered at exactly
+ * `/api` today, so that gap is invisible — a 404 rather than a 401 — but a
+ * future route landing there would otherwise be public, exactly the class of
+ * bug this hook exists to close.
  */
 export const requireAuthPlugin = fp(
   (app) => {
     app.addHook("onRequest", async (req, reply) => {
-      if (!req.url.startsWith("/api/")) return;
+      const path = req.url.split("?")[0] ?? "";
+      if (path !== "/api" && !path.startsWith("/api/")) return;
       await app.authenticate(req, reply);
     });
   },
