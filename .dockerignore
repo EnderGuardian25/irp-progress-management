@@ -1,8 +1,9 @@
 # Load-bearing, not hygiene. If a host copy of a generated package leaks into
 # the build context it is not necessarily overwritten by regeneration — stale
 # extra files survive — and the image silently ships a different contract from
-# spec/openapi.yaml. The `generated` stage asserts these are absent; this file
-# is what makes that assertion pass.
+# spec/openapi.yaml. The `generated` stage asserts the first two paths are
+# absent; the `build` stage asserts the third. This file is what makes both
+# assertions pass.
 packages/types/src
 packages/client/src
 apps/api/src/generated

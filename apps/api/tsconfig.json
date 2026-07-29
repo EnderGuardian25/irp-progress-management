@@ -1,10 +1,13 @@
 {
   "_comment": "esModuleInterop is set here and only here: ajv/dist/2020 and ajv-formats are CJS default-exports, and the base config's verbatimModuleSyntax rejects default-importing them without interop. This is an interop flag, not a strictness relaxation, so tsconfig.base.json stays untouched (CLAUDE.md: relax only in a package's own tsconfig).",
+  "_comment2": "allowImportingTsExtensions + rewriteRelativeImportExtensions: Prisma 7's generated client (src/generated/prisma) imports its own siblings with an explicit .ts extension on Linux — e.g. `from \"./enums.ts\"` — but Windows generates the same output WITHOUT the extension, a platform-dependent quirk in the generator itself, confirmed by generating fresh on both from the same schema and prisma version. Without these two options, tsc leaves the literal '.ts' in the emitted .js untouched, and Node's ESM loader then fails ERR_MODULE_NOT_FOUND looking for a file literally named enums.ts inside dist/, which does not exist there (only enums.js does). This was latent until Task 6 (Plan 4A) first ran the compiled dist/ with plain `node` in a Linux container — dev (`tsx`) and tests (`vitest`) both resolve `.ts` specifiers directly and never surfaced it. rewriteRelativeImportExtensions makes tsc rewrite the '.ts' to '.js' on emit, matching what dist/ actually contains.",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
     "esModuleInterop": true,
-    "types": ["node"]
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src/**/*", "test/**/*"]
 }

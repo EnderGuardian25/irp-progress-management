@@ -1753,6 +1753,19 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Append the `build`, `prod-deps` and `api` stages**
 
+**Correction found during execution (Task 6):** the leak check below is written as a bare
+existence test — `[ -e apps/api/src/generated ]` — mirroring the `generated` stage's pattern for
+`packages/types/src` and `packages/client/src`. That pattern does not transfer: `build` is `FROM
+generated`, and the `generated` stage's own `RUN pnpm --filter @irp/api exec prisma generate`
+already materialises `apps/api/src/generated/prisma/*` in-image before `build` starts, so the
+path is never absent here to test against — an existence check trips on every build, leak or not.
+Verified empirically: a plain `docker build --target api` failed at this exact `RUN` before any
+deliberate leak existed. The fix hashes the path's contents before the `COPY`s and diffs after,
+so the gate detects an actual change rather than mere presence — which also correctly catches the
+sharper risk (a same-named stale host file silently overwriting a freshly generated one) that a
+presence check could never see either way. The FATAL message text is unchanged, so Step 3's
+three-outcome demonstration still applies verbatim.
+
 Append to `Dockerfile`:
 
 ```dockerfile
@@ -1768,25 +1781,36 @@ ENV AUTH_DEV_BYPASS=false
 # to exist while prerendering. The real one is injected at runtime.
 ENV AUTH_SECRET=build-only-placeholder-not-a-runtime-secret
 
+# apps/api/src/generated already exists at this point in `build` — the
+# `generated` stage's own `RUN pnpm --filter @irp/api exec prisma generate`
+# put it there in-image, and `build` inherits it via `FROM generated`. A bare
+# existence check (Task 5's pattern for packages/types/src and
+# packages/client/src) CANNOT detect a leak here, because unlike those two
+# paths, this one is never structurally absent in this stage — it exists
+# before the COPYs below even run. Hash its contents first, so the gate that
+# follows the COPYs can tell "changed because of the COPY" apart from "was
+# already here, generated in-image" — the actual risk this guards against is
+# a stale host copy silently overwriting a same-named freshly generated file,
+# which an existence check would never see either way.
+RUN find apps/api/src/generated -type f -exec sha256sum {} + | sort > /tmp/generated-src.before
+
 COPY packages/core/ ./packages/core/
 COPY apps/api/ ./apps/api/
 COPY apps/web/ ./apps/web/
 
-# Gate: apps/api/src/generated must never arrive from the build context. The
-# `generated` stage's leak check (Task 5) cannot cover this path — it runs
-# before any apps/api/src COPY exists, so the path is structurally absent
-# there regardless of .dockerignore. This is the first stage where a leak in
-# it could actually reach an image, immediately after the COPY that could
-# carry it.
+# Gate: apps/api/src/generated must never arrive — or be altered — via the
+# build context. The `generated` stage's leak check (Task 5) cannot cover
+# this path at all, since that stage never copies apps/api/src; this is the
+# first (and only) stage where a leak in it could actually reach an image,
+# so the comparison runs immediately after the COPY that could carry it.
 RUN set -eu; \
-    for leaked in apps/api/src/generated; do \
-      if [ -e "$leaked" ]; then \
-        echo "FATAL: $leaked arrived from the build context."; \
-        echo "Generated output must be produced in-image, never copied in."; \
-        echo "Check .dockerignore — this is a regression, not a warning."; \
-        exit 1; \
-      fi; \
-    done
+    find apps/api/src/generated -type f -exec sha256sum {} + | sort > /tmp/generated-src.after; \
+    if ! diff -q /tmp/generated-src.before /tmp/generated-src.after > /dev/null; then \
+      echo "FATAL: apps/api/src/generated arrived from the build context."; \
+      echo "Generated output must be produced in-image, never copied in."; \
+      echo "Check .dockerignore — this is a regression, not a warning."; \
+      exit 1; \
+    fi
 
 RUN pnpm --filter @irp/core build
 # Declaration-only emit. apps/web resolves TYPES from dist/*.d.ts so it can stay
@@ -1812,8 +1836,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 ###############################  api  ###############################
 FROM base AS api
+ARG APP_VERSION=0.0.0
 ENV NODE_ENV=production \
-    PORT=3001
+    PORT=3001 \
+    APP_VERSION=${APP_VERSION}
 
 # Whole-tree copy on purpose. prod-deps contains only manifests and
 # node_modules, and copying it wholesale preserves pnpm's relative symlinks
