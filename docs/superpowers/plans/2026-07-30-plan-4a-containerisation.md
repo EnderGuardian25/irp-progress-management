@@ -1615,8 +1615,17 @@ COPY apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 # what keeps it out; this proves .dockerignore is still doing its job. A stale
 # generated file that survives into the image is a second version of the
 # contract, and it has no runtime symptom until something deserialises wrong.
+#
+# Only these two paths: they are the only generated-output paths this stage
+# actually copies (packages/types/ and packages/client/, above). apps/api/src
+# is never copied here at all, so apps/api/src/generated could never arrive
+# through this stage regardless of .dockerignore — checking for it here would
+# be a gate that always passes for a reason unrelated to correctness. That
+# check belongs in the `build` stage (Task 6), immediately after its
+# `COPY apps/api/ ./apps/api/`, which is the first point a leak in that path
+# could actually reach an image.
 RUN set -eu; \
-    for leaked in packages/types/src packages/client/src apps/api/src/generated; do \
+    for leaked in packages/types/src packages/client/src; do \
       if [ -e "$leaked" ]; then \
         echo "FATAL: $leaked arrived from the build context."; \
         echo "Generated output must be produced in-image, never copied in."; \
@@ -1653,25 +1662,43 @@ docker build --target migrate -t irp-migrate .
 Expected: builds successfully. If `pnpm generate` fails because a directory is missing, the
 `mkdir -p` line is the fix — it is already there; check the error before changing anything else.
 
-- [ ] **Step 4: Prove the leak gate goes red**
+- [ ] **Step 4: Prove the leak gate goes red — for both paths it can actually see**
 
-This is a new gate, so demonstrate it fails before trusting it.
+This is a new gate, so demonstrate it fails before trusting it. The loop only checks
+`packages/types/src` and `packages/client/src` — those are the only generated-output paths this
+stage copies (`apps/api/src/generated` is never reachable here at all; that path's check lives in
+Task 6 instead, immediately after the `COPY apps/api/ ./apps/api/` that could actually carry it).
+Demonstrate **both** paths this stage can see, not just one — a check that was only ever tested on
+one of two loop entries has not been shown to cover the other.
+
+For `packages/types/src`:
 
 ```bash
 mkdir -p packages/types/src && echo "// leaked" > packages/types/src/schema.ts
-docker build --target generated -t irp-leak-test . 2>&1 | tail -20
+docker build --target generated -t irp-leak-test-types . 2>&1 | tail -20
 ```
 
-Expected: **FAIL** with `FATAL: packages/types/src arrived from the build context.`
+Expected: **PASS** — `.dockerignore` excludes `packages/types/src`, so the file never arrives and
+the leak-detection `RUN` never sees it. That is the correct behaviour and it proves
+`.dockerignore` works. To prove the *guard itself* fires, temporarily comment out the
+`packages/types/src` line in `.dockerignore`, re-run the build, confirm it **FAILS** with
+`FATAL: packages/types/src arrived from the build context.`, then restore the line and confirm it
+**passes** again.
 
-Wait — `.dockerignore` excludes `packages/types/src`, so the file should *not* arrive and the build
-should **pass**. That is the correct behaviour and it proves `.dockerignore` works. To prove the
-*guard itself* fires, temporarily comment out the `packages/types/src` line in `.dockerignore`,
-re-run the build, confirm it fails with the FATAL message, then restore the line and confirm it
-passes again.
+Repeat the same three-state cycle for `packages/client/src`:
 
-**Record both outcomes in the task report** — the ignore working, and the guard firing when the
-ignore is removed. One without the other proves nothing.
+```bash
+mkdir -p packages/client/src && echo "// leaked" > packages/client/src/schema.ts
+docker build --target generated -t irp-leak-test-client . 2>&1 | tail -20
+```
+
+Expected: **PASS** with `.dockerignore` intact, **FAIL** with `FATAL: packages/client/src arrived
+from the build context.` once its line is commented out, **PASS** again once restored.
+
+**Record all six outcomes in the task report** — pass/fail/pass for each of the two paths. One
+path demonstrated and the other assumed proves nothing about the one left untested.
+
+Delete both leaked files and any test images afterward.
 
 - [ ] **Step 5: Prove the migration image actually migrates**
 
@@ -1745,6 +1772,22 @@ COPY packages/core/ ./packages/core/
 COPY apps/api/ ./apps/api/
 COPY apps/web/ ./apps/web/
 
+# Gate: apps/api/src/generated must never arrive from the build context. The
+# `generated` stage's leak check (Task 5) cannot cover this path — it runs
+# before any apps/api/src COPY exists, so the path is structurally absent
+# there regardless of .dockerignore. This is the first stage where a leak in
+# it could actually reach an image, immediately after the COPY that could
+# carry it.
+RUN set -eu; \
+    for leaked in apps/api/src/generated; do \
+      if [ -e "$leaked" ]; then \
+        echo "FATAL: $leaked arrived from the build context."; \
+        echo "Generated output must be produced in-image, never copied in."; \
+        echo "Check .dockerignore — this is a regression, not a warning."; \
+        exit 1; \
+      fi; \
+    done
+
 RUN pnpm --filter @irp/core build
 # Declaration-only emit. apps/web resolves TYPES from dist/*.d.ts so it can stay
 # fully strict; without this its tsc pulls generated runtime into its own
@@ -1800,7 +1843,27 @@ docker build --target api -t irp-api --build-arg APP_VERSION="$(git rev-parse --
 
 Expected: builds successfully.
 
-- [ ] **Step 3: Run it and check `/health`**
+- [ ] **Step 3: Prove the `build`-stage leak gate goes red**
+
+This is a new gate (it covers `apps/api/src/generated`, the one path the `generated` stage's gate
+in Task 5 could never see, since that stage never copies `apps/api/src` at all). Demonstrate it
+fails before trusting it, the same way Task 5 Step 4 did for its two paths.
+
+```bash
+mkdir -p apps/api/src/generated && echo "// leaked" > apps/api/src/generated/schema.ts
+docker build --target build -t irp-leak-test-build . 2>&1 | tail -20
+```
+
+Expected: **PASS** — `.dockerignore` excludes `apps/api/src/generated`, so the file never arrives
+and the leak-detection `RUN` never sees it. To prove the *guard itself* fires, temporarily comment
+out the `apps/api/src/generated` line in `.dockerignore`, re-run the build, confirm it **FAILS**
+with `FATAL: apps/api/src/generated arrived from the build context.`, then restore the line and
+confirm it **PASSES** again.
+
+**Record all three outcomes in the task report.** Delete the leaked file and any test images
+afterward.
+
+- [ ] **Step 4: Run it and check `/health`**
 
 The API needs a reachable database only lazily, but `loadConfig` requires all four variables to be
 present (PowerShell):
@@ -1819,7 +1882,7 @@ curl.exe -s http://127.0.0.1:3001/health
 Expected: a 200 JSON body whose version field is the short git SHA passed as `APP_VERSION`. That
 field is what will answer *"did the rollback take?"* in Plan 4B.
 
-- [ ] **Step 4: Prove the container drains on a real `SIGTERM`**
+- [ ] **Step 5: Prove the container drains on a real `SIGTERM`**
 
 This is the genuine proof of Task 2 — `docker stop` sends a real `SIGTERM`, which
 `Stop-Process` on Windows does not.
@@ -1847,7 +1910,7 @@ Clean up:
 docker rm -f irp-api-test 2>$null
 ```
 
-- [ ] **Step 5: Check the image has no devDependencies**
+- [ ] **Step 6: Check the image has no devDependencies**
 
 ```bash
 docker run --rm --entrypoint sh irp-api -c "ls node_modules | grep -E '^(vitest|tsx|prisma|typescript)$' || echo 'clean: no devDependencies'"
@@ -1856,7 +1919,7 @@ docker run --rm --entrypoint sh irp-api -c "ls node_modules | grep -E '^(vitest|
 Expected: `clean: no devDependencies`. If `prisma` (the CLI) appears, `--prod` did not take effect
 and the image is carrying the whole toolchain — fix before committing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add Dockerfile
@@ -1873,6 +1936,12 @@ not exist under --prod because @irp/core has devDependencies only.
 The image carries apps/api/dist alone. tsc compiles src/generated/prisma into
 dist/generated/prisma and dist/db/client.js resolves it inside dist, so the
 generated source is not needed at runtime.
+
+The build stage asserts apps/api/src/generated never arrived from the build
+context, immediately after the COPY that could carry it — the generated
+stage's own leak gate (Task 5) cannot cover this path, since it runs before
+any apps/api/src COPY exists. Demonstrated red by removing the matching
+.dockerignore line.
 
 APP_VERSION is a build arg set to the git SHA, surfaced by /health — that is
 what makes 'did the rollback take?' answerable in Plan 4B.

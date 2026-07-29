@@ -55,8 +55,17 @@ COPY apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 # what keeps it out; this proves .dockerignore is still doing its job. A stale
 # generated file that survives into the image is a second version of the
 # contract, and it has no runtime symptom until something deserialises wrong.
+#
+# Only these two paths: they are the only generated-output paths this stage
+# actually copies (packages/types/ and packages/client/, above). apps/api/src
+# is never copied here at all, so apps/api/src/generated could never arrive
+# through this stage regardless of .dockerignore — checking for it here would
+# be a gate that always passes for a reason unrelated to correctness. That
+# check belongs in the `build` stage (Task 6), immediately after its
+# `COPY apps/api/ ./apps/api/`, which is the first point a leak in that path
+# could actually reach an image.
 RUN set -eu; \
-    for leaked in packages/types/src packages/client/src apps/api/src/generated; do \
+    for leaked in packages/types/src packages/client/src; do \
       if [ -e "$leaked" ]; then \
         echo "FATAL: $leaked arrived from the build context."; \
         echo "Generated output must be produced in-image, never copied in."; \
