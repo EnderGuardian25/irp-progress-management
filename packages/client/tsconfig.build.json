@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Declaration-only emit. The runtime stays raw TypeScript for the bundler (see the",
+    "package's `default` export condition and apps/web's transpilePackages), but",
+    "consumers resolve TYPES from dist/*.d.ts via the `types` condition.",
+    "",
+    "Why this exists: within a single tsc Program one set of compilerOptions applies to",
+    "every file, including transitively-imported .ts. So a consumer importing this",
+    "package's raw source re-typechecks the generated runtime under the CONSUMER's",
+    "options, and skipLibCheck cannot help because these are .ts, not .d.ts. That",
+    "forced apps/web to relax exactOptionalPropertyTypes for its own hand-written code",
+    "too — precisely the strictness leak CLAUDE.md's rule exists to prevent.",
+    "",
+    "Emitting .d.ts here moves the boundary back where it belongs: the relaxation stays",
+    "in THIS package, and skipLibCheck (inherited, on) exempts the emitted declarations",
+    "from a consumer's stricter settings."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./dist"
+  }
+}

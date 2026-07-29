@@ -71,7 +71,9 @@ Every task's requirements implicitly include this section.
 
 | Path | Change |
 |---|---|
-| `packages/client/package.json` | Add `"./client"` subpath export |
+| `packages/client/package.json` | Add `"./client"` subpath export; `types`/`default` conditions; `build` script |
+| `packages/client/tsconfig.build.json` | **Created in Task 1.** Declaration-only emit, so consumers get `.d.ts` |
+| `pnpm-workspace.yaml` | `allowBuilds: sharp` — Next's optional native image dep |
 | `apps/api/src/plugins/auth.ts` | Distinguish key-retrieval failure from token invalidity |
 | `apps/api/src/server.ts` | Register the fail-closed hook |
 | `eslint.config.mjs` | `apps/web/.next/**` ignore; JSX settings |
@@ -94,6 +96,21 @@ Every task's requirements implicitly include this section.
 - Produces: `@irp/client/client` exporting `createClient`, `createConfig`, and types `Client`, `Config`. `apps/web` package name `@irp/web`.
 
 **Why the subpath export:** `createClient`/`createConfig` live in `packages/client/src/client/index.ts`, but `packages/client/package.json` exports only `"."`. Task 7 needs them. `packages/client/.gitignore` ignores `src/` only, so `package.json` is hand-written and tracked — this is allowed.
+
+> **AMENDED 2026-07-29, after Task 1 ran.** Two things the original steps did not anticipate, both found by the implementer and verified fixed:
+>
+> 1. **`pnpm install` fails on `sharp`'s build script** — Next.js's optional native image dependency. Add `sharp: true` to `pnpm-workspace.yaml`'s `allowBuilds`, matching the existing `esbuild`/`prisma` entries.
+>
+> 2. **`apps/web`'s `tsc` re-typechecks `packages/client/src`.** Within one tsc Program a single set of `compilerOptions` applies to every file, including transitively-imported `.ts`. So importing the raw-TS client pulls ~15 `TS2379`/`TS2375` errors from the generated fetch runtime into `apps/web`'s own typecheck, and `skipLibCheck` cannot help — it exempts `.d.ts` only.
+>
+>    **Do NOT fix this by relaxing `exactOptionalPropertyTypes` in `apps/web/tsconfig.json`.** That was the first attempt and it weakens the setting for all hand-written web code, which is the strictness leak CLAUDE.md's rule exists to prevent. Instead, `packages/client` emits declarations and consumers resolve types from them:
+>
+>    - Create `packages/client/tsconfig.build.json` extending `./tsconfig.json` with `noEmit: false`, `emitDeclarationOnly: true`, `declaration: true`, `outDir: "./dist"`.
+>    - Add `"build": "tsc -p tsconfig.build.json"` to its scripts.
+>    - Change its `exports` to condition maps — `types` → `./dist/…d.ts`, `default` → `./src/…ts` — matching the pattern `packages/core/package.json` already uses. The runtime stays raw TS for the bundler; only type resolution moves.
+>    - Add a **`Build @irp/client declarations`** step to `.github/workflows/ci.yml` immediately after `Build @irp/core` and **before** `Typecheck`.
+>
+>    Verified: `apps/web` then typechecks clean at full strictness, `dist/` is already covered by `.gitignore:2`, and the relaxation stays inside `packages/client` where the generated code lives.
 
 - [ ] **Step 1: Write the failing test**
 

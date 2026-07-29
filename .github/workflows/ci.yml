@@ -105,6 +105,15 @@ jobs:
       - name: Build @irp/core
         run: pnpm --filter @irp/core build
 
+      # Declaration-only emit. The runtime stays raw TypeScript for the bundler,
+      # but consumers resolve TYPES from dist/*.d.ts. Without this, apps/web's
+      # tsc pulls the generated runtime into its own program and re-checks it
+      # under apps/web's stricter options — which would force a strictness
+      # relaxation onto hand-written web code. Must run BEFORE Typecheck.
+      # See packages/client/tsconfig.build.json.
+      - name: Build @irp/client declarations
+        run: pnpm --filter @irp/client build
+
       - name: Typecheck
         run: pnpm -r typecheck
 
