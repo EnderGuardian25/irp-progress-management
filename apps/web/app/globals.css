@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* Verified light theme. docs/design-system.md §3.1 — 35 pairs pass WCAG AA,
+   every token in sRGB gamut. Do not substitute values.
+   --primary is the Bistec slot: a placeholder indigo until the brand hex
+   arrives. Any replacement must avoid hue 20-70 (missed/late) and 140-170 (ok). */
+:root {
+  --bg: #ffffff;
+  --surface: #f6f7fb;
+  --surface-sunk: #fafbfe;
+  --line: #dfe2e9;
+  --line-strong: #898c96;
+  --ink: #1b1f2a;
+  --ink-muted: #5f636e;
+  --primary: #3c4ba2;
+  --primary-weak: #e9eefe;
+
+  --st-ok: #267b4c;
+  --st-late: #9f5c0c;
+  --st-absent: #6d717e;
+  --st-missed: #be2132;
+
+  --radius-panel: 12px;
+  --radius-control: 8px;
+}
+
+/* docs/design-system.md §3.3. Light is the default (ADR-0002); dark is
+   supported, never the default. §3.3's canvas is deliberately chroma-0
+   near-black (#121212 is R=G=B=18) — surfaces lift toward indigo, the
+   canvas does not. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --surface: #1c1e23;
+    --surface-sunk: #16171b;
+    --line: #313339;
+    --line-strong: #656974;
+    --ink: #f2f3f6;
+    --ink-muted: #a7aab4;
+    --primary: #8a9ff0;
+    --primary-weak: #262c45;
+
+    --st-ok: #65c98c;
+    --st-late: #eeac53;
+    --st-absent: #9a9eaa;
+    --st-missed: #ed7473;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-primary: var(--primary);
+  --color-primary-weak: var(--primary-weak);
+  --color-st-ok: var(--st-ok);
+  --color-st-late: var(--st-late);
+  --color-st-absent: var(--st-absent);
+  --color-st-missed: var(--st-missed);
+  --font-sans: var(--font-jakarta);
+  --font-mono: var(--font-plex-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  /* Fixed scale, not fluid. Base UI 14px. docs/design-system.md §4 */
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every figure is tabular, mono or not. docs/design-system.md §4 */
+.tabular, code, kbd, samp {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Display letter-spacing floor -0.03em. Never tighter. */
+h1, h2, h3 {
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

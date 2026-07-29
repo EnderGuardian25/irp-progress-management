@@ -35,8 +35,16 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
-**Last updated:** 2026-07-28, Plan 2B — 10 of 10 tasks done, unmerged on
-`feat/plan-2b-service-and-persistence`, awaiting the whole-branch review and PR. The ledger is the precise record; this section is the summary.
+**Last updated:** 2026-07-29, **Plan 2B merged as PR #5**. Plan 3 is in the design phase on
+`feat/plan-3-auth-and-web-shell` — the brainstorm is partly done and its settled decisions are
+recorded in §3. No Plan 3 code exists yet.
+
+**Machine change, 2026-07-29.** Development moved to a second machine. It is fully provisioned and
+verified: install → generate → prisma generate → core build → `pnpm typecheck` clean, and
+**160 tests / 16 files green against real Postgres** (112 core + 48 api). Docker server 29.6.1,
+Postgres on host port **5433** as on machine 1. **The Azure CLI is NOT installed here** — it needs
+an elevated MSI install, see `docs/manual-setup-steps.md` §1.2. The hosting topology was settled
+this session and is ADR-0009.
 
 ### Done
 
@@ -44,11 +52,14 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 - **Stakeholder interview** — `docs/stakeholder-interview.md`.
 - **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-13.
 - **`docs/design-system.md`** — visual system. Palette verified by script: 35 pairs across light and dark pass WCAG AA, all tokens in sRGB gamut.
-- **Eight ADRs** — `docs/adr/0001`–`0008`. Each names at least two rejected alternatives.
+- **Nine ADRs** — `docs/adr/0001`–`0009`. Each names at least two rejected alternatives.
   **0007** hand-written tracing plugin over auto-instrumentation (Plan 2B Task 3);
   **0008** Prisma driver adapter (`@prisma/adapter-pg`) over Accelerate (Plan 2B Task 5) —
   Accelerate was rejected partly because student submissions are personal data and it is a
-  third-party proxy they would transit, the same concern class as O-5.
+  third-party proxy they would transit, the same concern class as O-5;
+  **0009** hosting topology (2026-07-29) — GHCR over ACR, public-with-firewall Postgres over a
+  VNet private endpoint, migrations as a Container Apps Job, Southeast Asia, and scale-to-zero
+  with the API's replica floor raised only for the k6 run.
 - **`docs/manual-setup-steps.md`** — everything needing a human. **Start here if you are Damian.**
 
 **Code — merged to `main`**
@@ -58,13 +69,21 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 | #1 | — | Design direction, ADRs 0001–0003, slice 1 spec |
 | #2 | 1 · Foundation + cycle engine | `@irp/core`, 112 tests, green under three timezones in CI |
 | #3 | 2A · Contract + generation | `spec/openapi.yaml`, `@irp/types`, `@irp/client`, spec-lint and determinism gates |
+| #5 | 2B · Service + persistence | Fastify service, Prisma persistence, Azure-AD-shaped auth. FR-5 implemented; FR-3 groundwork only |
 
-**Code — on `feat/plan-2b-service-and-persistence`, not yet merged**
-
-Plan 2B tasks 1–10 complete and reviewed clean; the whole-branch review and PR are still pending.
 A running Fastify service exists: `GET /health` and `GET /api/v1/me`, Azure-AD-shaped JWT auth,
 Prisma-backed user lookup with soft delete, RFC 7807 errors carrying a real span's traceId.
-**34 tests across 9 files, zero skipped**, against real Postgres.
+**160 tests across 16 files, zero skipped** (`apps/api` 48/9, `@irp/core` 112/7), against real
+Postgres, green on all three CI timezone legs.
+
+Plan 2B's whole-branch review found five Important issues, all fixed before merge. Three are worth
+knowing because they change how the service behaves: the problem handler now honours Fastify's own
+4xx `statusCode` instead of collapsing everything into a 500; `createValidatorCompiler` selects a
+**coercing** ajv for querystring/params/headers and a strict one for bodies, so the first
+`type: integer` query parameter in Plan 6 will not 400 on every request; and a route-discovery
+guard test asserts every `/api/` route sits behind the auth preHandler, because the spec's
+document-level `security` default is fail-closed while the implementation is opt-in per route.
+The structural fix for that last one — a global fail-closed hook — is **Plan 3's**.
 
 Two seams are deliberate extension points, not accidents of this slice's scope: `buildServer(deps:
 ServerDeps)` in `apps/api/src/server.ts` takes config, the user repo, the JWKS key-getter, and the
@@ -95,13 +114,13 @@ eslint.config.mjs        type-aware, generated dirs ignored
 
 ### Not started
 
-`apps/web`, `infra/`, `tests/load/`. After Plan 2B merges, the next slices (**3 · auth + web shell**
-and **4 · infra, deploy, observability**) are both **blocked on the Azure account**.
+`apps/web`, `infra/`, `tests/load/`. **Plan 3 is in design, not blocked.** Plan 4 needs the Entra
+directory below before its Bicep can deploy from CI.
 
 ### Blocked / needs the stakeholder
 | # | Item | Blocks |
 |---|---|---|
-| **—** | **An Azure free account.** Not created; `az` is not installed | **Plan 4 entirely**, and the Entra half of Plan 3. Blocks nothing before that. `docs/manual-setup-steps.md` §1 |
+| **—** | **A dedicated Entra directory.** The Azure *subscription* now exists and hosting works; **Entra is the remaining gap** — see §3 "Azure and Entra: the real state" | Creating the app registrations, and Plan 4's Graph Bicep deploying from CI. `docs/manual-setup-steps.md` §1 |
 | O-5 | **AI provider + data-processing approval.** Student submissions are personal data leaving the tenant | The whole AI slice (Plan 9, FR-22 to FR-26). Needs an ADR and escalation to leadership |
 | O-6 | Exact wording of the five rubric criteria | The evaluation schema and screen |
 | O-10 | FR-13 and FR-15 conflict on the Monday grace window | Implemented on the FR-15 reading, marked `// ASSUMPTION: O-10`. Blocks nothing |
@@ -141,9 +160,9 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 |---|---|---|---|---|
 | **1 — Deployed integration skeleton** | 1 · Foundation + cycle engine | T-01, T-03, T-06 | D2 | ✅ **Merged, PR #2** |
 | | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
-| | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | **10/10 tasks done, unmerged** — branch `feat/plan-2b-service-and-persistence`, PR pending |
-| | 3 · Auth + web shell | T-11 | D3 | Blocked on the Azure account |
-| | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Blocked on the Azure account |
+| | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | ✅ **Merged, PR #5** |
+| | 3 · Auth + web shell | T-11 | D3 | **In design** — branch `feat/plan-3-auth-and-web-shell`. Decisions in §3 |
+| | 4 · Infra, deploy, observability | T-19 – T-23 | D3 | Needs the Entra directory (§3) before Graph Bicep can deploy from CI |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
@@ -219,36 +238,150 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/plan-2b-service-and-persistence` · **Next:** **Plan 3 (Auth + web shell)** — still blocked on the Azure account · **Ledger:** `.superpowers/sdd/2026-07-28-plan-2b-service-and-persistence/progress.md`
+**Branch:** `feat/plan-3-auth-and-web-shell` · **Next:** finish the Plan 3 **brainstorm** (Sections 2–3), write the spec, then `writing-plans` · **Ledger:** none yet — Plan 2B's workspace was deleted at merge, and Plan 3's is created by `sdd-workspace` when execution starts
 
+> **Correction, 2026-07-29 (Plan 3 Task 14): the claim below is wrong.** The installed
+> `scripts/sdd-workspace` **ignores its argument** and returns the flat `.superpowers/sdd/` path
+> regardless of which plan file is passed. It does **not** resolve a per-plan workspace, so
+> **`CLAUDE.md`'s manual-archiving convention still applies** — move everything except
+> `progress.md` and `.gitignore` into `.superpowers/sdd/plan-<N>/` before the first task of a new
+> plan. The paragraph immediately below is kept for context but describes intended, not actual,
+> behaviour of the installed script version.
+>
 > **Ledger path convention changed.** The `subagent-driven-development` skill now resolves a
 > **per-plan** workspace via `scripts/sdd-workspace <plan-file>` — `.superpowers/sdd/<plan-basename>/`
 > — so plans no longer overwrite each other's records and the old manual archiving step is
 > obsolete. The flat `.superpowers/sdd/progress.md` path referenced by older notes is dead.
 
-**Plan 2B status: 10 of 10 tasks complete, all reviewed clean.** Tasks 1–9 are done on the branch;
-Task 9 took one fix round (the CI step-ordering finding) and its re-review confirmed every finding
-addressed with no new breakage. **Task 10 (this doc/spec reconciliation) is done.**
+**Plan 2B is merged (PR #5).** Its SDD workspace was deleted at merge, per the skill — git history
+and the PR description are the record now.
 
-Remaining before merge: the whole-branch review (on the most capable model, per the skill's Model
-Selection), then `finishing-a-development-branch`. The ledger's closing block lists exactly what
-the PR must carry — including that the PR cites **FR-5 as implemented and FR-3 only as
-groundwork**, and records that both CI gate directions were demonstrated red.
+### Azure and Entra: the real state
+
+Verified on 2026-07-28. **The old "no Azure account, `az` not installed" note was wrong in both
+directions** — correcting it is why this section exists.
+
+| Thing | State |
+|---|---|
+| Azure CLI | Installed, **2.88.0** |
+| Subscription | **`Azure subscription 1`**, `7bb869f8-053c-4c2d-b444-1bf079bfcef7`, Enabled |
+| Tenant | `d5e769b0-fd19-45e4-a4a8-b73545450234` — **`bisteccare.lk`**, signed in as `Damian@bisteccare.lk` |
+| Hosting (ARM) | ✅ Works — `az group list` exits 0 |
+| Resource providers | ❌ **All `NotRegistered`** — `Microsoft.App`, `Microsoft.DBforPostgreSQL`, `Microsoft.Insights`, `Microsoft.OperationalInsights`, `Microsoft.ContainerRegistry`. Register before Plan 4 or Bicep fails confusingly |
+| Entra / Graph | ❌ **Blocked by conditional access.** Every Graph call returns `InteractionRequired` / `LocationConditionEvaluationSatisfied`, inconsistently within a single session |
+| Permissions in `bisteccare.lk` | **Unknown.** The queries that would answer it are the ones Graph refuses. Do not record this as "no permissions" — it was never established |
+
+**Two facts that together decide the auth design:**
+
+1. **The users are not in `bisteccare.lk`.** Students and mentors hold `bistecglobal.com` accounts,
+   and Damian has no account there. An app registration is scoped to one directory, so a
+   single-tenant app in `bisteccare.lk` would let nobody but Damian sign in.
+2. **CI cannot re-authenticate interactively.** Even if the registrations can be created by hand in
+   `bisteccare.lk`, Plan 4 deploys Graph Bicep from GitHub Actions. Whether a conditional-access
+   policy targeting users also catches a workload identity depends on separately-licensed
+   configuration — unverified, and Plan 4 is the expensive place to find out.
+
+**Decision: a dedicated Entra directory**, created by Damian, where he is Global Administrator.
+The Azure subscription stays in `bisteccare.lk` — hosting is demonstrably unaffected. Use a
+**native cloud-only** `admin@<name>.onmicrosoft.com` account for all CLI and Bicep work, not the
+external `Damian@bisteccare.lk` identity the new tenant grants Global Admin to on creation.
+
+**Do not substitute a personal Microsoft account.** Microsoft's Graph Bicep docs state that
+*"permissions for personal Microsoft accounts cannot be used to deploy Microsoft Graph resources
+declared in Bicep files"* — an MSA would silently invalidate the Bicep-for-Entra decision below.
+
+**FR-1 remains partially satisfied**, exactly as slice-1 spec §6 "Known gap" already records: auth
+is generic OIDC, so pointing at a real Bistec training tenant later is an issuer and
+app-registration swap, not a rewrite. `manual-setup-steps.md` §3 carries the standing mentor ask.
+
+### Plan 3 design decisions — settled in the brainstorm, do not re-litigate
+
+The brainstorm is **partly complete**: Section 1 (architecture and data flow) is approved.
+Sections 2 and 3 have not been presented, and no spec file exists yet.
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | **Thin vertical slice.** `apps/web` scaffold, Auth.js sign-in/out, one authenticated page calling `GET /api/v1/me` through `@irp/client` and rendering the real user, design-system tokens and app frame. **No product screens** | Proves the whole chain end to end and keeps Plan 4 close behind, honouring "deployed and traced before slice 2" |
+| 2 | **Auth.js v5** with the Microsoft Entra provider | Slice-1 §6 named it as expected and reserved the call to the Impl Lead, who confirmed it. MSAL rejected: no Next.js integration, so session storage, callback routes and middleware would all be hand-built in a plan meant to be thin |
+| 3 | **The access token never reaches the browser.** Session is an encrypted HTTP-only cookie; the token is pulled server-side and attached by `@irp/client` | Makes `CLAUDE.md`'s "no hand-written fetch in the frontend" structural rather than a matter of discipline — the browser has no token to fetch with |
+| 4 | **Entra registrations in Bicep** — `infra/entra.bicep`, `Microsoft.Graph/applications@v1.0`, landing in **Plan 3**, not Plan 4 | Verified GA and sufficient: supports `api.oauth2PermissionScopes`, `appRoles` with `allowedMemberTypes`, `web`/`spa.redirectUris`, `identifierUris`, `requiredResourceAccess`, `requestedAccessTokenVersion`. `uniqueName` is required and is the idempotency key. Keeps `CLAUDE.md`'s no-checked-in-scripts rule intact with **no exception needed**. Plan 3 cannot work without the registrations, so the thing that creates them belongs here |
+| 5 | **Testing: hermetic suite + one secrets-gated real-token CI job** | All existing tests stay offline via the `getKey` injection seam. One job acquires a real Entra token through the **k6 service principal** and calls `/api/v1/me`. That principal is required by Deliverable 4 anyway (NFR-3, "10 RPS for 5 min, zero token failures" — the reason slice-1 §6 rejected Easy Auth), so it is D4's prerequisite built early, not extra scaffolding |
+| 6 | **The secrets-gated job must hard-fail, never skip**, when secrets are expected but absent | A conditionally-skipped job is the exact false-green shape this repo has been bitten by twice — `describe.skipIf` and the porcelain gate. Apply the `apps/api/test/helpers/require-db.ts` pattern |
+| 7 | **First users: a documented one-off insert**, recorded in the runbook | The API returns 403 for a valid token with no `User` row (spec §7, deliberate; FR-3 is not built). Rejected: a throwaway seed script, because **Plan 5 owns seeding (T-07)** and a second one would drift; and auto-provisioning on first sign-in, because that silently contradicts §7's "rejected, not provisioned" security posture |
+
+**Constraints carried into the spec:**
+
+- **Bicep cannot emit a client secret** — `passwordCredentials.secretText` is read-only. Auth.js
+  needs one for the confidential-client code flow, so `infra/entra.bicep` creates the
+  registrations and the secret is minted once with `az ad app credential reset`, landing in
+  `.env.local` and a GitHub Actions secret. That step and the **admin-consent portal click** are
+  Microsoft safeguards, not gaps in our automation — both belong in the runbook.
+- **Graph replication lag can fail a first deploy** — service principal IDs may not have
+  propagated when dependent resources deploy.
+- **Assigning an app role needs elevated consent**, with no narrower permission available. Affects
+  giving the k6 service principal its role.
+- **Two ADRs are owed** before or with the implementation, per `CLAUDE.md`'s two-rejected-
+  alternatives rule: **Auth.js v5 over MSAL**, and **Bicep Graph extension over a committed
+  bootstrap script or portal clicks**.
+
+**Mandatory fix, not optional, and it belongs in this plan:** `apps/api/src/plugins/auth.ts`'s
+`catch` around `jwtVerify` is unconditional and swallows key-getter errors too. Inert with a local
+key set; with `createRemoteJWKSet` a JWKS-endpoint outage would tell every user *"your token is
+invalid"* (401) while the real fault is a 5xx. Plan 2B logged it as a Plan 3 obligation precisely
+because this is the plan that makes it real.
 
 ### Starting a fresh session
 
-1. Read `CLAUDE.md`, then this file, then the **ledger** (path above) — it is the authoritative
-   resume map and records every defect, ruling, and deferred minor from Plan 2B. Then
-   `docs/superpowers/specs/2026-07-28-plan-2-api-contract-design.md` for the requirements
-   themselves: §5 (layout), §7 (the 403 rule), §8 (data model), §9 (error handling), §10 (testing).
-2. Run `pnpm install && pnpm generate && pnpm --filter @irp/api exec prisma generate && pnpm --filter @irp/core build`
-   — the Prisma client is a third git-ignored generated package, so a fresh clone will not
-   typecheck until it exists.
-3. Plan 2B's ten tasks are complete; do the whole-branch review and
-   `finishing-a-development-branch`, then start **Plan 3** with `subagent-driven-development` (the
-   skill's own scripts: `sdd-workspace`, `task-brief`, `review-package`). One plan, one branch, one
-   PR, merged before the next starts.
-4. For new plans, the skill creates the workspace itself — no manual archiving.
+1. Read `CLAUDE.md`, then this file — **§3's "Azure and Entra: the real state" and "Plan 3 design
+   decisions" are the resume map.** Then `docs/superpowers/specs/2026-07-28-slice-1-integration-skeleton-design.md`
+   §6 (the auth shape and its "Known gap") and §7, and
+   `docs/superpowers/specs/2026-07-28-plan-2-api-contract-design.md` §7 (the 403 rule) and §9
+   (error handling) for what the API already guarantees.
+2. Bring the clone up. **`prisma generate` needs `DATABASE_URL` in the shell environment first** —
+   Prisma 7 dropped implicit `.env` loading, and `prisma.config.ts` resolves `env("DATABASE_URL")`
+   from the real process env, so a bare `prisma generate` fails `PrismaConfigEnvError` on a fresh
+   clone. The value only has to *parse*; `generate` never connects.
+
+   ```powershell
+   pnpm install
+   pnpm generate
+   Copy-Item apps/api/.env.example apps/api/.env      # git-ignored
+   $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+   pnpm --filter @irp/api exec prisma generate         # third generated package
+   pnpm --filter @irp/core build
+   pnpm typecheck                                      # should be clean, 4 projects
+   ```
+
+   To run the database-backed tests as well:
+
+   ```powershell
+   $env:IRP_DB_PORT = "5433"
+   docker compose -f apps/api/docker-compose.yml up -d
+   pnpm --filter @irp/api exec prisma migrate deploy
+   pnpm test        # expect 160 tests / 16 files, zero skipped
+   ```
+
+   Verified end to end on a second machine on 2026-07-29: 112 core + 48 api, all green.
+3. **Plan 3's brainstorm is complete and the spec is written** —
+   `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md`. Next is
+   `writing-plans`, then `subagent-driven-development`.
+
+   **Three things in that spec change previously-settled ground, all recorded in its §2:**
+   a **dev auth bypass** (issuer swap, not an auth skip) so Plan 3 no longer depends on Entra
+   existing; **`infra/entra.bicep` moved to Plan 4**, because decision 4's stated premise — "Plan 3
+   cannot work without the registrations" — is now false; and the sign-in page takes the
+   split-with-ribbon treatment, which pulls a **real** `CycleRibbon` forward from Plan 7 (extended
+   there, not replaced).
+4. The settled decisions in §3 are approved — build on them, do not re-open them. What is *not*
+   settled: the web shell's file layout, the sign-in page's visual treatment, how Auth.js session
+   config is tested, and the CI job's exact shape.
+5. **Blocked on Damian:** the dedicated Entra directory (§3) must exist before any of Plan 3's
+   auth can be wired against something real. Everything else in the plan — the Next.js scaffold,
+   the design-system frame, the `transpilePackages` wiring — proceeds without it.
+6. **Correction:** the installed `scripts/sdd-workspace` ignores its argument and always returns
+   the flat `.superpowers/sdd/` path — it does **not** create a per-plan workspace. Before the
+   first task of a new plan, manually archive per `CLAUDE.md`: move everything except
+   `progress.md` and `.gitignore` into `.superpowers/sdd/plan-<N>/`, then reset `progress.md`.
 
 ### Local environment facts that cost real debugging time
 
@@ -284,12 +417,22 @@ New, and all of them cost a round trip or a corrected plan. Formal doc/spec reco
 - **No `SIGTERM`/`SIGINT` handler exists anywhere in `apps/api`.** Azure Container Apps sends
   `SIGTERM` on scale-down and redeploy, so in-flight requests are dropped on every deploy. This
   bears directly on the NFR "200 RPS burst, zero 5xx" target. **A Plan 4 obligation.**
-- **The auth plugin's `catch` around `jwtVerify` is unconditional** and also swallows errors thrown
-  by the key-getter itself. Harmless with a local key set, but once **Plan 3** wires a real
-  `createRemoteJWKSet`, a JWKS-endpoint outage will present to clients as `401 "your token is
-  invalid"` rather than a 5xx — actively misleading during an incident.
+- ~~**The auth plugin's `catch` around `jwtVerify` is unconditional**~~ — **fixed in Plan 3.**
+  A wrapper around the key-getter records whether retrieval itself failed, so a JWKS outage now
+  returns **503** while an unverifiable token still returns 401.
 - **`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`.** If
   `buildServer` itself rejects, the client leaks. Low stakes since the process exits.
+- **`middleware.ts` → `proxy.ts` migration, owed an ADR, Plan 4's.** `next build` warns that
+  `middleware.ts` is deprecated in favour of `proxy.ts`. This is **not a rename**: per
+  `next/dist/build/entries.js:231-243`, `isProxyFile` routes to `onServer()` unconditionally,
+  while `isMiddlewareFile` routes to `onEdgeServer()` unless `runtime === "nodejs"` — so adopting
+  `proxy.ts` moves the auth guard from the **Edge** runtime to **Node**, a behavioural change on
+  the auth path, not a cosmetic one. Next hard-errors if both files exist, so there is no
+  incremental migration path; it is one atomic swap. Deferred to Plan 4 because Azure Container
+  Apps runs Node in a container with no Edge network — the Edge bundle is dead weight there, and
+  the deploy target settles which runtime should own the guard. The build warning is accepted as
+  noise for Plan 3. Needs an ADR before the swap, per `CLAUDE.md`'s two-rejected-alternatives
+  rule, since "just rename it" is a plausible-looking wrong answer.
 
 ### Superseded constraints from Plan 2A (kept for context)
 

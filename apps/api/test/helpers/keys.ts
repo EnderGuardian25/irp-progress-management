@@ -7,7 +7,7 @@ const KID = "test-key-1";
 export const testIssuer = ISS;
 export const testAudience = AUD;
 
-const keys = await generateKeyPair("RS256", { extractable: true });
+const keys = await generateKeyPair("RS256");
 
 export async function getLocalKeySet(): Promise<JWTVerifyGetKey> {
   const jwk = await exportJWK(keys.publicKey);

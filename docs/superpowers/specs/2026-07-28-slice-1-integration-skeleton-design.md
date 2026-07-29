@@ -243,6 +243,13 @@ stays free. A one-line swap if fully-Azure-native is preferred later.
 
 ### The Bicep exception, stated honestly
 
+> **SUPERSEDED, 2026-07-29.** The decision below — a committed, documented,
+> idempotent `az ad app` bootstrap script — was replaced by the **Microsoft
+> Graph Bicep extension** (`Microsoft.Graph/applications@v1.0`), which is GA and
+> sufficient. See **ADR-0011**. The file lands in **Plan 4**, not Plan 3,
+> because the dev bypass (ADR-0012) removed Plan 3's dependency on the
+> registrations. The paragraph is kept for the reasoning it records.
+
 **Entra app registrations are not ARM resources** — they are Microsoft Graph objects, and
 Bicep cannot create them natively. Options are the Microsoft Graph Bicep extension (preview)
 or a committed bootstrap script.

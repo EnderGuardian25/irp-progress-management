@@ -57,4 +57,14 @@ export default tseslint.config(
     ignores: ["**/src/**"],
     ...tseslint.configs.disableTypeChecked,
   },
+  {
+    // apps/web is React + JSX. The type-aware config above already applies;
+    // this only relaxes the rules that misfire on JSX and Server Components.
+    files: ["apps/web/**/*.tsx"],
+    rules: {
+      // Server Components are async functions returning JSX. The rule assumes
+      // a Promise-returning function is awaited by its caller; React awaits it.
+      "@typescript-eslint/require-await": "off",
+    },
+  },
 );

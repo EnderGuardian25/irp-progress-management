@@ -7,6 +7,7 @@ import { createValidatorCompiler } from "./validation.js";
 import { tracingPlugin } from "./telemetry.js";
 import { problemDetailsPlugin } from "./plugins/problem-details.js";
 import { authPlugin } from "./plugins/auth.js";
+import { requireAuthPlugin } from "./plugins/require-auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 
@@ -40,6 +41,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     audience: deps.config.jwtAudience,
     userRepo: deps.userRepo,
   });
+  // Fail-closed for /api/* before routing. Order is enforced by fastify-plugin's
+  // dependency graph, not by convention — a wrong order throws at boot.
+  await app.register(requireAuthPlugin);
   await app.register(healthRoutes);
   await app.register(meRoutes);
 

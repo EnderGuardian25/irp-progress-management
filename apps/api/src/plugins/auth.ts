@@ -1,7 +1,7 @@
 import fp from "fastify-plugin";
-import { jwtVerify, type JWTVerifyGetKey } from "jose";
+import { jwtVerify, errors as joseErrors, type JWTVerifyGetKey } from "jose";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { UnauthorizedError, ForbiddenError } from "../errors.js";
+import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from "../errors.js";
 import type { UserRecord, UserRepo } from "../db/user-repo.js";
 
 export interface AuthOptions {
@@ -25,6 +25,17 @@ export const authPlugin = fp<AuthOptions>(
     app.decorateRequest("user", null);
 
     app.decorate("authenticate", async (req: FastifyRequest) => {
+      // Both the global fail-closed hook (plugins/require-auth.ts) and a
+      // route's own preHandler call this. Verifying twice would mean two JWT
+      // verifications and two findByExternalId round-trips per request, which
+      // bears directly on NFR-1 (p95 < 250 ms at 50 RPS) and NFR-2's burst
+      // target. req.user is per-request state, so an already-populated value
+      // means this request has already authenticated successfully.
+      //
+      // A FAILED authentication throws, so it never reaches this line — there
+      // is no path where a rejected request is later treated as authenticated.
+      if (req.user !== null) return;
+
       const header = req.headers.authorization;
       if (!header?.startsWith("Bearer ")) {
         throw new UnauthorizedError("No bearer token was supplied.");
@@ -32,8 +43,34 @@ export const authPlugin = fp<AuthOptions>(
       const token = header.slice("Bearer ".length);
 
       let oid: unknown;
+      // The key-getter is a separate failure domain from the token. A JWKS
+      // endpoint outage is OUR fault (5xx); an unverifiable token is the
+      // caller's (401). One catch around both reports an outage as "your token
+      // is invalid", which is actively misleading during an incident.
+      let keyRetrievalFailed = false;
+      const trackingGetKey: JWTVerifyGetKey = async (protectedHeader, input) => {
+        try {
+          return await opts.getKey(protectedHeader, input);
+        } catch (cause) {
+          // A kid that matches no published key is the TOKEN's problem, not
+          // ours: jose raises this from the key-getter only AFTER attempting a
+          // refetch, so the endpoint is demonstrably reachable. Treating it as
+          // an outage would report a forged token as 503 "please retry",
+          // masking an attack and emitting 5xx for a caller error (NFR-2).
+          if (
+            !(
+              cause instanceof joseErrors.JWKSNoMatchingKey ||
+              cause instanceof joseErrors.JWKSMultipleMatchingKeys
+            )
+          ) {
+            keyRetrievalFailed = true;
+          }
+          throw cause;
+        }
+      };
+
       try {
-        const { payload } = await jwtVerify(token, opts.getKey, {
+        const { payload } = await jwtVerify(token, trackingGetKey, {
           issuer: opts.issuer,
           audience: opts.audience,
           // Entra signs with RS256. Stating it means the accepted set is a
@@ -47,7 +84,13 @@ export const authPlugin = fp<AuthOptions>(
           clockTolerance: "60s",
         });
         oid = payload.oid;
-      } catch {
+      } catch (cause) {
+        if (keyRetrievalFailed) {
+          req.log.error({ err: cause }, "JWKS key retrieval failed");
+          throw new ServiceUnavailableError(
+            "Could not retrieve the signing keys needed to verify your session. Please retry.",
+          );
+        }
         // Malformed, bad signature, wrong issuer/audience, or expired.
         throw new UnauthorizedError("The bearer token is invalid or has expired.");
       }

@@ -10,13 +10,27 @@ matters — start it now, because it gates two whole plans and takes real elapse
 
 ## 1. Blocks Plan 3 and Plan 4 — start today
 
-### 1.1 Create an Azure free account
+### 1.0 Read this first — nothing here blocks Plan 3 any more
 
-Roughly 15 minutes, but identity verification can take longer.
+Plan 3 ships a **dev auth bypass** (ADR-0012), so the whole application runs,
+tests and demos with no Entra directory at all. Everything in §1 is still
+needed to *deploy on Azure with real Microsoft sign-in*, but none of it blocks
+building or merging.
 
-1. Go to <https://azure.microsoft.com/free>
-2. Sign up. **A payment card is required for identity verification even though nothing is charged** — the free grant covers this project entirely.
-3. Confirm you land on a subscription named something like *Azure subscription 1*.
+**What the bypass does not excuse:** it must be deleted, not left dormant. The
+cutover is four config steps — see the Plan 3 spec §7.
+
+### 1.1 Create an Azure free account — ✅ DONE, 2026-07-28
+
+Signed up successfully with the work account. Current state:
+
+| | |
+|---|---|
+| Subscription | `Azure subscription 1` — `7bb869f8-053c-4c2d-b444-1bf079bfcef7`, Enabled |
+| Tenant | `bisteccare.lk` (`d5e769b0-fd19-45e4-a4a8-b73545450234`), as `Damian@bisteccare.lk` |
+| Hosting | Working — `az group list` succeeds |
+
+**Hosting is no longer a blocker. Entra is — see §1.1a.**
 
 What the free account gives this project:
 
@@ -33,24 +47,113 @@ Plus $200 credit for 30 days as headroom if load testing needs a bigger tier bri
 > 50 of the 75 remaining graded points sit behind having something deployed. This unblocks
 > today. Ask the mentor for Bistec tenant access anyway — see §3 — but nothing waits on it.
 
-### 1.2 Install the Azure CLI
+### 1.1a Create a dedicated Entra directory — ⬅ **THE BLOCKER. Do this next.**
 
-Not currently installed. Needed for the Entra bootstrap and for deploys.
+**Why, in one line:** the users are in `bistecglobal.com` (where you have no account), the
+subscription is in `bisteccare.lk` (where Graph is blocked by conditional access), so neither
+directory can host the app registrations. See `handoff.md` §3 for the full reasoning.
+
+Roughly 5 minutes.
+
+1. Go to <https://entra.microsoft.com>
+2. **Manage tenants → Create → Microsoft Entra ID** (*not* the B2C option)
+3. Organisation name and initial domain — e.g. `irpdemo` gives `irpdemo.onmicrosoft.com`. Pick a
+   country, complete the captcha, **Create**.
+4. **Create a native cloud-only admin inside the new directory** — Users → New user → Create new
+   user, e.g. `admin@irpdemo.onmicrosoft.com`. Assign it **Global Administrator**. Sign in once to
+   clear the initial password prompt.
+5. Create the demo users the slice needs — one mentor and two or three students. Free, and it
+   makes the demo real rather than a single-user screenshot.
+
+**Step 4 is not optional bureaucracy.** Creating a tenant grants Global Admin to your *external*
+`Damian@bisteccare.lk` identity, and external/guest identities are where Graph-via-Bicep gets
+awkward. Use the native account for all CLI and Bicep work.
+
+**Do not use a personal Microsoft account instead.** Microsoft's docs state that *"permissions for
+personal Microsoft accounts cannot be used to deploy Microsoft Graph resources declared in Bicep
+files."* An MSA would silently break the Bicep-for-Entra decision the design depends on.
+
+Then: `az login --tenant <new-tenant-id> --allow-no-subscriptions`
+
+**If tenant creation is blocked** (some directories restrict non-admins from creating tenants),
+say so — the fallback is the mentor ask in §3, with the design unchanged either way.
+
+### 1.2 Install the Azure CLI — ✅ on machine 1, ⬅ **TODO on machine 2**
+
+Installed and working on the original dev machine, version **2.88.0**.
+
+**On the second machine (2026-07-29) it is absent and I cannot install it for you.** The Azure CLI
+ships as a machine-scope MSI, so `winget` needs elevation, and a UAC prompt cannot be answered from
+a non-interactive session — the attempt hung and was killed with nothing installed. Run this
+yourself **from an elevated terminal**:
 
 ```powershell
-winget install Microsoft.AzureCLI
+winget install -e --id Microsoft.AzureCLI
 ```
 
-Then, in a terminal, run `az login` yourself — it opens a browser and I cannot do it for you.
-In this session you can run it inline by typing `! az login`.
+Then, in a fresh terminal: `az login`. Every `az` step in this document depends on it.
+
+Note for later: `az` reaches **Azure Resource Manager fine** but is repeatedly challenged on
+**Microsoft Graph** in the `bisteccare.lk` tenant (`InteractionRequired` /
+`LocationConditionEvaluationSatisfied`, inconsistently within one session). That is a
+conditional-access policy, not a broken install — and it is the reason for §1.1a.
+
+### 1.2a Register the Azure resource providers
+
+**Four** are needed and all are currently `NotRegistered`. Bicep fails with a confusing error
+rather than a clear one if they aren't registered first, so do this before Plan 4.
+
+```powershell
+az provider register --namespace Microsoft.App
+az provider register --namespace Microsoft.DBforPostgreSQL
+az provider register --namespace Microsoft.Insights
+az provider register --namespace Microsoft.OperationalInsights
+```
+
+`Microsoft.ContainerRegistry` was on this list and **is no longer needed** — images go to GHCR, not
+ACR (see §1.5).
+
+Free, reversible, creates nothing, takes a few minutes in the background. **I cannot run these for
+you** — they need an authenticated `az` session, and `az login` is an interactive browser flow.
+Run `az login` yourself, then either run the four lines above or tell me and I will.
 
 ### 1.3 Grant admin consent for the Entra app registrations
 
-The app registrations themselves are created by a committed bootstrap script, not by hand.
+The app registrations themselves are created by **`infra/entra.bicep`** (`Microsoft.Graph/
+applications@v1.0`), not by hand and not by a checked-in script — see `handoff.md` §3 decision 4.
 But **granting admin consent requires a human click in the portal** — that is a deliberate
 Microsoft safeguard and cannot be scripted away.
 
+Two other things in this area are also human-only, for the same reason:
+
+- **Minting the client secret.** Bicep cannot emit one — `passwordCredentials.secretText` is
+  read-only. Auth.js needs a secret for the confidential-client code flow, so it is created once
+  with `az ad app credential reset` and lands in `apps/web/.env.local` plus a GitHub Actions secret.
+- **Assigning the k6 service principal its app role**, which needs elevated consent with no
+  narrower permission available.
+
 I will tell you exactly which app and which permissions when Plan 3 reaches that point.
+
+### 1.3a Register the dev users (local development)
+
+`dev-unknown-1` is deliberately absent — it must produce a 403 and land on
+`/not-registered`.
+
+```powershell
+$env:IRP_DB_PORT = "5433"
+docker compose -f apps/api/docker-compose.yml up -d
+docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+```
+
+### 1.3b The Entra cutover, when the directory exists
+
+1. `UPDATE "User" SET "externalId" = '<entra-oid>'` for each real person.
+2. Unset `AUTH_DEV_BYPASS` in `apps/web/.env.local` and the deployed config.
+3. Point `JWKS_URI` and `JWT_ISSUER` at the tenant.
+4. Set the repository **variable** `ENTRA_REAL_TOKEN_TESTS=true` to wake the CI job.
+5. Delete `apps/web/lib/dev-identity.ts`, its route, and its tests.
+
+No application code changes in steps 1–4. That is the design working.
 
 ### 1.4 Add GitHub Actions secrets
 
@@ -61,9 +164,44 @@ when Plan 4 generates them; the names will be:
 - `AZURE_SUBSCRIPTION_ID`
 - `POSTGRES_ADMIN_PASSWORD`
 - `APPLICATIONINSIGHTS_CONNECTION_STRING`
+- `AUTH_SECRET` — Auth.js cookie encryption key (`openssl rand -base64 32`)
+- `ENTRA_CLIENT_SECRET` — the one from §1.3, since Bicep cannot emit it
+- `GHCR_PAT` — **only if the images stay private**; see §1.5
 
 **Never paste any of these into the chat.** Put them straight into GitHub. If one is ever
 exposed, rotate it rather than hoping.
+
+### 1.5 Decide whether the container images are public — one question, then it's automated
+
+Images go to **GitHub Container Registry**, not ACR (decided 2026-07-29; ~$5/mo saved, and it
+keeps everything in one place). That leaves exactly one choice for you:
+
+| Option | What it costs you |
+|---|---|
+| **Packages public** | Nothing. No credential at all — Container Apps pulls anonymously, no `GHCR_PAT`, nothing to rotate. The images become world-readable. They contain no secrets (all config is env-injected at runtime), so the exposure is the source code itself |
+| **Packages private** | A PAT with `read:packages`, stored as `GHCR_PAT` and referenced as a Container Apps registry secret. One more long-lived credential to rotate |
+
+Tell me which and the Bicep follows. **Default if you say nothing: private with a PAT**, because it
+is the reversible direction — making a package public later is a click, un-publishing something the
+internet has already pulled is not.
+
+### 1.6 Hosting shape, for reference — nothing to do here
+
+Settled 2026-07-29, recorded so you are not re-deciding it at deploy time. Full reasoning in
+`docs/adr/0009-hosting-topology.md`.
+
+| Choice | Value |
+|---|---|
+| Region | **Southeast Asia** (Singapore) — lowest latency to Sri Lanka, ~50 ms, and the p95 < 250 ms target is measured over it |
+| Registry | GHCR |
+| Postgres reachability | Public endpoint + firewall + `sslmode=require`. Not VNet-private — that needs a VNet-injected Container Apps environment and a /23 subnet |
+| Migrations | A **Container Apps Job** inside the environment, so no firewall hole is ever opened for a GitHub runner's dynamic IP |
+| `apps/web` scaling | Min replicas **0**. Cold start is acceptable for a demo |
+| `apps/api` scaling | Min replicas 0 normally, **≥1 during the k6 run** — a scale-from-zero cold start alone would miss p95 < 250 ms |
+
+**Two dates that matter:** the $200 credit expires around **2026-08-27** (30 days from account
+creation), so the load test belongs inside that window; and the free Postgres B1ms allowance is
+750 h/month **for 12 months**, from 2026-07-28.
 
 ---
 
@@ -146,6 +284,6 @@ Listed so you do not waste time on it:
 
 - **No portal clicks for infrastructure.** Everything except Entra admin consent comes from `infra/main.bicep`.
 - **No manual deploys.** GitHub Actions handles it on merge to `main`.
-- **No manual app registration.** A committed, re-runnable script creates it; you only consent.
-- **No database setup.** Bicep provisions Postgres; migrations run from CI.
+- **No manual app registration.** `infra/entra.bicep` declares them and is idempotent on `uniqueName`; you only consent and mint the secret (§1.3).
+- **No database setup.** Bicep provisions Postgres; migrations run as a Container Apps Job, not from a CI runner.
 - **No local `.env` juggling for CI.** Secrets live in GitHub.

@@ -36,6 +36,11 @@ jobs:
       JWKS_URI: https://jwks.invalid/keys
       JWT_ISSUER: https://issuer.test/v2.0
       JWT_AUDIENCE: api://irp-test
+      # apps/web. AUTH_DEV_BYPASS is deliberately absent — the unit suite must
+      # not depend on it, and Task 5's guard test sets NODE_ENV itself.
+      AUTH_SECRET: ci-only-secret-at-least-32-bytes-xx
+      AUTH_URL: http://localhost:3000
+      API_BASE_URL: http://localhost:3001
     steps:
       - uses: actions/checkout@v4
 
@@ -56,6 +61,16 @@ jobs:
 
       - name: Fail if regenerating changes anything
         run: |
+          # Scoped to the CODE GENERATORS' output on purpose. packages/*/dist is
+          # generated too but is deliberately NOT checksummed here: this gate
+          # exists for the risk that @hey-api/openapi-ts emits different output
+          # from the same spec (iteration-order-dependent templating). tsc
+          # compiling already-checksummed src into .d.ts is a categorically more
+          # reliable transform — no timestamps, no environment-dependent codegen,
+          # compiler pinned by the lockfile — and covering it would mean running
+          # both package builds twice, against the under-8-minute deploy target.
+          # ADD packages/client/dist HERE IF tsconfig.build.json ever gains
+          # declarationMap or anything else that can embed machine-specific paths.
           pnpm generate
           find packages/types/src packages/client/src -type f | sort | xargs sha256sum > /tmp/gen-before.txt
           pnpm generate
@@ -67,6 +82,18 @@ jobs:
 
       - name: Generate the Prisma client
         run: pnpm --filter @irp/api exec prisma generate
+
+      - name: Build @irp/core
+        run: pnpm --filter @irp/core build
+
+      # Declaration-only emit. The runtime stays raw TypeScript for the bundler,
+      # but consumers resolve TYPES from dist/*.d.ts. Without this, apps/web's
+      # tsc pulls the generated runtime into its own program and re-checks it
+      # under apps/web's stricter options — which would force a strictness
+      # relaxation onto hand-written web code. Must run BEFORE Typecheck.
+      # See packages/client/tsconfig.build.json.
+      - name: Build @irp/client declarations
+        run: pnpm --filter @irp/client build
 
       - name: Fail if generated output is tracked or dirties the tree
         run: |
@@ -90,10 +117,13 @@ jobs:
           # Both are whole-repo and unfiltered, so they must run after every
           # generation step in the job — including `prisma generate` above — or
           # the class of output produced last is never covered. Generate first,
-          # check once, for everything.
-          if [ -n "$(git ls-files packages/types/src packages/client/src apps/api/src/generated)" ]; then
+          # check once, for everything. That is also why this step now sits
+          # after `Build @irp/core` and `Build @irp/client declarations`: those
+          # two emit packages/core/dist and packages/client/dist, and a check
+          # run before them would never see that output.
+          if [ -n "$(git ls-files packages/types/src packages/client/src apps/api/src/generated packages/core/dist packages/client/dist)" ]; then
             echo "::error::Generated output is tracked in git — a second, hand-editable copy of the contract that can drift."
-            git ls-files packages/types/src packages/client/src apps/api/src/generated
+            git ls-files packages/types/src packages/client/src apps/api/src/generated packages/core/dist packages/client/dist
             exit 1
           fi
           if [ -n "$(git status --porcelain)" ]; then
@@ -102,17 +132,219 @@ jobs:
             exit 1
           fi
 
-      - name: Build @irp/core
-        run: pnpm --filter @irp/core build
-
       - name: Typecheck
         run: pnpm -r typecheck
 
       - name: Lint
         run: pnpm lint
 
+      # Plain tsc (Typecheck, above) does not run Next's own checks — it
+      # missed both a typedRoutes error and a middleware export error that
+      # broke the production build for four tasks. Only `next build` catches
+      # those, so it runs as its own gate rather than being folded into
+      # Typecheck. AUTH_DEV_BYPASS is unset at job level for this step on
+      # purpose: with it set, `next build` sets NODE_ENV=production and
+      # auth.config.ts's assertBypassNotInProduction correctly refuses to
+      # build — see apps/web/auth.config.ts.
+      - name: Build @irp/web
+        run: pnpm --filter @irp/web build
+
       - name: Apply database migrations
         run: pnpm --filter @irp/api exec prisma migrate deploy
 
       - name: Test
         run: pnpm -r test
+
+      # The four e2e steps below run on the UTC leg ONLY.
+      #
+      # The timezone matrix exists to catch reliance on server local time
+      # (NFR-12), and that risk is fully covered by the unit suites, which DO
+      # run on all three legs — @irp/core's 112 date-engine tests are the ones
+      # that matter there. The e2e spec asserts sign-in identity and rendering
+      # and contains no date or timezone assertion at all, so running it three
+      # times buys no extra coverage while paying three browser installs and
+      # three full app builds against the under-8-minute deploy target (NFR-5).
+      #
+      # If an e2e spec ever gains a date-sensitive assertion, drop this
+      # condition — do not work around it.
+      - name: Install the Playwright browser
+        if: matrix.timezone == 'UTC'
+        run: pnpm --filter @irp/web exec playwright install --with-deps chromium
+
+      # Must run AFTER `pnpm -r test`, never before: apps/api's suites
+      # TRUNCATE the User table, so a seed placed earlier is wiped by the time
+      # this step runs. The unit suite itself must never depend on this seed
+      # (Task 10) — that is why it is not seeded any earlier in the job.
+      - name: Seed the dev users the e2e test expects
+        if: matrix.timezone == 'UTC'
+        run: |
+          psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+
+      # These overrides never actually reach either spawned webServer:
+      # apps/web/playwright.config.ts sets JWKS_URI/JWT_ISSUER/JWT_AUDIENCE
+      # unconditionally in the api webServer's own `env` block, and
+      # AUTH_DEV_BYPASS unconditionally in the web webServer's — and
+      # Playwright merges `{ ...process.env, ...webServer.env }`, so the
+      # config-level value always wins. They are set here anyway, matching
+      # playwright.config.ts's own choices exactly (JWKS_URI as 127.0.0.1
+      # because it is fetched over the network; JWT_ISSUER as localhost
+      # because it is only ever string-compared) so this step documents the
+      # same contract rather than a stale or contradictory one, and so they
+      # take effect immediately if that config ever changes to read from
+      # process.env the way its DATABASE_URL and AUTH_SECRET already do.
+      - name: End-to-end smoke test
+        if: matrix.timezone == 'UTC'
+        env:
+          AUTH_DEV_BYPASS: "true"
+          JWKS_URI: http://127.0.0.1:3000/api/dev-jwks
+          JWT_ISSUER: http://localhost:3000/api/dev-jwks
+          JWT_AUDIENCE: api://irp-progress-management
+        run: pnpm --filter @irp/web e2e
+
+      # playwright.config.ts's CI reporter is now `[["github"], ["html", {
+      # open: "never" }]]`, not bare "github" — the github reporter alone
+      # writes NO files (only inline PR annotations), so this step used to
+      # upload an empty playwright-report/ and go green on an e2e failure
+      # with zero diagnostics attached. test-results/ is uploaded too: that
+      # is where `trace: "retain-on-failure"` writes, and traces are the
+      # actually useful artifact for debugging a CI-only failure.
+      #
+      # Deliberately NOT setting if-no-files-found: error. This step's `if`
+      # also fires when some OTHER step on the UTC leg failed before
+      # Playwright ever ran (e.g. Lint, or the DB migration step) — in that
+      # case both directories legitimately don't exist, and hardening this
+      # into a hard failure would turn an unrelated failure into a second,
+      # misleading one. Leave the default (`warn`) so that scenario stays a
+      # warning, not a red X.
+      - name: Upload the Playwright report on failure
+        if: failure() && matrix.timezone == 'UTC'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.timezone }}
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+
+  # The Entra path, proven against a real token. Dormant until the tenant
+  # exists: set the repository VARIABLE ENTRA_REAL_TOKEN_TESTS to 'true'.
+  #
+  # Gated on a VARIABLE, not on secret presence, because variables are readable
+  # when secrets are not. That is what lets this job tell "expected but absent"
+  # (hard fail) from "not configured yet" (do not run) — the same reasoning as
+  # apps/api/test/helpers/require-db.ts, with the flag explicit instead of
+  # inferred. A conditionally-skipped job is the false-green shape this repo has
+  # been bitten by twice.
+  real-token:
+    if: vars.ENTRA_REAL_TOKEN_TESTS == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: irp
+          POSTGRES_PASSWORD: irp
+          POSTGRES_DB: irp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U irp -d irp"
+          --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      DATABASE_URL: postgresql://irp:irp@localhost:5432/irp?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hard-fail if the secrets are expected but absent
+        env:
+          ENTRA_TENANT_ID: ${{ secrets.ENTRA_TENANT_ID }}
+          ENTRA_K6_CLIENT_ID: ${{ secrets.ENTRA_K6_CLIENT_ID }}
+          ENTRA_K6_CLIENT_SECRET: ${{ secrets.ENTRA_K6_CLIENT_SECRET }}
+          ENTRA_API_AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+        run: |
+          missing=0
+          for name in ENTRA_TENANT_ID ENTRA_K6_CLIENT_ID ENTRA_K6_CLIENT_SECRET ENTRA_API_AUDIENCE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is missing, but ENTRA_REAL_TOKEN_TESTS=true says these tests are expected."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate
+        run: |
+          pnpm generate
+          pnpm --filter @irp/api exec prisma generate
+          pnpm --filter @irp/core build
+
+      - name: Apply database migrations
+        run: pnpm --filter @irp/api exec prisma migrate deploy
+
+      - name: Acquire a real Entra token via the k6 service principal
+        id: token
+        env:
+          TENANT: ${{ secrets.ENTRA_TENANT_ID }}
+          CLIENT_ID: ${{ secrets.ENTRA_K6_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.ENTRA_K6_CLIENT_SECRET }}
+          AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+        run: |
+          # Client credentials, so no browser is involved. This service
+          # principal is required by Deliverable 4 anyway (NFR-3), so this is
+          # D4's prerequisite built early rather than extra scaffolding.
+          resp=$(curl -sS -X POST \
+            "https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token" \
+            -d "client_id=${CLIENT_ID}" \
+            -d "client_secret=${CLIENT_SECRET}" \
+            -d "scope=${AUDIENCE}/.default" \
+            -d "grant_type=client_credentials")
+          token=$(echo "$resp" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            echo "::error::Token acquisition failed: $(echo "$resp" | jq -c '.error_description // .')"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Register the service principal as a User, then call /api/v1/me
+        env:
+          ACCESS_TOKEN: ${{ steps.token.outputs.token }}
+          TENANT: ${{ secrets.ENTRA_TENANT_ID }}
+          AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+          JWKS_URI: https://login.microsoftonline.com/${{ secrets.ENTRA_TENANT_ID }}/discovery/v2.0/keys
+          JWT_ISSUER: https://login.microsoftonline.com/${{ secrets.ENTRA_TENANT_ID }}/v2.0
+          JWT_AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+        run: |
+          # The oid of a client-credentials token is the service principal's
+          # object id. A User row must exist for it, or the API correctly 403s.
+          oid=$(echo "$ACCESS_TOKEN" | cut -d. -f2 \
+            | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r '.oid')
+          psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), '${oid}', 'k6@ci.local', 'k6 Load Principal', 'ADMIN', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+
+          pnpm --filter @irp/api dev &
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:3001/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+          status=$(curl -sS -o /tmp/me.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            http://localhost:3001/api/v1/me)
+
+          echo "GET /api/v1/me → $status"
+          cat /tmp/me.json
+          if [ "$status" != "200" ]; then
+            echo "::error::A real Entra token did not authenticate against the API."
+            exit 1
+          fi

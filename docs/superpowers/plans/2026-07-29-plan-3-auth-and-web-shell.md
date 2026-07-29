@@ -1,0 +1,4064 @@
+# Plan 3 — Auth and Web Shell Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Prove the whole chain end to end — a browser signs in, a real JWT is minted, `apps/api` validates it with its real `jose` code path, a real `User` row is found, and that user's name renders on a real page.
+
+**Architecture:** `apps/web` (Next.js 16, App Router) runs Auth.js v5 with two providers — Microsoft Entra for production and a dev-only provider for now. Both mint a real JWT; `apps/api` validates either against a JWKS with **no code branch**, because the only thing that differs is which JWKS `JWKS_URI` points at. The dev provider serves its own JWKS endpoint, so dev exercises `createRemoteJWKSet` — the production mechanism — every day rather than only in a dormant CI job.
+
+**Tech Stack:** Next.js 16.2.12 · React 19.2.8 · next-auth 5.0.0-beta.32 · Tailwind CSS 4.3.3 · Playwright 1.62.0 · Vitest 4.1.10 · TypeScript 6.0.3 · jose 6.2.4
+
+**Spec:** `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md`
+
+---
+
+## Global Constraints
+
+Every task's requirements implicitly include this section.
+
+- **Spec-first.** `spec/openapi.yaml` changes before any handler. This plan adds **no** endpoints, so the spec is untouched. If you think you need a new endpoint, stop and escalate.
+- **Never hand-edit** `packages/types/src/`, `packages/client/src/`, or `apps/api/src/generated/`. All three are git-ignored generated output. `packages/client/package.json` **is** hand-written and tracked — editing it is allowed.
+- **No hand-written `fetch` to our own API.** `apps/web` imports only from `@irp/client`.
+- **Zero lint warnings.** `pnpm lint` must exit 0 with no output. `res.json()` returns `unknown` — use `res.json<T>()` with a local interface, or `@typescript-eslint/no-unsafe-member-access` fires.
+- **TypeScript strict everywhere.** Relax strictness only in a generated package's own tsconfig, never in `tsconfig.base.json`.
+- **Time:** store UTC, evaluate in **Asia/Colombo (UTC+05:30)**. Never read server local time.
+- **Weekdays are required; weekends are optional Extra.** A weekend is never missed, never late, and never in a compliance denominator.
+- **Desktop only, min 1280px** (NFR-13). No mobile layout.
+- **Design tokens are verified** — use the exact hex values in Task 2. Do not invent colours. Avoid hue 20–70° (`missed`/`late`) and 140–170° (`ok`).
+- **Conventional commits.** No direct commits to `main`. Branch is `feat/plan-3-auth-and-web-shell`.
+- **Prove a gate fails before trusting it.** Tasks 5, 10 and 11 each require demonstrating a test red before making it green. This is not a formality — two of this repo's original four gates looked correct and did nothing.
+- **Local database commands run through PowerShell, not Bash.** The Bash tool is network-sandboxed and cannot open a TCP connection to a localhost port; Prisma fails `P1001` from Bash against a healthy container. Local DB: `postgresql://irp:irp@127.0.0.1:5433/irp?schema=public`, container started with `IRP_DB_PORT=5433`.
+- **`DATABASE_URL` must be in the shell env** for any `prisma` CLI command. Prisma 7 dropped implicit `.env` loading.
+- **Do not add `DOM` to `tsconfig.base.json`.** It would leak browser globals into the Fastify package. `apps/web` sets its own `lib`.
+
+---
+
+## File Structure
+
+**Created**
+
+| Path | Responsibility |
+|---|---|
+| `apps/web/package.json` | Package manifest, scripts, deps |
+| `apps/web/tsconfig.json` | Strict + `DOM` lib + Next plugin |
+| `apps/web/next.config.ts` | `transpilePackages: ['@irp/client']` |
+| `apps/web/postcss.config.mjs` | Tailwind v4 plugin |
+| `apps/web/vitest.config.ts` | jsdom environment, React plugin |
+| `apps/web/app/globals.css` | Verified design tokens, light + dark |
+| `apps/web/app/layout.tsx` | Root: `html`/`body`, fonts, tokens |
+| `apps/web/app/(auth)/signin/page.tsx` | Split sign-in — ribbon left, action right |
+| `apps/web/app/(auth)/not-registered/page.tsx` | Terminal 403 state |
+| `apps/web/app/(app)/layout.tsx` | Topbar + sidebar frame |
+| `apps/web/app/(app)/page.tsx` | Renders the authenticated user |
+| `apps/web/app/api/auth/[...nextauth]/route.ts` | Auth.js route handlers |
+| `apps/web/app/api/dev-jwks/route.ts` | Dev JWKS — dev mode only |
+| `apps/web/components/cycle-ribbon/cycle-ribbon.tsx` | Real `CycleRibbon` (Plan 7 extends) |
+| `apps/web/components/app-frame/topbar.tsx` | 56px topbar |
+| `apps/web/components/app-frame/sidebar.tsx` | 216px sidebar |
+| `apps/web/lib/api-client.ts` | `server-only`; cookie → token → per-request client |
+| `apps/web/lib/dev-identities.ts` | Dev identity data only — no `jose`/`next-auth` imports, safe for a Client Component |
+| `apps/web/lib/dev-identity.ts` | Local keypair, token minting, provider. `server-only`-guarded, never evaluated in prod (not bundle-excluded) |
+| `apps/web/test/mocks/server-only.ts` | Vitest-only no-op alias for `server-only`, mirroring Next's `react-server` condition |
+| `apps/web/auth.config.ts` | Edge-safe provider list + guard |
+| `apps/web/auth.ts` | Full config, callbacks, prod guard |
+| `apps/web/middleware.ts` | Redirect guard — UX only |
+| `apps/web/e2e/signin.spec.ts` | Playwright smoke test |
+| `apps/web/playwright.config.ts` | Playwright config |
+| `apps/api/src/plugins/require-auth.ts` | Global fail-closed `onRequest` hook |
+| `docs/adr/0010-authjs-v5-over-msal.md` | ADR |
+| `docs/adr/0011-bicep-graph-extension-over-bootstrap-script.md` | ADR |
+| `docs/adr/0012-dev-auth-bypass-by-issuer-swap.md` | ADR |
+
+**Modified**
+
+| Path | Change |
+|---|---|
+| `packages/client/package.json` | Add `"./client"` subpath export; `types`/`default` conditions; `build` script |
+| `packages/client/tsconfig.build.json` | **Created in Task 1.** Declaration-only emit, so consumers get `.d.ts` |
+| `pnpm-workspace.yaml` | `allowBuilds: sharp` — Next's optional native image dep |
+| `apps/api/src/plugins/auth.ts` | Distinguish key-retrieval failure from token invalidity |
+| `apps/api/src/server.ts` | Register the fail-closed hook |
+| `eslint.config.mjs` | `apps/web/.next/**` ignore; JSX settings |
+| `.github/workflows/ci.yml` | Web steps, Playwright job, dormant real-token job |
+| `CLAUDE.md` | Pin the new versions |
+| `docs/manual-setup-steps.md` | Dev-identity `INSERT`s, Entra cutover |
+| `handoff.md` | Status |
+
+---
+
+## Task 1: Web scaffold and the `@irp/client` subpath export
+
+**Files:**
+- Modify: `packages/client/package.json`
+- Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/next.config.ts`, `apps/web/vitest.config.ts`, `apps/web/test/client-export.test.ts`
+- Modify: `eslint.config.mjs:19-27`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `@irp/client/client` exporting `createClient`, `createConfig`, and types `Client`, `Config`. `apps/web` package name `@irp/web`.
+
+**Why the subpath export:** `createClient`/`createConfig` live in `packages/client/src/client/index.ts`, but `packages/client/package.json` exports only `"."`. Task 7 needs them. `packages/client/.gitignore` ignores `src/` only, so `package.json` is hand-written and tracked — this is allowed.
+
+> **AMENDED 2026-07-29, after Task 1 ran.** Two things the original steps did not anticipate, both found by the implementer and verified fixed:
+>
+> 1. **`pnpm install` fails on `sharp`'s build script** — Next.js's optional native image dependency. Add `sharp: true` to `pnpm-workspace.yaml`'s `allowBuilds`, matching the existing `esbuild`/`prisma` entries.
+>
+> 2. **`apps/web`'s `tsc` re-typechecks `packages/client/src`.** Within one tsc Program a single set of `compilerOptions` applies to every file, including transitively-imported `.ts`. So importing the raw-TS client pulls ~15 `TS2379`/`TS2375` errors from the generated fetch runtime into `apps/web`'s own typecheck, and `skipLibCheck` cannot help — it exempts `.d.ts` only.
+>
+>    **Do NOT fix this by relaxing `exactOptionalPropertyTypes` in `apps/web/tsconfig.json`.** That was the first attempt and it weakens the setting for all hand-written web code, which is the strictness leak CLAUDE.md's rule exists to prevent. Instead, `packages/client` emits declarations and consumers resolve types from them:
+>
+>    - Create `packages/client/tsconfig.build.json` extending `./tsconfig.json` with `noEmit: false`, `emitDeclarationOnly: true`, `declaration: true`, `outDir: "./dist"`.
+>    - Add `"build": "tsc -p tsconfig.build.json"` to its scripts.
+>    - Change its `exports` to condition maps — `types` → `./dist/…d.ts`, `default` → `./src/…ts` — matching the pattern `packages/core/package.json` already uses. The runtime stays raw TS for the bundler; only type resolution moves.
+>    - Add a **`Build @irp/client declarations`** step to `.github/workflows/ci.yml` immediately after `Build @irp/core` and **before** `Typecheck`.
+>
+>    Verified: `apps/web` then typechecks clean at full strictness, `dist/` is already covered by `.gitignore:2`, and the relaxation stays inside `packages/client` where the generated code lives.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/client-export.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { createClient, createConfig } from "@irp/client/client";
+import { getCurrentUser } from "@irp/client";
+
+describe("@irp/client subpath export", () => {
+  it("exposes createClient and createConfig from the ./client subpath", () => {
+    expect(typeof createClient).toBe("function");
+    expect(typeof createConfig).toBe("function");
+  });
+
+  it("builds an isolated client that does not share the module singleton", () => {
+    const a = createClient(createConfig({ baseUrl: "http://a.test" }));
+    const b = createClient(createConfig({ baseUrl: "http://b.test" }));
+    expect(a).not.toBe(b);
+    expect(a.getConfig().baseUrl).toBe("http://a.test");
+    expect(b.getConfig().baseUrl).toBe("http://b.test");
+  });
+
+  it("still exposes the generated SDK operations from the root export", () => {
+    expect(typeof getCurrentUser).toBe("function");
+  });
+});
+```
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test
+```
+
+Expected: FAIL — the `@irp/web` package does not exist yet, so pnpm reports no matching project.
+
+- [ ] **Step 3: Add the subpath export**
+
+Replace the `exports` block in `packages/client/package.json`:
+
+```json
+{
+  "name": "@irp/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
+```
+
+- [ ] **Step 4: Create `apps/web/package.json`**
+
+```json
+{
+  "name": "@irp/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@irp/client": "workspace:*",
+    "next": "16.2.12",
+    "next-auth": "5.0.0-beta.32",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@irp/types": "workspace:*",
+    "@playwright/test": "1.62.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "jose": "6.2.4",
+    "jsdom": "30.0.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
+```
+
+- [ ] **Step 5: Create `apps/web/tsconfig.json`**
+
+`DOM` is added here and **only** here — `tsconfig.base.json` must stay DOM-free so browser globals never leak into the Fastify package. `lib` **replaces** the inherited value, so `ES2023` must be restated.
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "noEmit": true,
+    "declaration": false,
+    "allowJs": true,
+    "incremental": true,
+    "resolveJsonModule": true,
+    "paths": { "@/*": ["./*"] },
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "e2e"]
+}
+```
+
+- [ ] **Step 6: Create `apps/web/next.config.ts`**
+
+```ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  // @irp/client is bundler-only: it ships runtime code as raw TypeScript with
+  // noEmit, so Next must compile it. apps/api cannot load it at all.
+  transpilePackages: ["@irp/client"],
+  typedRoutes: true,
+};
+
+export default nextConfig;
+```
+
+- [ ] **Step 7: Create `apps/web/vitest.config.ts`**
+
+```ts
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: { "@": fileURLToPath(new URL(".", import.meta.url)) },
+  },
+  test: {
+    environment: "jsdom",
+    globals: false,
+    setupFiles: ["./test/setup.ts"],
+    include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+  },
+});
+```
+
+- [ ] **Step 8: Create `apps/web/test/setup.ts`**
+
+```ts
+import "@testing-library/jest-dom/vitest";
+```
+
+- [ ] **Step 9: Add the Next build output to the ESLint ignores**
+
+In `eslint.config.mjs`, the `ignores` array already contains `"**/.next/**"`, which covers `apps/web/.next/`. Confirm it is present and add nothing. Then append a JSX-aware block as the **last** argument to `tseslint.config(...)`:
+
+```js
+  {
+    // apps/web is React + JSX. The type-aware config above already applies;
+    // this only relaxes the rules that misfire on JSX and Server Components.
+    files: ["apps/web/**/*.tsx"],
+    rules: {
+      // Server Components are async functions returning JSX. The rule assumes
+      // a Promise-returning function is awaited by its caller; React awaits it.
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+```
+
+- [ ] **Step 10: Install**
+
+```powershell
+pnpm install
+```
+
+Expected: `+ 12 packages` or similar for `apps/web`, exit 0.
+
+- [ ] **Step 11: Run the test to verify it passes**
+
+```powershell
+pnpm --filter @irp/web test
+```
+
+Expected: PASS, 3 tests.
+
+- [ ] **Step 12: Verify the whole workspace still typechecks and lints**
+
+```powershell
+pnpm typecheck
+pnpm lint
+```
+
+Expected: both exit 0, `lint` with no output. `typecheck` now reports 5 projects.
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add packages/client/package.json apps/web eslint.config.mjs pnpm-lock.yaml pnpm-workspace.yaml
+git commit -m "feat(web): scaffold apps/web and export the @irp/client subpath
+
+Adds the ./client subpath export so a per-request client can be built
+instead of mutating the generated module singleton, which would leak
+tokens across concurrent requests. packages/client/.gitignore covers
+src/ only, so package.json is hand-written and editing it does not
+touch the never-hand-edit rule."
+```
+
+---
+
+## Task 2: Design tokens, root layout, and fonts
+
+**Files:**
+- Create: `apps/web/app/globals.css`, `apps/web/app/layout.tsx`, `apps/web/postcss.config.mjs`, `apps/web/test/layout.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 1's scaffold.
+- Produces: CSS custom properties `--bg`, `--surface`, `--surface-sunk`, `--line`, `--line-strong`, `--ink`, `--ink-muted`, `--primary`, `--primary-weak`, `--st-ok`, `--st-late`, `--st-absent`, `--st-missed`. Fonts exposed as `--font-sans` and `--font-mono`.
+
+**Every hex below is verified** — 35 pairs pass WCAG AA and every token is in sRGB gamut (`docs/design-system.md` §3). Do not substitute values.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/layout.test.tsx`:
+
+```tsx
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { PageShell } from "@/app/layout";
+
+describe("PageShell", () => {
+  it("renders its children", () => {
+    render(<PageShell><p>hello</p></PageShell>);
+    expect(screen.getByText("hello")).toBeInTheDocument();
+  });
+
+  it("applies the font custom properties to the shell", () => {
+    const { container } = render(<PageShell><span /></PageShell>);
+    const shell = container.firstElementChild;
+    expect(shell?.className).toContain("min-h-dvh");
+  });
+});
+```
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test
+```
+
+Expected: FAIL — `Failed to resolve import "@/app/layout"`.
+
+- [ ] **Step 3: Create `apps/web/postcss.config.mjs`**
+
+```js
+export default {
+  plugins: { "@tailwindcss/postcss": {} },
+};
+```
+
+- [ ] **Step 4: Create `apps/web/app/globals.css`**
+
+```css
+@import "tailwindcss";
+
+/* Verified light theme. docs/design-system.md §3.1 — 35 pairs pass WCAG AA,
+   every token in sRGB gamut. Do not substitute values.
+   --primary is the Bistec slot: a placeholder indigo until the brand hex
+   arrives. Any replacement must avoid hue 20-70 (missed/late) and 140-170 (ok). */
+:root {
+  --bg: #ffffff;
+  --surface: #f6f7fb;
+  --surface-sunk: #fafbfe;
+  --line: #dfe2e9;
+  --line-strong: #898c96;
+  --ink: #1b1f2a;
+  --ink-muted: #5f636e;
+  --primary: #3c4ba2;
+  --primary-weak: #e9eefe;
+
+  --st-ok: #267b4c;
+  --st-late: #9f5c0c;
+  --st-absent: #6d717e;
+  --st-missed: #be2132;
+
+  --radius-panel: 12px;
+  --radius-control: 8px;
+}
+
+/* docs/design-system.md §3.3. Light is the default (ADR-0002); dark is
+   supported, never the default. §3.3's canvas is deliberately chroma-0
+   near-black (#121212 is R=G=B=18) — surfaces lift toward indigo, the
+   canvas does not. */
+/* NOTE: the dark neutrals below were wrong in the original version of this
+   plan (invented, not verified). They are corrected here to match
+   docs/design-system.md §3.3. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --surface: #1c1e23;
+    --surface-sunk: #16171b;
+    --line: #313339;
+    --line-strong: #656974;
+    --ink: #f2f3f6;
+    --ink-muted: #a7aab4;
+    --primary: #8a9ff0;
+    --primary-weak: #262c45;
+
+    --st-ok: #65c98c;
+    --st-late: #eeac53;
+    --st-absent: #9a9eaa;
+    --st-missed: #ed7473;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-primary: var(--primary);
+  --color-primary-weak: var(--primary-weak);
+  --color-st-ok: var(--st-ok);
+  --color-st-late: var(--st-late);
+  --color-st-absent: var(--st-absent);
+  --color-st-missed: var(--st-missed);
+  --font-sans: var(--font-jakarta);
+  --font-mono: var(--font-plex-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  /* Fixed scale, not fluid. Base UI 14px. docs/design-system.md §4 */
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every figure is tabular, mono or not. docs/design-system.md §4 */
+.tabular, code, kbd, samp {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Display letter-spacing floor -0.03em. Never tighter. */
+h1, h2, h3 {
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+```
+
+- [ ] **Step 5: Create `apps/web/app/layout.tsx`**
+
+`PageShell` is exported separately so it is testable without Next's `html`/`body` wrapper, which React Testing Library cannot render.
+
+```tsx
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import { Plus_Jakarta_Sans, IBM_Plex_Mono } from "next/font/google";
+import "./globals.css";
+
+// next/font/google downloads at build time and self-hosts, so there is no
+// runtime dependency on Google's CDN.
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-jakarta",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
+
+export const metadata: Metadata = {
+  title: "Hearts Academy · IRP",
+  description: "Industry Readiness Programme progress management",
+};
+
+export function PageShell({ children }: { children: ReactNode }) {
+  // Desktop only, min 1280px (NFR-13). No mobile layout is provided or tested.
+  return <div className="min-h-dvh min-w-[1280px]">{children}</div>;
+}
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en" className={`${jakarta.variable} ${plexMono.variable}`}>
+      <body>
+        <PageShell>{children}</PageShell>
+      </body>
+    </html>
+  );
+}
+```
+
+- [ ] **Step 6: Run the test to verify it passes**
+
+```powershell
+pnpm --filter @irp/web test
+```
+
+Expected: PASS, 5 tests total.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web
+git commit -m "feat(web): design tokens, root layout, and fonts
+
+Tokens are the verified values from docs/design-system.md §3 — 35 WCAG AA
+pairs, all in sRGB gamut. Light is the default per ADR-0002. PageShell is
+exported separately from RootLayout so it is testable without the html/body
+wrapper RTL cannot render."
+```
+
+---
+
+## Task 3: The `CycleRibbon` component
+
+**Files:**
+- Create: `apps/web/components/cycle-ribbon/cycle-ribbon.tsx`, `apps/web/test/cycle-ribbon.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 2's tokens.
+- Produces:
+  ```ts
+  export type DayMark = "ok" | "partial" | "late" | "absent" | "missed" | "future";
+  export interface RibbonDay { date: string; mark: DayMark; fill?: number; isToday?: boolean; }
+  export interface RibbonProps { days: RibbonDay[]; extraAfter?: string[]; label?: string; caption?: string; }
+  export function CycleRibbon(props: RibbonProps): JSX.Element;
+  ```
+
+  > **CORRECTED 2026-07-29 (fix pass 1).** The original shape put `"today"` in
+  > `DayMark` itself, as a sibling of `"ok"`/`"partial"`/`"missed"`. That conflates
+  > **status** (has today been submitted, and how) with **decoration** (is this the
+  > current day) — the type could not express "today, not yet submitted," which is
+  > the ordinary state of the current day for most of its duration. The implementation
+  > compounded it: `today` hardcoded 100% height and the ok colour, so a day with
+  > **zero** entries rendered as a solid full green bar — a mentor checking at 10am
+  > would see today as fully submitted when nobody had. `isToday` is now a boolean
+  > carried alongside a real `mark`, decorated with a ring drawn over whatever colour
+  > that mark produces. A day that is `isToday` with `mark: "missed"` renders the
+  > missed colour, ringed — never the ok colour.
+
+**This is the real component Plan 7 extends, not a placeholder.** Scope here is **day-mark rendering only** — no data fetching, no cycle arithmetic (that is `@irp/core`'s, already built), no interaction.
+
+**The weekend rule is real logic, not decoration:** `days` contains **required days only** (weekdays). `extraAfter` lists dates after which a weekend `+` slot is rendered, per FR-33. An empty weekend renders nothing at all.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/cycle-ribbon.test.tsx`:
+
+```tsx
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { CycleRibbon, type RibbonDay } from "@/components/cycle-ribbon/cycle-ribbon";
+
+const days: RibbonDay[] = [
+  { date: "2026-07-10", mark: "ok" },
+  { date: "2026-07-13", mark: "late" },
+  { date: "2026-07-14", mark: "absent" },
+  { date: "2026-07-15", mark: "missed" },
+  { date: "2026-07-16", mark: "partial", fill: 0.6 },
+  { date: "2026-07-17", mark: "ok", isToday: true },
+  { date: "2026-07-20", mark: "future" },
+];
+
+describe("CycleRibbon", () => {
+  it("renders one slot per required day", () => {
+    render(<CycleRibbon days={days} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+  });
+
+  it("labels every day with its mark for assistive tech", () => {
+    render(<CycleRibbon days={days} />);
+    for (const d of days) {
+      const expected =
+        d.isToday === true ? `${d.date}: ${d.mark}, today` : `${d.date}: ${d.mark}`;
+      expect(screen.getByLabelText(expected)).toBeInTheDocument();
+    }
+  });
+
+  it("draws the today ring over the day's real status instead of forcing ok", () => {
+    // The bug this guards: `today` used to be a mark of its own, hardcoded to
+    // 100% height and the ok colour, so an unsubmitted today rendered as a
+    // solid full green bar. isToday must decorate whatever mark applies.
+    render(<CycleRibbon days={[{ date: "2026-07-17", mark: "missed", isToday: true }]} />);
+    const item = screen.getByLabelText("2026-07-17: missed, today");
+    const bar = item.firstElementChild;
+    expect(bar).toHaveStyle({ background: "var(--st-missed)", height: "100%" });
+    expect(item).toHaveStyle({ outline: "1.5px solid var(--primary)" });
+  });
+
+  it("renders no weekend slot when nobody worked the weekend", () => {
+    render(<CycleRibbon days={days} />);
+    expect(screen.queryByLabelText(/extra/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a half-width extra slot only where a weekend was worked", () => {
+    render(<CycleRibbon days={days} extraAfter={["2026-07-10"]} />);
+    const extras = screen.getAllByLabelText(/extra work/i);
+    expect(extras).toHaveLength(1);
+    // FR-33: the slot sits between the Friday and the Monday it falls between,
+    // so immediately after the day it follows.
+    const items = screen.getAllByRole("listitem");
+    expect(items[1]).toHaveAccessibleName(/extra work/i);
+  });
+
+  it("does not count an extra slot as a required day", () => {
+    render(<CycleRibbon days={days} extraAfter={["2026-07-10"]} />);
+    // 7 required + 1 extra = 8 slots, but only 7 are required days.
+    expect(screen.getAllByRole("listitem")).toHaveLength(8);
+    expect(screen.getByTestId("required-day-count")).toHaveTextContent(
+      "7 required days in this cycle",
+    );
+  });
+
+  it("renders the label and caption when supplied", () => {
+    render(<CycleRibbon days={days} label="Cycle 2 · 10 Jul – 9 Aug" caption="8 of 10 submitted today" />);
+    expect(screen.getByText("Cycle 2 · 10 Jul – 9 Aug")).toBeInTheDocument();
+    expect(screen.getByText("8 of 10 submitted today")).toBeInTheDocument();
+  });
+
+  it("applies a proportional fill for a partial day", () => {
+    render(<CycleRibbon days={[{ date: "2026-07-16", mark: "partial", fill: 0.6 }]} />);
+    const bar = screen.getByLabelText("2026-07-16: partial").firstElementChild;
+    expect(bar).toHaveStyle({ height: "60%" });
+  });
+});
+```
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test cycle-ribbon
+```
+
+Expected: FAIL — `Failed to resolve import "@/components/cycle-ribbon/cycle-ribbon"`.
+
+- [ ] **Step 3: Implement the component**
+
+Create `apps/web/components/cycle-ribbon/cycle-ribbon.tsx`:
+
+```tsx
+/**
+ * The VISUAL mark for one required day. Deliberately distinct from
+ * @irp/core's domain-level DayStatus union — this is presentation, that is
+ * domain truth, and Plan 6 owns deciding how the two relate. Do not import
+ * one where the other is meant.
+ */
+export type DayMark = "ok" | "partial" | "late" | "absent" | "missed" | "future";
+
+export interface RibbonDay {
+  /** ISO date, YYYY-MM-DD. A required day (weekday) only. */
+  date: string;
+  mark: DayMark;
+  /** 0..1, used only when mark === "partial". */
+  fill?: number;
+  /**
+   * Decoration, ORTHOGONAL to mark. Today has a real status like any other day
+   * — it may be unsubmitted, partial, or late — so the ring is drawn OVER
+   * whatever mark applies rather than replacing it.
+   */
+  isToday?: boolean;
+}
+
+export interface RibbonProps {
+  /** Required days only. Weekends never appear here — see extraAfter. */
+  days: RibbonDay[];
+  /** Dates after which a weekend Extra slot is rendered (FR-33). */
+  extraAfter?: string[];
+  label?: string;
+  caption?: string;
+}
+
+// "today" is NOT a mark — see the DayMark doc comment above. MARK_COLOR has
+// five entries, one per real status; the today ring is applied in DaySlot
+// independent of which of these five a day carries.
+const MARK_COLOR: Record<Exclude<DayMark, "future">, string> = {
+  ok: "var(--st-ok)",
+  partial: "var(--st-ok)",
+  late: "var(--st-late)",
+  absent: "var(--st-absent)",
+  missed: "var(--st-missed)",
+};
+
+function DaySlot({ day }: { day: RibbonDay }) {
+  const isFuture = day.mark === "future";
+  const heightPct = day.mark === "partial" ? Math.round((day.fill ?? 0) * 100) : 100;
+  const label = day.isToday === true ? `${day.date}: ${day.mark}, today` : `${day.date}: ${day.mark}`;
+
+  return (
+    <li
+      aria-label={label}
+      className="relative flex h-11 w-2 items-end"
+      style={
+        day.isToday === true
+          ? { outline: "1.5px solid var(--primary)", outlineOffset: "1px", borderRadius: "2px" }
+          : undefined
+      }
+    >
+      <span
+        className="block w-full rounded-[2px]"
+        style={{
+          height: `${String(heightPct)}%`,
+          background: isFuture ? "transparent" : MARK_COLOR[day.mark],
+          border: isFuture ? "1px solid var(--line)" : undefined,
+        }}
+      />
+    </li>
+  );
+}
+
+function ExtraSlot({ after }: { after: string }) {
+  // Half-width, and distinguished by FORM not colour. A sixth status colour was
+  // tried and rejected: a teal at hue 200 lands within 1.01:1 luminance of the
+  // ok green, indistinguishable in a dense ribbon for a colour-vision-deficient
+  // user. docs/design-system.md §3.2 specifies the exact treatment: "a
+  // half-width slot in --ink-muted carrying a + glyph" — both the glyph and the
+  // bar below use --ink-muted, never a status colour.
+  return (
+    <li aria-label={`Extra work after ${after}`} className="relative flex h-11 w-1 items-end">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] leading-none"
+        style={{ color: "var(--ink-muted)" }}
+      >
+        +
+      </span>
+      <span
+        className="block w-full rounded-[2px]"
+        style={{ height: "60%", background: "var(--ink-muted)" }}
+      />
+    </li>
+  );
+}
+```
+
+> **CORRECTED 2026-07-29 during execution.** The original version of this block used a
+> dotted `--line-strong` left border and **no `+` glyph**, which contradicts
+> `docs/design-system.md` §3.2: *"a half-width slot in `--ink-muted` carrying a `+`
+> glyph."* The doc governs. This is the second place the plan diverged from the
+> design-system doc while claiming to follow it — see also Task 2's dark neutrals.
+> **Read §3.2 and §7 directly rather than trusting this block.**
+
+```tsx
+
+/**
+ * The signature element (docs/design-system.md §7, FR-28). One bar per REQUIRED
+ * day; an Extra slot appears only where a weekend was actually worked (FR-33).
+ *
+ * Plan 3 builds day-mark rendering only. Plan 7 extends this with real data and
+ * interaction — it does not replace it. There is only ever one ribbon.
+ */
+export function CycleRibbon({ days, extraAfter = [], label, caption }: RibbonProps) {
+  const extras = new Set(extraAfter);
+
+  return (
+    <figure
+      className="rounded-[var(--radius-panel)] border p-6"
+      style={{ background: "var(--surface)", borderColor: "var(--line)" }}
+    >
+      {label !== undefined && (
+        <figcaption
+          className="tabular mb-3 text-xs uppercase tracking-[0.08em]"
+          style={{ color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}
+        >
+          {label}
+        </figcaption>
+      )}
+
+      <ol className="flex items-end gap-[3px]">
+        {days.flatMap((day) => {
+          const slots = [<DaySlot key={day.date} day={day} />];
+          if (extras.has(day.date)) {
+            slots.push(<ExtraSlot key={`${day.date}-extra`} after={day.date} />);
+          }
+          return slots;
+        })}
+      </ol>
+
+      {/* Extra days never enter a compliance denominator (FR-12). */}
+      <span data-testid="required-day-count" className="sr-only">
+        {days.length} required days in this cycle
+      </span>
+
+      {caption !== undefined && (
+        <p className="tabular mt-3 text-xs" style={{ color: "var(--ink-muted)" }}>
+          {caption}
+        </p>
+      )}
+    </figure>
+  );
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```powershell
+pnpm --filter @irp/web test cycle-ribbon
+```
+
+Expected: PASS, 8 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/web/components/cycle-ribbon apps/web/test/cycle-ribbon.test.tsx
+git commit -m "feat(web): CycleRibbon day-mark rendering (FR-28, FR-33)
+
+The real component Plan 7 extends, not a placeholder — two things that
+resemble each other drift, and a fake ribbon whose day-mark vocabulary
+later contradicts the real one is worse than no ribbon.
+
+days[] carries required weekdays only; extraAfter renders a half-width
+weekend slot only where someone worked, and an empty weekend renders
+nothing. Extra is distinguished by form, never a sixth colour."
+```
+
+---
+
+## Task 4: App frame and route groups
+
+**Files:**
+- Create: `apps/web/components/app-frame/topbar.tsx`, `apps/web/components/app-frame/sidebar.tsx`, `apps/web/app/(app)/layout.tsx`, `apps/web/test/app-frame.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 2's tokens.
+- Produces:
+  ```ts
+  export function Topbar(props: { userName: string; batchName?: string }): JSX.Element;
+  export function Sidebar(props: { reviewCount?: number }): JSX.Element;
+  ```
+
+Dimensions are fixed by `docs/design-system.md` §6: topbar **56px**, sidebar **216px**, both `--surface`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/app-frame.test.tsx`:
+
+```tsx
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { Topbar } from "@/components/app-frame/topbar";
+import { Sidebar } from "@/components/app-frame/sidebar";
+
+describe("Topbar", () => {
+  it("shows the signed-in user's name", () => {
+    render(<Topbar userName="Damian De Cruz" />);
+    expect(screen.getByText("Damian De Cruz")).toBeInTheDocument();
+  });
+
+  it("shows the batch when supplied and omits it otherwise", () => {
+    const { rerender } = render(<Topbar userName="A" batchName="Batch 12" />);
+    expect(screen.getByText("Batch 12")).toBeInTheDocument();
+    rerender(<Topbar userName="A" />);
+    expect(screen.queryByText("Batch 12")).not.toBeInTheDocument();
+  });
+
+  it("is a banner landmark 56px tall", () => {
+    render(<Topbar userName="A" />);
+    expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
+  });
+});
+
+describe("Sidebar", () => {
+  it("is a navigation landmark 216px wide", () => {
+    render(<Sidebar />);
+    expect(screen.getByRole("navigation")).toHaveStyle({ width: "216px" });
+  });
+
+  it("renders every destination as a non-interactive item — none has a page yet", () => {
+    // "/" has no page.tsx either (only apps/web/app/(app)/layout.tsx exists;
+    // Task 9 adds the page). typedRoutes rejects a Link to any of the five,
+    // so none render as links until their task lands.
+    render(<Sidebar />);
+    for (const item of ["Today", "Roster", "Review", "Cycles", "Students"]) {
+      expect(screen.queryByRole("link", { name: new RegExp(item) })).not.toBeInTheDocument();
+      const el = screen.getByText(new RegExp(item));
+      expect(el).toHaveAttribute("aria-disabled", "true");
+    }
+  });
+
+  it("shows a review count on the (non-link) Review item only when there is something to review", () => {
+    const { rerender } = render(<Sidebar reviewCount={3} />);
+    const withCount = screen.getByText(/^Review$/);
+    expect(withCount).toHaveAttribute("aria-disabled", "true");
+    expect(withCount.textContent).toBe("Review 3");
+
+    rerender(<Sidebar reviewCount={0} />);
+    const withoutCount = screen.getByText(/^Review$/);
+    expect(withoutCount).toHaveAttribute("aria-disabled", "true");
+    expect(withoutCount.textContent).toBe("Review");
+  });
+});
+```
+
+> **Correction (found during Fix 1 of the Task 8 fix pass, `.superpowers/sdd/task-8-report.md`):**
+> the test above originally asserted all five destinations render as `getByRole("link", ...)`.
+> That could never pass — see the corrected Step 4 below for why — and this plan carried
+> the same wrong premise into the implementation. Corrected here at source.
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test app-frame
+```
+
+Expected: FAIL — cannot resolve `@/components/app-frame/topbar`.
+
+- [ ] **Step 3: Create `apps/web/components/app-frame/topbar.tsx`**
+
+```tsx
+export function Topbar({ userName, batchName }: { userName: string; batchName?: string }) {
+  return (
+    <header
+      role="banner"
+      className="flex items-center justify-between border-b px-6"
+      style={{ height: "56px", background: "var(--surface)", borderColor: "var(--line)" }}
+    >
+      <div className="flex items-center gap-2">
+        <span aria-hidden="true" style={{ color: "var(--primary)" }}>&#9670;</span>
+        <span className="font-semibold" style={{ color: "var(--ink)" }}>
+          Hearts Academy &middot; IRP
+        </span>
+      </div>
+
+      <div className="flex items-center gap-6">
+        {batchName !== undefined && (
+          <span className="tabular" style={{ color: "var(--ink-muted)" }}>{batchName}</span>
+        )}
+        <span style={{ color: "var(--ink)" }}>{userName}</span>
+      </div>
+    </header>
+  );
+}
+```
+
+- [ ] **Step 4: Create `apps/web/components/app-frame/sidebar.tsx`**
+
+> **Correction (found during Fix 1 of the Task 8 fix pass, `.superpowers/sdd/task-8-report.md`):**
+> the code below shipped as the original Task 4 implementation and passed this plan's own
+> (wrong) test above, but it fails `next build`: `apps/web/next.config.ts` sets
+> `typedRoutes: true`, which validates every `<Link href>` against routes that **actually
+> have a page.tsx**. At the point this task runs, none of the five do — not even `"/"`.
+> `apps/web/app/(app)/` holds only `layout.tsx`; the page (`apps/web/app/(app)/page.tsx`)
+> is Task 9's Step 4, alongside `middleware.ts`. Confirmed by the generated
+> `.next/types/routes.d.ts`: `PageRoutes: never`, `"/"` appears only under `LayoutRoutes`,
+> and `StaticRoutes` (the set `Link` accepts) is just
+> `/api/dev-jwks | /not-registered | /signin`. `pnpm typecheck` (plain `tsc`) does not catch
+> this — the route-type declarations are generated by `next build` only, so a fresh checkout
+> passes typecheck and then fails the build.
+>
+> The fix, corrected here at source: every destination renders as a non-interactive
+> `<span aria-disabled="true">` until its own task adds the page it needs — Today in this
+> plan's Task 9, Roster and Students in Plan 6, Review and Cycles in Plan 7. No `as Route`
+> casts, no disabling `typedRoutes`, no placeholder pages. Each becomes a real
+> `<Link href="...">` in the task that adds its page.
+
+```tsx
+/**
+ * The app frame's primary navigation. `navigation` landmark, 216px wide, on
+ * `--surface` — docs/design-system.md §6. Desktop only (NFR-13); no
+ * collapse/drawer treatment is provided in this task.
+ *
+ * `typedRoutes: true` (apps/web/next.config.ts) validates every `<Link
+ * href>` against routes that actually exist, and none of these five do yet:
+ * `apps/web/app/(app)/` currently holds only `layout.tsx`, no `page.tsx`, so
+ * "/" itself has no page either — confirmed by the generated
+ * `.next/types/routes.d.ts` (`PageRoutes: never`, `"/"` appears only under
+ * `LayoutRoutes`, and `StaticRoutes` — the set `Link` accepts — is just
+ * `/api/dev-jwks | /not-registered | /signin`). Linking to any of the five
+ * fails `next build`, as it did before this comment existed. Rather than
+ * disabling typedRoutes or stubbing empty pages, every destination renders
+ * as a non-interactive item until its page lands: Today in this plan's own
+ * Task 9 (`apps/web/app/(app)/page.tsx` + `middleware.ts`), Roster and
+ * Students in Plan 6, Review and Cycles in Plan 7. Each becomes a real
+ * `<Link href="...">` in the task that adds its page — no `as Route` casts
+ * in the meantime.
+ */
+const DESTINATIONS = [
+  { label: "Today" },
+  { label: "Roster" },
+  { label: "Review" },
+  { label: "Cycles" },
+  { label: "Students" },
+] as const;
+
+export function Sidebar({ reviewCount = 0 }: { reviewCount?: number }) {
+  return (
+    <nav
+      aria-label="Primary"
+      className="flex flex-col gap-1 border-r p-4"
+      style={{ width: "216px", background: "var(--surface)", borderColor: "var(--line)" }}
+    >
+      {DESTINATIONS.map((d) => {
+        const showCount = d.label === "Review" && reviewCount > 0;
+        return (
+          <span
+            key={d.label}
+            aria-disabled="true"
+            className="rounded-[var(--radius-control)] px-3 py-2"
+            style={{ color: "var(--ink-muted)" }}
+          >
+            {d.label}
+            {showCount && " "}
+            {showCount && (
+              <span className="tabular ml-2" style={{ color: "var(--ink-muted)" }}>
+                {reviewCount}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </nav>
+  );
+}
+```
+
+- [ ] **Step 5: Create `apps/web/app/(app)/layout.tsx`**
+
+The frame lives here, so filing a page under `(app)` makes it framed and filing it under `(auth)` makes it bare. Route groups do not affect URLs.
+
+**This layout does not guard.** Next.js layouts are cached across navigations and its docs warn against relying on them for authorization — see Task 9's `middleware.ts` and, authoritatively, `apps/api`.
+
+```tsx
+import type { ReactNode } from "react";
+import { Topbar } from "@/components/app-frame/topbar";
+import { Sidebar } from "@/components/app-frame/sidebar";
+import { getCurrentUserOrRedirect } from "@/lib/api-client";
+
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  const user = await getCurrentUserOrRedirect();
+
+  return (
+    <div className="flex flex-col" style={{ minHeight: "100dvh" }}>
+      <Topbar userName={user.displayName} />
+      <div className="flex flex-1">
+        <Sidebar />
+        <main className="flex-1 p-8" style={{ background: "var(--bg)" }}>
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+```
+
+> **Note for the implementer:** `getCurrentUserOrRedirect` lands in Task 7. This layout will not typecheck until then. That is expected — do **not** stub it. Run only the component tests in this task; the full typecheck gate is Task 7's Step 8.
+>
+> **Correction (found executing Task 4):** root `pnpm lint` also fails until Task 7, for the
+> same reason — not just `tsc`. `eslint.config.mjs` runs typescript-eslint's type-aware rules,
+> and an unresolved import types as `error`/`any`, which cascades into
+> `@typescript-eslint/no-unsafe-assignment`, `no-unsafe-call`, and `no-unsafe-member-access` on
+> `user` and `user.displayName` in this file (4 errors). This is expected and resolves itself
+> once Task 7 adds the real `lib/api-client.ts` — no eslint-disable is needed or wanted here,
+> matching the "do not stub it" rule above. Both gates are deferred to Task 7's Step 8.
+
+- [ ] **Step 6: Run the component tests to verify they pass**
+
+```powershell
+pnpm --filter @irp/web test app-frame
+```
+
+Expected: PASS, 6 tests.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web/components/app-frame "apps/web/app/(app)" apps/web/test/app-frame.test.tsx
+git commit -m "feat(web): app frame and route groups
+
+56px topbar and 216px sidebar per docs/design-system.md §6. The (app)
+route group carries the frame and (auth) does not, so the framed/unframed
+distinction is a directory boundary rather than runtime logic.
+
+The layout deliberately does not guard: Next.js layouts are cached across
+navigations and its docs warn against relying on them for authorization."
+```
+
+---
+
+## Task 5: Auth.js config and the two production guards
+
+**Files:**
+- Create: `apps/web/auth.config.ts`, `apps/web/auth.ts`, `apps/web/app/api/auth/[...nextauth]/route.ts`, `apps/web/test/prod-guard.test.ts`
+- Create: `apps/web/.env.example`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces:
+  ```ts
+  // auth.config.ts
+  export const authConfig: NextAuthConfig;
+  type BypassGuardEnv = Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>;
+  export function assertBypassNotInProduction(env: BypassGuardEnv): void;
+  // auth.ts
+  export const { handlers, auth, signIn, signOut }: NextAuthResult;
+  ```
+
+**This task carries the most dangerous thing in the plan.** A bypass reaching production is unauthenticated access to student personal data, not a recoverable bug. Both guards go in here, and **the runtime throw must be demonstrated red before it is made green.**
+
+> **CORRECTED 2026-07-29 (fix pass 1).** A whole-branch review found three defects below, now folded into the steps that follow:
+>
+> 1. **The "excluded from the production bundle" claim was false.** A dynamic `await import()` with a literal specifier is statically analyzable; Turbopack emits it as a lazy chunk and does not remove it. `import "server-only"` does not change server-bundle inclusion either — it only turns a *Client Component* import into a build error via the `react-server` condition. What is actually guaranteed: `lib/dev-identity.ts` is never **evaluated** in production, because the branch that imports it is never taken — its top-level `generateKeyPair()` call never runs. `assertBypassNotInProduction` (guard one) is the guard that structurally enforces the block; guard two only keeps the module's side effects from executing. Every occurrence of "excluded from the production bundle" below is reworded to this accurate claim.
+> 2. **The guard was not invoked on every import path.** `middleware.ts` (Task 9) imports `auth.config.ts` directly, because `auth.ts` is not edge-safe. With the call living only in `auth.ts`, an edge-only import path (e.g. a health check hitting only middleware) would boot clean with a live bypass in production. `assertBypassNotInProduction(process.env)` now runs at **module scope in `auth.config.ts`**, immediately after the function definition — covering both import paths. The redundant call in `auth.ts` is removed rather than kept, since `auth.ts` already imports `auth.config.ts` and a second call there would be noise, not additional coverage. `process.env` reads are Edge-runtime-safe in Next 16: the Edge sandbox (`next/dist/server/web/sandbox/context.js`, `buildEnvironmentVariablesFrom`) mirrors the real `process.env` rather than restricting reads to statically-inlined names.
+> 3. **The two string comparisons need opposite strictness.** `AUTH_DEV_BYPASS === "true"` stays exact — only the literal string enables a bypass, so `"1"`/`"TRUE"`/`"yes"` must not trip the guard either. But `NODE_ENV === "production"` was too strict *for a guard*: a container setting `NODE_ENV=Production` would sail through with a live bypass. The environment check is now `env.NODE_ENV?.toLowerCase() === "production"` — case-insensitive, so the guard fires *more* often, not less. `NodeJS.ProcessEnv`'s `NODE_ENV` is typed as the literal union `'development' | 'production' | 'test'` (from `next/types/global.d.ts`), which would reject a test literal of `"Production"`; the parameter type is widened to `Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>` (the `| undefined` is required by `exactOptionalPropertyTypes`) so the case tests can actually be expressed, without changing what the real call site (`process.env`) is allowed to pass.
+
+**`next-auth@5.0.0-beta.32` is a beta release.** That is deliberate — v4 is the `latest` tag but has no real App Router support. ADR-0010 (Task 14) records the acceptance.
+
+**Note for the implementer:** `jwtCallback` below reads `user.devAccessToken` directly, with no cast. That property does not exist on `next-auth`'s `User` type; it typechecks here only because Task 6's `lib/dev-identity.ts` carries a `declare module "next-auth" { interface User { devAccessToken?: string } }` augmentation, colocated with the provider that invents the field. Until Task 6 lands, `pnpm typecheck`/`pnpm lint` report this file as an error — expected, matching the pattern already noted in Task 4. Do not add a local cast here to paper over it; that is exactly the zero-compile-error rename hazard the augmentation exists to close.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/prod-guard.test.ts`:
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import { assertBypassNotInProduction } from "@/auth.config";
+
+describe("assertBypassNotInProduction", () => {
+  it("throws when the bypass is enabled in a production build", () => {
+    expect(() =>
+      assertBypassNotInProduction({ NODE_ENV: "production", AUTH_DEV_BYPASS: "true" }),
+    ).toThrow(/AUTH_DEV_BYPASS/);
+  });
+
+  it("names the variable and refuses to start, so the failure is unmistakable", () => {
+    expect(() =>
+      assertBypassNotInProduction({ NODE_ENV: "production", AUTH_DEV_BYPASS: "true" }),
+    ).toThrow(/Refusing to start/);
+  });
+
+  it("permits the bypass outside production", () => {
+    for (const NODE_ENV of ["development", "test"] as const) {
+      expect(() =>
+        assertBypassNotInProduction({ NODE_ENV, AUTH_DEV_BYPASS: "true" }),
+      ).not.toThrow();
+    }
+  });
+
+  it("permits production when the bypass is unset or not exactly 'true'", () => {
+    for (const AUTH_DEV_BYPASS of [undefined, "", "false", "1", "TRUE", "yes"]) {
+      expect(() =>
+        assertBypassNotInProduction({ NODE_ENV: "production", AUTH_DEV_BYPASS }),
+      ).not.toThrow();
+    }
+  });
+
+  // AUTH_DEV_BYPASS is exact (above); NODE_ENV must be the opposite — case
+  // insensitive — so the guard fires MORE often, not less.
+  it("throws when NODE_ENV is 'Production' (mixed case)", () => {
+    expect(() =>
+      assertBypassNotInProduction({ NODE_ENV: "Production", AUTH_DEV_BYPASS: "true" }),
+    ).toThrow(/AUTH_DEV_BYPASS/);
+  });
+
+  it("throws when NODE_ENV is 'PRODUCTION' (upper case)", () => {
+    expect(() =>
+      assertBypassNotInProduction({ NODE_ENV: "PRODUCTION", AUTH_DEV_BYPASS: "true" }),
+    ).toThrow(/AUTH_DEV_BYPASS/);
+  });
+
+  // middleware.ts imports auth.config.ts directly, never through auth.ts.
+  // The guard must fire as a module-scope side effect of the import itself.
+  it("throws merely by importing auth.config.ts when the bypass is set in production", async () => {
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_DEV_BYPASS", "true");
+
+    try {
+      await expect(import("@/auth.config")).rejects.toThrow(/AUTH_DEV_BYPASS/);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run it and CONFIRM IT FAILS — this is the gate proof**
+
+```powershell
+pnpm --filter @irp/web test prod-guard
+```
+
+Expected: FAIL — cannot resolve `@/auth.config`.
+
+**Do not proceed until you have seen this fail.** Then, after Step 3, you will comment out the `throw` and re-run to confirm the test goes red for the *right* reason — a guard that cannot fail is worse than no guard, and in Plan 2B a gate-*proof* turned out to be the thing that could not fail.
+
+- [ ] **Step 3: Create `apps/web/auth.config.ts`**
+
+Edge-safe: no Node-only imports, so `middleware.ts` can use it.
+
+```ts
+import type { NextAuthConfig } from "next-auth";
+import MicrosoftEntraId from "next-auth/providers/microsoft-entra-id";
+
+/**
+ * The enforcing guard. A bypass reaching production is unauthenticated access
+ * to student personal data, so this refuses to boot rather than degrading.
+ *
+ * Guard two, in lib/dev-identity.ts's docblock, is NOT bundle exclusion —
+ * that module is imported dynamically with a literal specifier, which is
+ * statically analyzable, so Turbopack still emits it as a lazy chunk rather
+ * than removing it. What guard two actually guarantees is that the module is
+ * never EVALUATED in production (its top-level key generation never runs),
+ * because the dynamic import is gated on this same flag. This function is the
+ * one that structurally enforces the block.
+ *
+ * Exact string comparison on AUTH_DEV_BYPASS is deliberate — "1", "TRUE" and
+ * "yes" must NOT enable a bypass, so they must not trip the guard either.
+ *
+ * The NODE_ENV comparison is deliberately the OPPOSITE: case-insensitive, so
+ * the guard fires MORE often, not less. A container that sets NODE_ENV to
+ * "Production" (capitalized) must still trip this guard — an exact-match
+ * comparison here would let a live bypass through on a technicality. The two
+ * checks have opposite risk profiles: the flag that enables the bypass must
+ * be matched exactly (narrow), and the check that blocks it must be matched
+ * loosely (broad).
+ */
+// `| undefined` is explicit, not redundant with the optional `?` — the
+// tsconfig sets exactOptionalPropertyTypes, under which an optional property
+// accepts *omission* but not an explicitly-assigned `undefined` unless the
+// property's type says so. The existing "unset AUTH_DEV_BYPASS" test case
+// passes `undefined` as a value, so the type must allow that explicitly.
+type BypassGuardEnv = Partial<Record<"NODE_ENV" | "AUTH_DEV_BYPASS", string | undefined>>;
+
+export function assertBypassNotInProduction(env: BypassGuardEnv): void {
+  if (env.AUTH_DEV_BYPASS === "true" && env.NODE_ENV?.toLowerCase() === "production") {
+    throw new Error(
+      "AUTH_DEV_BYPASS is set in a production build. Refusing to start. " +
+        "This flag mints tokens with a local key and must never run in production.",
+    );
+  }
+}
+
+// Invoked here at module scope — not only from auth.ts — because
+// middleware.ts imports auth.config.ts directly (auth.ts is not edge-safe,
+// so middleware cannot go through it). Without this call living here, an
+// Edge health check that only loads middleware.ts would boot clean with
+// AUTH_DEV_BYPASS=true in production; only a page or route that also pulls
+// in @/auth would trip the guard. process.env reads are Edge-runtime-safe in
+// Next 16 — the Edge sandbox mirrors the real process.env, it does not
+// restrict reads to NEXT_PUBLIC_*-prefixed or statically inlined names — so
+// this call is safe on both the edge and the Node import path.
+assertBypassNotInProduction(process.env);
+
+/**
+ * Goes into the ENCRYPTED, HTTP-ONLY cookie. Server-only.
+ *
+ * Exported separately so it is directly testable — see Task 7's token-leak
+ * test. Keeping it inline in a config literal would leave the invariant
+ * assertable only end-to-end.
+ *
+ * `user.devAccessToken` typechecks directly — no cast — because Task 6's
+ * `lib/dev-identity.ts` carries a `declare module "next-auth" { interface
+ * User { devAccessToken?: string } }` augmentation, colocated with the
+ * provider that invents the field. `next-auth`'s own `User` type has no such
+ * property and excess-property checking does not fire through the
+ * `Awaitable<User | null>` union `authorize()` returns, so without that
+ * augmentation a rename of the field in dev-identity.ts would break this
+ * callback at runtime with zero compile error.
+ */
+export const jwtCallback: NonNullable<NextAuthConfig["callbacks"]>["jwt"] = ({
+  token,
+  account,
+  user,
+}) => {
+  if (account?.access_token !== undefined) {
+    token.accessToken = account.access_token;
+  }
+  // The dev provider returns its minted token on the user object, because a
+  // Credentials sign-in produces no account.access_token.
+  if (user?.devAccessToken !== undefined) {
+    token.accessToken = user.devAccessToken;
+  }
+  return token;
+};
+
+/**
+ * This return value is what auth() gives a Server Component AND what the
+ * browser's GET /api/auth/session returns.
+ *
+ * The access token is deliberately ABSENT — exposing it here would hand the
+ * browser a bearer credential and destroy the whole design (spec §4.1).
+ *
+ * `role` is absent too, on purpose: it would be a second source of truth
+ * competing with the User row. The authoritative role comes from
+ * GET /api/v1/me (spec §4.1a).
+ *
+ * It takes `token` and deliberately copies NOTHING off it. That is the
+ * invariant Task 7 tests: given a token carrying accessToken and role, the
+ * session must carry neither.
+ */
+export const sessionCallback: NonNullable<NextAuthConfig["callbacks"]>["session"] = ({
+  session,
+}) => session;
+
+export const authConfig: NextAuthConfig = {
+  providers: [
+    MicrosoftEntraId({
+      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? "",
+      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? "",
+      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER ?? "",
+      authorization: {
+        params: { scope: `openid profile email ${process.env.API_SCOPE ?? ""}`.trim() },
+      },
+    }),
+  ],
+  pages: { signIn: "/signin" },
+  session: { strategy: "jwt" },
+  callbacks: {
+    // UX redirect only. NOT the security boundary — that is apps/api.
+    authorized({ auth: session }) {
+      return session?.user != null;
+    },
+    jwt: jwtCallback,
+    session: sessionCallback,
+  },
+};
+```
+
+- [ ] **Step 4: Create `apps/web/auth.ts`**
+
+```ts
+import NextAuth, { type NextAuthConfig } from "next-auth";
+import type { Provider } from "next-auth/providers";
+import { authConfig } from "./auth.config";
+
+// The guard (assertBypassNotInProduction) runs at auth.config.ts's module
+// scope, not here. This module already imports auth.config.ts below, so
+// that call has already executed by the time this line is reached — calling
+// it again here would be redundant, not additional coverage. auth.config.ts
+// is the one that must self-invoke, because middleware.ts imports it
+// directly without going through this file.
+const bypassEnabled = process.env.AUTH_DEV_BYPASS === "true";
+
+// Guard two: the dev module is imported only under the flag, so it is never
+// EVALUATED in production — its top-level generateKeyPair() call never runs.
+// This is NOT bundle exclusion: a dynamic import with a literal specifier is
+// statically analyzable, and Turbopack still emits it as a lazy chunk rather
+// than removing it. The guard that actually enforces the block is
+// auth.config.ts's assertBypassNotInProduction. Keep this as a dynamic
+// import anyway — a static one would evaluate the module (and its top-level
+// key generation) unconditionally at load time, bypass flag or not.
+const devProviders: Provider[] = bypassEnabled
+  ? [(await import("./lib/dev-identity")).devIdentityProvider()]
+  : [];
+
+// The callbacks live in auth.config.ts and are shared by both configs, so the
+// invariant Task 7 tests is the same one production uses. Do not re-declare
+// them here — a second copy is a second thing to keep in step.
+const config: NextAuthConfig = {
+  ...authConfig,
+  providers: [...authConfig.providers, ...devProviders],
+};
+
+export const { handlers, auth, signIn, signOut } = NextAuth(config);
+```
+
+- [ ] **Step 5: Create `apps/web/app/api/auth/[...nextauth]/route.ts`**
+
+```ts
+import { handlers } from "@/auth";
+
+export const { GET, POST } = handlers;
+```
+
+- [ ] **Step 6: Create `apps/web/.env.example`**
+
+```bash
+# apps/web configuration. Copy to .env.local for local dev (git-ignored).
+
+# Auth.js cookie encryption. Generate with: openssl rand -base64 32
+AUTH_SECRET=replace-me-with-32-random-bytes
+AUTH_URL=http://localhost:3000
+
+# Where apps/api lives. apps/web calls it server-side only.
+API_BASE_URL=http://localhost:3001
+
+# ── Dev bypass ────────────────────────────────────────────────────────────
+# Mints tokens with a LOCAL key and serves its own JWKS at /api/dev-jwks.
+# apps/api validates them with its real jose code path — this swaps the token
+# ISSUER, it does not skip authentication.
+#
+# Setting this with NODE_ENV=production makes the app REFUSE TO BOOT
+# (case-insensitively — "Production" trips it too). That startup throw is the
+# enforcing guard: the dev module is still part of the production bundle (a
+# dynamic import does not remove it), it is just never evaluated when the
+# flag is off.
+AUTH_DEV_BYPASS=true
+
+# Audience claim on the token the dev provider mints. Must match what
+# apps/api expects. Defaults to api://irp-progress-management when unset.
+API_SCOPE_AUDIENCE=api://irp-progress-management
+
+# ── Microsoft Entra (unused while the bypass is on) ───────────────────────
+AUTH_MICROSOFT_ENTRA_ID_ID=
+AUTH_MICROSOFT_ENTRA_ID_SECRET=
+AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+API_SCOPE=api://irp-progress-management/access_as_user
+```
+
+- [ ] **Step 7: Run the test to verify it passes**
+
+```powershell
+pnpm --filter @irp/web test prod-guard
+```
+
+Expected: PASS, 7 tests.
+
+- [ ] **Step 8: PROVE THE GATE FAILS — mandatory, two mutations**
+
+**Mutation 1.** Comment out the `throw new Error(...)` block in `auth.config.ts`, leaving the `if` body empty. Re-run:
+
+```powershell
+pnpm --filter @irp/web test prod-guard
+```
+
+Expected: **FAIL**, 5 of 7 tests — the two direct-throw assertions, both case-insensitivity assertions, and the import-path assertion. The two "permits ..." tests still pass, since they never expected a throw.
+
+**Restore the throw**, confirm green (7/7), then run **mutation 2**: change the condition to `env.AUTH_DEV_BYPASS !== undefined` (loosen the exact-match check). Re-run:
+
+```powershell
+pnpm --filter @irp/web test prod-guard
+```
+
+Expected: **FAIL**, 1 of 7 tests — "permits production when the bypass is unset or not exactly 'true'" (now `"1"`/`"TRUE"`/`"yes"`/`""` incorrectly trip the guard).
+
+If either mutation passes clean, the corresponding assertion is not testing what it claims and must be rewritten. **Restore the exact condition** and confirm green (7/7) again before committing. Record in your task report that you performed both mutations and what you observed.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/web/auth.config.ts apps/web/auth.ts "apps/web/app/api/auth" apps/web/test/prod-guard.test.ts apps/web/.env.example
+git commit -m "feat(web): Auth.js v5 config with two production bypass guards
+
+Guard one: a startup throw when AUTH_DEV_BYPASS=true meets
+NODE_ENV=production (checked case-insensitively, so the guard fires more
+often rather than less). Guard two: the dev module is dynamically
+imported under the flag, so it is never evaluated in production — not
+excluded from the production bundle, which a dynamic import with a
+literal specifier does not achieve.
+
+The guard runs at auth.config.ts's module scope so both import paths
+are covered: middleware.ts imports auth.config.ts directly (it is not
+edge-safe to go through auth.ts), so the guard must not depend on
+auth.ts being loaded.
+
+Demonstrated red by two mutations — removing the throw (5 of 7 tests
+fail) and loosening the AUTH_DEV_BYPASS comparison to !== undefined (1
+of 7 fails) — then restored both times. Exact string comparison on
+AUTH_DEV_BYPASS is deliberate: '1', 'TRUE' and 'yes' do not enable a
+bypass, so they must not trip the guard either.
+
+The session callback exposes neither the access token nor the role. Its
+return value is what the browser's /api/auth/session returns, so a token
+there would defeat the whole design; role would be a second source of
+truth competing with the User row.
+
+next-auth is pinned to 5.0.0-beta.32. v4 is the 'latest' tag but has no
+real App Router support. ADR-0010 records the acceptance."
+```
+
+---
+
+## Task 6: The dev identity provider and its JWKS endpoint
+
+**Files:**
+- Create: `apps/web/lib/dev-identities.ts`, `apps/web/lib/dev-identity.ts`, `apps/web/app/api/dev-jwks/route.ts`, `apps/web/test/dev-identity.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  ```ts
+  // lib/dev-identities.ts — data only, no jose/next-auth imports, safe for a
+  // Client Component (Task 8's dev-identity-picker.tsx imports from here).
+  export interface DevIdentity { id: string; label: string; oid: string; email: string; name: string; }
+  export const DEV_IDENTITIES: readonly DevIdentity[];
+  export const DEV_ISSUER = "http://localhost:3000/api/dev-jwks";
+
+  // lib/dev-identity.ts — the keypair, jose, next-auth. `import "server-only"`
+  // is its first line, so a Client Component importing it is a build-time error.
+  export function devIdentityProvider(): Provider;
+  export async function mintDevToken(identity: DevIdentity, audience: string): Promise<string>;
+  export async function devJwks(): Promise<{ keys: JWK[] }>;
+  export const devKeyPairForTest: CryptoKeyPair; // test-only
+  ```
+
+> **CORRECTED 2026-07-29 (fix pass 1).** The original version of this task put
+> everything — `DEV_IDENTITIES`, the keypair, `mintDevToken`, `devJwks`, and
+> `devIdentityProvider` — in one `lib/dev-identity.ts`, with a top-level
+> `await generateKeyPair(...)`. Task 8's `dev-identity-picker.tsx` is a
+> `"use client"` component that needs `DEV_IDENTITIES`, so as originally
+> structured it would have pulled `jose`, `next-auth/providers/credentials`,
+> and the top-level await keygen into the client bundle — executing keygen in
+> the browser and breaking the build on the top-level await. The module is
+> split: `lib/dev-identities.ts` holds the data (interface, array, issuer
+> constant), importable from anywhere; `lib/dev-identity.ts` keeps everything
+> that needs `jose`/`next-auth` and gains `import "server-only"` as its first
+> line, so a client import is a build-time error rather than a runtime leak.
+>
+> The original also generated the keypair with `{ extractable: true }`. That
+> option is the *only* thing that lets `exportJWK(privateKey)` succeed — it
+> buys nothing here (only the public key is ever exported) and discards a
+> platform-enforced guarantee that private key material can never leave the
+> process. Corrected to `await generateKeyPair("RS256")`, non-extractable, with
+> a `devKeyPairForTest` test-only export so the guarantee is asserted directly
+> rather than assumed. `server-only`'s real `index.js` throws unconditionally
+> outside Next's build (Next resolves it to a no-op via the `react-server`
+> export condition); Vitest has no such condition, so it needs a test-only
+> alias — see `apps/web/test/mocks/server-only.ts` and the `resolve.alias`
+> entry in `apps/web/vitest.config.ts`, added in this task alongside the
+> `server-only` import for exactly this reason.
+
+**The design in one line:** this mints a **real** RS256 JWT with a local key and serves the matching public key as a JWKS, so `apps/api` validates it through `createRemoteJWKSet` — the exact production mechanism. Dev therefore exercises the remote-JWKS path every day, not only in the dormant CI job.
+
+**Key lifetime:** generated once per process, held in module scope. Restarting `apps/web` invalidates outstanding sessions, which correctly presents as a 401 and a sign-out. Acceptable in dev; noted so it is not mistaken for a bug.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/dev-identity.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { createLocalJWKSet, exportJWK, jwtVerify } from "jose";
+import { DEV_IDENTITIES, DEV_ISSUER } from "@/lib/dev-identities";
+import { devJwks, devKeyPairForTest, mintDevToken } from "@/lib/dev-identity";
+
+const AUD = "api://irp-progress-management";
+
+describe("DEV_IDENTITIES", () => {
+  it("offers a mentor, a student, and an unregistered identity", () => {
+    expect(DEV_IDENTITIES).toHaveLength(3);
+    expect(DEV_IDENTITIES.map((i) => i.oid)).toEqual([
+      "dev-admin-1",
+      "dev-student-1",
+      "dev-unknown-1",
+    ]);
+  });
+
+  it("carries no role — the User row is the only source of truth", () => {
+    for (const identity of DEV_IDENTITIES) {
+      expect(identity).not.toHaveProperty("role");
+    }
+  });
+});
+
+describe("mintDevToken", () => {
+  it("mints a token the published JWKS verifies", async () => {
+    const identity = DEV_IDENTITIES[0]!;
+    const token = await mintDevToken(identity, AUD);
+    const keySet = createLocalJWKSet(await devJwks());
+
+    const { payload } = await jwtVerify(token, keySet, {
+      issuer: DEV_ISSUER,
+      audience: AUD,
+      algorithms: ["RS256"],
+    });
+
+    expect(payload.oid).toBe("dev-admin-1");
+  });
+
+  it("sets the oid claim apps/api matches against User.externalId", async () => {
+    for (const identity of DEV_IDENTITIES) {
+      const token = await mintDevToken(identity, AUD);
+      const keySet = createLocalJWKSet(await devJwks());
+      const { payload } = await jwtVerify(token, keySet, {
+        issuer: DEV_ISSUER,
+        audience: AUD,
+      });
+      expect(payload.oid).toBe(identity.oid);
+    }
+  });
+
+  it("is rejected when the audience does not match", async () => {
+    const token = await mintDevToken(DEV_IDENTITIES[0]!, AUD);
+    const keySet = createLocalJWKSet(await devJwks());
+    await expect(
+      jwtVerify(token, keySet, { issuer: DEV_ISSUER, audience: "api://wrong" }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("devJwks", () => {
+  it("publishes exactly one public RS256 signing key and no private material", async () => {
+    const jwks = await devJwks();
+    expect(jwks.keys).toHaveLength(1);
+    const key = jwks.keys[0]!;
+    expect(key.alg).toBe("RS256");
+    expect(key.use).toBe("sig");
+    expect(key.kid).toBeTypeOf("string");
+    // A private RSA key would carry these. Publishing one would let anyone
+    // mint tokens our own API trusts.
+    for (const priv of ["d", "p", "q", "dp", "dq", "qi"]) {
+      expect(key).not.toHaveProperty(priv);
+    }
+  });
+
+  it("refuses to export the private key at all — it is non-extractable", async () => {
+    // The platform-level guarantee, not just an omitted field: WebCrypto
+    // itself refuses to export keyPair.privateKey as a JWK, because it was
+    // generated without { extractable: true }. Even a future edit that
+    // mistakenly reaches for the private key in an export path cannot
+    // publish it — the runtime throws before it can.
+    await expect(exportJWK(devKeyPairForTest.privateKey)).rejects.toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test dev-identity
+```
+
+Expected: FAIL — cannot resolve `@/lib/dev-identities`.
+
+- [ ] **Step 3: Create `apps/web/lib/dev-identities.ts`**
+
+Data only. No imports from `jose` or `next-auth` — safe for a Client Component.
+
+```ts
+export interface DevIdentity {
+  id: string;
+  label: string;
+  /** Becomes the token's `oid`. apps/api matches it to User.externalId. */
+  oid: string;
+  email: string;
+  name: string;
+}
+
+/**
+ * No `role` field, deliberately. Role lives in the User row and reaches the web
+ * app only via GET /api/v1/me — see spec §4.1a. Switching identity switches the
+ * oid; the role follows from the database.
+ *
+ * dev-unknown-1 has NO User row on purpose. It must produce a 403 and land on
+ * /not-registered, turning the spec's most load-bearing authorization rule into
+ * something clickable rather than something only a test knows about.
+ */
+export const DEV_IDENTITIES: readonly DevIdentity[] = [
+  { id: "mentor", label: "Mentor (Admin)", oid: "dev-admin-1", email: "mentor@dev.local", name: "Dev Mentor" },
+  { id: "student", label: "Student", oid: "dev-student-1", email: "student@dev.local", name: "Dev Student" },
+  { id: "unknown", label: "Unregistered user (expect 403)", oid: "dev-unknown-1", email: "nobody@dev.local", name: "Unregistered" },
+];
+
+export const DEV_ISSUER = "http://localhost:3000/api/dev-jwks";
+```
+
+- [ ] **Step 4: Create `apps/web/lib/dev-identity.ts`**
+
+`import "server-only"` is the **first line** — it makes a Client Component import of this module a build-time error rather than a runtime leak. Everything that needs `jose`/`next-auth` lives here; `DEV_IDENTITIES`/`DEV_ISSUER` are re-imported from `lib/dev-identities.ts`, not redefined.
+
+The keypair is generated **without** `{ extractable: true }`. That option is the only thing that would let `exportJWK(keyPair.privateKey)` succeed — `exportJWK(keyPair.publicKey)` needs no such permission, so the option buys nothing here and discards a platform-enforced guarantee. Non-extractable means WebCrypto itself refuses to export the private key as a JWK, so even a future edit that mistakenly reaches for it in an export path cannot publish private material.
+
+```ts
+import "server-only";
+
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import type { JWK } from "jose";
+import Credentials from "next-auth/providers/credentials";
+import type { Provider } from "next-auth/providers";
+// Only subpaths of next-auth (./providers, ./providers/credentials) are
+// otherwise imported here. TypeScript's module augmentation below needs the
+// bare "next-auth" specifier registered as a resolved module in this file, or
+// it fails with TS2664 even though `declare module "next-auth"` resolves the
+// package fine on its own — an empty type-only import is enough to satisfy it.
+import type {} from "next-auth";
+import { DEV_IDENTITIES, DEV_ISSUER, type DevIdentity } from "@/lib/dev-identities";
+
+/**
+ * The dev bypass. It swaps the token ISSUER; it does NOT skip authentication.
+ *
+ * A real RS256 JWT is minted with a local key, and the matching public key is
+ * published at /api/dev-jwks. apps/api validates it through createRemoteJWKSet
+ * with its real jose code path — the exact production mechanism — so dev
+ * exercises remote JWKS retrieval every day rather than only in CI.
+ *
+ * This module is imported ONLY when AUTH_DEV_BYPASS=true (see auth.ts), so it
+ * is never EVALUATED in production — the top-level generateKeyPair() call
+ * below never runs when the flag is off. It is NOT excluded from the
+ * production bundle: a dynamic import with a literal specifier is statically
+ * analyzable, so Turbopack still emits it as a lazy chunk. The guard that
+ * actually enforces the block is auth.config.ts's
+ * assertBypassNotInProduction, which refuses to boot if the flag is set with
+ * NODE_ENV=production (case-insensitively).
+ *
+ * `import "server-only"` above makes any accidental import from a Client
+ * Component (e.g. reaching for mintDevToken instead of the data-only
+ * lib/dev-identities.ts) a build-time error rather than a runtime leak.
+ */
+
+declare module "next-auth" {
+  interface User {
+    /**
+     * Set only by the dev identity provider. A Credentials sign-in produces no
+     * account.access_token, so the minted token travels on the user object to
+     * the jwt callback. Declared here, where it is invented, so producer and
+     * consumer typecheck against one declaration.
+     */
+    devAccessToken?: string;
+  }
+}
+
+const KID = "dev-key-1";
+
+// Generated once per process and held here. Restarting apps/web invalidates
+// outstanding sessions, which presents correctly as a 401 and a sign-out.
+//
+// Deliberately NOT { extractable: true } — see the note above this block.
+const keyPair = await generateKeyPair("RS256");
+
+/** Test-only. Asserting the private key is non-extractable requires a handle to it. */
+export const devKeyPairForTest = keyPair;
+
+export async function devJwks(): Promise<{ keys: JWK[] }> {
+  const jwk = await exportJWK(keyPair.publicKey);
+  return { keys: [{ ...jwk, kid: KID, alg: "RS256", use: "sig" }] };
+}
+
+export async function mintDevToken(identity: DevIdentity, audience: string): Promise<string> {
+  return new SignJWT({ oid: identity.oid, email: identity.email, name: identity.name })
+    .setProtectedHeader({ alg: "RS256", kid: KID })
+    .setIssuedAt()
+    .setIssuer(DEV_ISSUER)
+    .setAudience(audience)
+    .setExpirationTime("8h")
+    .sign(keyPair.privateKey);
+}
+
+export function devIdentityProvider(): Provider {
+  return Credentials({
+    id: "dev-identity",
+    name: "Development identity",
+    credentials: { identityId: { label: "Identity", type: "text" } },
+    authorize: async (credentials) => {
+      const identityId = credentials.identityId;
+      if (typeof identityId !== "string") return null;
+
+      const identity = DEV_IDENTITIES.find((i) => i.id === identityId);
+      if (identity === undefined) return null;
+
+      const audience = process.env.API_SCOPE_AUDIENCE ?? "api://irp-progress-management";
+
+      // Handed to the jwt callback as `user.devAccessToken`, because a
+      // Credentials sign-in produces no account.access_token.
+      return {
+        id: identity.oid,
+        email: identity.email,
+        name: identity.name,
+        devAccessToken: await mintDevToken(identity, audience),
+      };
+    },
+  });
+}
+```
+
+- [ ] **Step 5: Alias `server-only` for Vitest**
+
+`server-only`'s real `index.js` throws unconditionally when imported — that is the guard. Next resolves it to a no-op via the package's `react-server` export condition in a Server Component compilation; Vitest is a plain Vite/Node environment with no such condition, so every test that imports `lib/dev-identity.ts` (directly or transitively) would fail on the throw. This mirrors the existing `next/font/google` alias pattern in the same file.
+
+Create `apps/web/test/mocks/server-only.ts`:
+
+```ts
+// The real `server-only` package throws unconditionally when its index.js
+// runs — that IS the guard. Next's build resolves it through the
+// `react-server` package-export condition instead, which points at an empty
+// no-op module in a Server Component compilation. Vitest has no such
+// condition wired in, so importing the real package here would fail every
+// test that imports a server-only module. This mirrors Next's own empty.js
+// for the Vitest module graph only — next build/next dev still resolve the
+// real package and its real throw.
+export {};
+```
+
+Add to `apps/web/vitest.config.ts`'s `resolve.alias`:
+
+```ts
+"server-only": fileURLToPath(new URL("./test/mocks/server-only.ts", import.meta.url)),
+```
+
+- [ ] **Step 6: Create `apps/web/app/api/dev-jwks/route.ts`**
+
+> **CORRECTED 2026-07-29 (whole-branch review, Important finding 1).** The
+> version below is what actually shipped after Task 6 first landed, and it
+> was wrong: it imported `lib/dev-identity` directly and never pulled in
+> `auth.config.ts` by any path, and `middleware.ts` excludes all of `/api`
+> wholesale (necessarily — see Task 8's middleware note), so **neither
+> guard covered this route**. A review built with the flag off, then ran
+> `next start` (which sets `NODE_ENV=production`) with
+> `AUTH_DEV_BYPASS=true`: `/` and `/api/auth/session` correctly 500'd at
+> the guard, but `GET /api/dev-jwks` returned **200** with a live JWKS
+> containing a freshly generated RSA key. The code block below now includes
+> the fix — an explicit `assertBypassNotInProduction(process.env)` call at
+> module scope, imported from `@/auth.config`, making this route a third,
+> independently-guarded entry point alongside `auth.ts` and `middleware.ts`.
+> **The rule for any future module that imports `lib/dev-identity`
+> directly: it must call the guard itself.** A fourth test file,
+> `apps/web/test/dev-jwks-route.test.ts`, pins this (404 when off, a valid
+> public-only JWKS when on outside production, and a throw-on-import when
+> the flag is set in production) — Task 6 as originally executed shipped
+> with no test at all for this route.
+
+```ts
+import { NextResponse } from "next/server";
+import { assertBypassNotInProduction } from "@/auth.config";
+
+/**
+ * Publishes the dev public key so apps/api can validate dev-minted tokens
+ * through createRemoteJWKSet — the same code path production uses.
+ *
+ * Returns 404 when the bypass is off, so this endpoint does not exist in a
+ * normal build.
+ *
+ * This is a THIRD entry point into the bypass, alongside auth.ts and
+ * middleware.ts (via auth.config.ts) — and it does not go through either of
+ * those, because it imports lib/dev-identity directly and middleware.ts
+ * excludes /api wholesale. The guard's coverage is per entry point, not
+ * automatic, so this call is required here even though auth.config.ts
+ * already calls it at its own module scope for a different reason.
+ */
+assertBypassNotInProduction(process.env);
+
+export async function GET() {
+  if (process.env.AUTH_DEV_BYPASS !== "true") {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  const { devJwks } = await import("@/lib/dev-identity");
+  return NextResponse.json(await devJwks(), {
+    headers: { "cache-control": "no-store" },
+  });
+}
+```
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+```powershell
+pnpm --filter @irp/web test dev-identity
+pnpm --filter @irp/web test dev-jwks-route
+```
+
+Expected: PASS, 7 tests in `dev-identity.test.ts` (the six original plus the
+non-extractable guarantee) and 3 tests in `dev-jwks-route.test.ts` (404 when
+off; a valid public-only JWKS when on outside production; a throw on import
+when the flag is set in production).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apps/web/lib/dev-identities.ts apps/web/lib/dev-identity.ts "apps/web/app/api/dev-jwks" apps/web/test/dev-identity.test.ts apps/web/test/dev-jwks-route.test.ts apps/web/test/mocks/server-only.ts apps/web/vitest.config.ts
+git commit -m "feat(web): dev identity provider minting real RS256 tokens
+
+Swaps the token issuer rather than skipping authentication. A real JWT is
+signed with a local key and the public key is published at /api/dev-jwks,
+so apps/api validates it through createRemoteJWKSet — the exact production
+mechanism. Dev therefore exercises remote JWKS retrieval every day, not
+only in the dormant CI job.
+
+Three identities. dev-unknown-1 has no User row on purpose, so the 403
+rule becomes clickable rather than test-only. None carries a role: role
+lives in the User row and arrives via GET /api/v1/me.
+
+Data (DEV_IDENTITIES, DEV_ISSUER) lives in lib/dev-identities.ts, which
+imports neither jose nor next-auth, so Task 8's Client Component picker can
+use it without pulling the keypair or a top-level await into the browser
+bundle. lib/dev-identity.ts holds the keypair and token minting, guarded by
+`import "server-only"` as its first line.
+
+The keypair is generated without { extractable: true }, so WebCrypto itself
+refuses to export the private key as a JWK under any circumstance — a
+platform-enforced guarantee, not just an omitted field. A test asserts the
+JWKS publishes no private RSA material, and a second test asserts the
+private key cannot be exported at all."
+```
+
+---
+
+## Task 7: The server-only API client factory and the token-leak test
+
+**Files:**
+- Create: `apps/web/lib/api-client.ts`, `apps/web/test/api-client.test.ts`, `apps/web/test/token-leak.test.ts`
+
+**Interfaces:**
+- Consumes: `@irp/client/client` (Task 1), `auth.ts` (Task 5).
+- Produces:
+  ```ts
+  export const SESSION_COOKIE_NAMES: readonly [string, string];
+  export async function readAccessToken(cookieValue: string | undefined, salt: string): Promise<string>;
+  export async function resolveSessionToken(jar: { get(name: string): { value: string } | undefined }): Promise<string>;
+  export async function apiClient(): Promise<Client>;
+  export async function getCurrentUserOrRedirect(): Promise<{ id: string; email: string; displayName: string; role: "Admin" | "Student" }>;
+  ```
+
+**Two things this file exists to make structural.**
+
+First, **the token is read from the encrypted cookie, never from the session.** In Auth.js v5 the `session` callback's return value is what the browser's `GET /api/auth/session` returns, so `session.accessToken` would hand the browser a bearer token. We decrypt the JWE directly with `decode` from `next-auth/jwt`.
+
+> **Why `decode` and not `getToken`:** `getToken` needs a request-like object whose shape is coupled to Auth.js internals and has churned across betas. `decode` takes `{ token, secret, salt }` — three values we control. The cookie name **is** the salt in Auth.js v5.
+
+> **Correction, post-implementation review (fix pass 1):** the first draft of this task derived the `__Secure-` prefix from `NODE_ENV === "production"`. That is the wrong signal — Auth.js derives it from the URL **protocol** (`@auth/core/lib/init.js`: `defaultCookies(config.useSecureCookies ?? url.protocol === "https:")`), never from `NODE_ENV`. Fix pass 1 replaced the `NODE_ENV` check with a standalone `deriveSessionCookieName(authUrl)` reading `AUTH_URL`'s protocol.
+>
+> **Correction, post-implementation review (fix pass 2): env-derived cookie names were themselves the wrong approach, not just the first attempt at one.** `deriveSessionCookieName` had two more gaps, found by a second review pass directly against `@auth/core@0.41.3/lib/utils/env.js:66-86`: (1) it never read `NEXTAUTH_URL` — Auth.js resolves `AUTH_URL ?? NEXTAUTH_URL`, so a deployed config carrying only the v4 name derives the bare name locally while Auth.js resolves https and writes `__Secure-`; (2) Auth.js's own fallback when neither env var is set is `x-forwarded-proto ?? protocol ?? "https"` — its floor is **https**, so the "fails safe to the bare name when unset" test encoded the opposite of what Auth.js actually does, and Azure Container Apps terminates TLS at ingress and sets `x-forwarded-proto: https` regardless. Any local re-derivation is a guess that can disagree with what Auth.js actually wrote, and every such disagreement means every signed-in user gets a 500.
+>
+> Fix pass 2 removes the derivation entirely. `lib/api-client.ts` now holds both names Auth.js may write in `SESSION_COOKIE_NAMES`, checks the cookie jar for whichever is actually present (prefixed first, since it can only exist over https), and threads that same name through as the decryption salt — `readAccessToken(cookieValue, salt)` takes the salt as a parameter instead of reading a module constant, because salt and cookie name must always agree. `deriveSessionCookieName` and `SESSION_COOKIE_NAME` are gone; nothing derives a name from an env var anymore.
+
+Second, **a fresh client per request.** `packages/client/src/client.gen.ts` creates a module-level singleton at import time; attaching a per-user token to it would leak tokens across concurrent requests in a Next.js server process.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/api-client.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { encode } from "next-auth/jwt";
+import { SESSION_COOKIE_NAMES, readAccessToken, resolveSessionToken } from "@/lib/api-client";
+
+const SECRET = "test-secret-at-least-32-bytes-long-xx";
+const [PREFIXED_NAME, BARE_NAME] = SESSION_COOKIE_NAMES;
+
+async function makeCookie(payload: Record<string, unknown>, salt: string): Promise<string> {
+  return encode({ token: payload, secret: SECRET, salt });
+}
+
+// A fake jar backed by a plain map — no need to mock next/headers's
+// `cookies()` to exercise the lookup.
+function jarWith(entries: Record<string, string>): { get(name: string): { value: string } | undefined } {
+  return {
+    get(name: string) {
+      const value = entries[name];
+      return value === undefined ? undefined : { value };
+    },
+  };
+}
+
+describe("readAccessToken", () => {
+  it("recovers the access token from an encrypted session cookie", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, BARE_NAME)).resolves.toBe("the-bearer-token");
+  });
+
+  it("throws when there is no cookie at all", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    await expect(readAccessToken(undefined, BARE_NAME)).rejects.toThrow(/no session/i);
+  });
+
+  it("throws when the cookie decrypts but carries no access token", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, BARE_NAME)).rejects.toThrow(/no access token/i);
+  });
+
+  it("throws rather than proceeding unauthenticated when the cookie is corrupt", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    await expect(readAccessToken("not-a-jwe", BARE_NAME)).rejects.toThrow();
+  });
+
+  it("fails when the cookie was encrypted under a different name than it is read with", async () => {
+    // Proves salt and cookie name genuinely have to agree: the HKDF salt is
+    // the cookie name, so decrypting under the wrong name must not succeed.
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "the-bearer-token", sub: "u1" }, BARE_NAME);
+    await expect(readAccessToken(cookie, PREFIXED_NAME)).rejects.toThrow();
+  });
+});
+
+describe("resolveSessionToken", () => {
+  it("uses the prefixed cookie when only it is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "prefixed-token" }, PREFIXED_NAME);
+    const jar = jarWith({ [PREFIXED_NAME]: cookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("prefixed-token");
+  });
+
+  it("uses the bare cookie when only it is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const cookie = await makeCookie({ accessToken: "bare-token" }, BARE_NAME);
+    const jar = jarWith({ [BARE_NAME]: cookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("bare-token");
+  });
+
+  it("prefers the prefixed cookie when both are present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const prefixedCookie = await makeCookie({ accessToken: "prefixed-token" }, PREFIXED_NAME);
+    const bareCookie = await makeCookie({ accessToken: "bare-token" }, BARE_NAME);
+    const jar = jarWith({ [PREFIXED_NAME]: prefixedCookie, [BARE_NAME]: bareCookie });
+    await expect(resolveSessionToken(jar)).resolves.toBe("prefixed-token");
+  });
+
+  it("throws when neither cookie is present", async () => {
+    process.env.AUTH_SECRET = SECRET;
+    const jar = jarWith({});
+    await expect(resolveSessionToken(jar)).rejects.toThrow(/no session/i);
+  });
+});
+```
+
+- [ ] **Step 2: Write the token-leak invariant test**
+
+Create `apps/web/test/token-leak.test.ts`. This is what turns "the token never reaches the browser" from an intention into an assertion.
+
+```ts
+import { describe, expect, it } from "vitest";
+import { authConfig, jwtCallback, sessionCallback } from "@/auth.config";
+
+// A token that carries BOTH secrets the session must never surface. If the
+// session callback ever copies from the token, these tests go red.
+const LOADED_TOKEN = {
+  sub: "dev-admin-1",
+  name: "Dev Mentor",
+  email: "mentor@dev.local",
+  accessToken: "eyJhbGciOiJSUzI1NiJ9.super-secret-bearer-token.sig",
+  role: "ADMIN",
+};
+
+const BARE_SESSION = {
+  user: { name: "Dev Mentor", email: "mentor@dev.local" },
+  expires: "2026-08-01T00:00:00.000Z",
+};
+
+function invokeSession(token: Record<string, unknown>): unknown {
+  // The callback's real signature carries more fields than we supply; the cast
+  // narrows to what this invariant depends on.
+  return (sessionCallback as (args: unknown) => unknown)({
+    session: structuredClone(BARE_SESSION),
+    token,
+    user: undefined,
+    newSession: undefined,
+    trigger: "update",
+  });
+}
+
+describe("the browser-visible session", () => {
+  it("does not surface the access token even when the token carries one", () => {
+    const serialised = JSON.stringify(invokeSession(LOADED_TOKEN));
+    expect(serialised).not.toMatch(/accessToken/i);
+    expect(serialised).not.toMatch(/\beyJ[A-Za-z0-9_-]{8,}/); // a JWT
+    expect(serialised).not.toContain("super-secret-bearer-token");
+  });
+
+  it("does not surface a role — the User row is the only source of truth", () => {
+    const serialised = JSON.stringify(invokeSession(LOADED_TOKEN));
+    expect(serialised).not.toMatch(/role/i);
+    expect(serialised).not.toContain("ADMIN");
+  });
+
+  it("still returns the user identity the app needs to render", () => {
+    const result = invokeSession(LOADED_TOKEN) as typeof BARE_SESSION;
+    expect(result.user.name).toBe("Dev Mentor");
+    expect(result.user.email).toBe("mentor@dev.local");
+  });
+});
+
+describe("the jwt callback", () => {
+  it("stores a provider access token on the encrypted token", () => {
+    const result = (jwtCallback as (args: unknown) => Record<string, unknown>)({
+      token: { sub: "u1" },
+      account: { access_token: "from-entra" },
+      user: undefined,
+    });
+    expect(result.accessToken).toBe("from-entra");
+  });
+
+  it("stores the dev provider's minted token, which arrives on user not account", () => {
+    const result = (jwtCallback as (args: unknown) => Record<string, unknown>)({
+      token: { sub: "u1" },
+      account: null,
+      user: { devAccessToken: "from-dev-provider" },
+    });
+    expect(result.accessToken).toBe("from-dev-provider");
+  });
+});
+
+describe("authConfig", () => {
+  it("keeps the sign-in page pointed at our own route, not a provider URL", () => {
+    expect(authConfig.pages?.signIn).toBe("/signin");
+  });
+});
+```
+
+> **Why this shape:** an earlier draft of this plan asserted against a
+> hand-written literal — `JSON.stringify({user:{...}})` checked for a key the
+> literal never had — which could not fail regardless of what the callback did.
+> These tests invoke the **real** callback with a token that carries both
+> secrets, so copying token→session turns them red. Caught in the pre-flight
+> plan review, 2026-07-29.
+
+- [ ] **Step 3: Run both to make sure they fail**
+
+```powershell
+pnpm --filter @irp/web test api-client token-leak
+```
+
+Expected: `api-client` FAILS (cannot resolve `@/lib/api-client`). `token-leak` may pass already — that is fine and expected; it is a regression net against a future edit to the `session` callback, not a red-then-green test.
+
+- [ ] **Step 4: Create `apps/web/lib/api-client.ts`**
+
+```ts
+import "server-only";
+
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { decode } from "next-auth/jwt";
+import { createClient, createConfig, type Client } from "@irp/client/client";
+import { getCurrentUser } from "@irp/client";
+
+/**
+ * Both names Auth.js may write. The __Secure- prefix is only ever set over
+ * https, so if the prefixed cookie exists it is authoritative — check it first.
+ *
+ * We deliberately do NOT derive the name from an env var. Auth.js resolves
+ * AUTH_URL ?? NEXTAUTH_URL and falls back to `x-forwarded-proto` and then to
+ * "https" (@auth/core/lib/utils/env.js). Any local re-derivation is a guess
+ * that can disagree with what Auth.js actually wrote, and a disagreement means
+ * every signed-in user gets a 500. Reading the jar removes the guess.
+ */
+export const SESSION_COOKIE_NAMES = [
+  "__Secure-authjs.session-token",
+  "authjs.session-token",
+] as const;
+
+export type SessionCookieName = (typeof SESSION_COOKIE_NAMES)[number];
+
+const NO_SESSION_COOKIE_MESSAGE = "No session cookie — the caller is not signed in.";
+
+interface CookieJar {
+  get(name: string): { value: string } | undefined;
+}
+
+/**
+ * Finds whichever of Auth.js's two possible session cookies is actually
+ * present, checking the __Secure- prefixed name first. Auth.js writes exactly
+ * one of the two per request depending on the resolved protocol, so this is
+ * the lookup, not a guess about which one it picked.
+ */
+function findSessionCookie(
+  jar: CookieJar,
+): { name: SessionCookieName; value: string } | undefined {
+  for (const name of SESSION_COOKIE_NAMES) {
+    const cookie = jar.get(name);
+    if (cookie !== undefined) return { name, value: cookie.value };
+  }
+  return undefined;
+}
+
+/**
+ * Reads the access token out of the ENCRYPTED, HTTP-ONLY session cookie.
+ *
+ * Deliberately NOT from the Auth.js session object: that object is what the
+ * browser's GET /api/auth/session returns, so putting a bearer token in it
+ * would defeat the whole design. See spec §4.1.
+ *
+ * Throws rather than returning undefined. A caller that silently proceeded
+ * without a token would call the API unauthenticated and get a confusing 401.
+ *
+ * The cookie name IS the HKDF salt in Auth.js v5, so `salt` must be the name
+ * the value was actually read from — never a separately-derived constant.
+ */
+export async function readAccessToken(
+  cookieValue: string | undefined,
+  salt: string,
+): Promise<string> {
+  if (cookieValue === undefined || cookieValue === "") {
+    throw new Error(NO_SESSION_COOKIE_MESSAGE);
+  }
+
+  const secret = process.env.AUTH_SECRET;
+  if (secret === undefined || secret === "") {
+    throw new Error("AUTH_SECRET is not set — the session cookie cannot be decrypted.");
+  }
+
+  const payload = await decode({
+    token: cookieValue,
+    secret,
+    salt,
+  });
+
+  const accessToken = payload?.accessToken;
+  if (typeof accessToken !== "string" || accessToken === "") {
+    throw new Error("The session carries no access token.");
+  }
+  return accessToken;
+}
+
+/**
+ * Resolves the caller's access token by checking the cookie jar for whichever
+ * of Auth.js's two possible session-cookie names is actually present, then
+ * decrypting with that same name as the salt. Exported so the prefixed/bare
+ * lookup and the salt-agreement invariant are directly testable against a
+ * fake jar, without mocking next/headers's `cookies()`.
+ */
+export async function resolveSessionToken(jar: CookieJar): Promise<string> {
+  const found = findSessionCookie(jar);
+  if (found === undefined) {
+    throw new Error(NO_SESSION_COOKIE_MESSAGE);
+  }
+  return readAccessToken(found.value, found.name);
+}
+
+/**
+ * A FRESH client per request. The generated @irp/client exports a module-level
+ * singleton; attaching a per-user token to it would leak tokens across
+ * concurrent requests in a Next.js server process. Building a new one makes
+ * that impossible by construction rather than by care.
+ */
+export async function apiClient(): Promise<Client> {
+  const jar = await cookies();
+  const token = await resolveSessionToken(jar);
+
+  const baseUrl = process.env.API_BASE_URL;
+  if (baseUrl === undefined || baseUrl === "") {
+    throw new Error("API_BASE_URL is not set.");
+  }
+
+  return createClient(
+    createConfig({ baseUrl, headers: { Authorization: `Bearer ${token}` } }),
+  );
+}
+
+export interface WebUser {
+  id: string;
+  email: string;
+  displayName: string;
+  role: "Admin" | "Student";
+}
+
+/**
+ * Four distinct states, not two. Routing a 403 to /signin loops forever: the
+ * session is valid, so middleware sends the user straight back. See spec §8.
+ */
+export async function getCurrentUserOrRedirect(): Promise<WebUser> {
+  const client = await apiClient();
+  const { data, error, response } = await getCurrentUser({ client });
+
+  if (data !== undefined) return data;
+
+  if (response.status === 403) redirect("/not-registered");
+  if (response.status === 401) redirect("/signin?reason=expired");
+
+  throw new Error(
+    `GET /api/v1/me failed with ${String(response.status)}: ${JSON.stringify(error)}`,
+  );
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```powershell
+pnpm --filter @irp/web test api-client token-leak
+```
+
+Expected: PASS, 15 tests (9 in `api-client.test.ts`, 6 in `token-leak.test.ts`).
+
+- [ ] **Step 6: Verify the whole workspace typechecks**
+
+Task 4's `(app)/layout.tsx` imports `getCurrentUserOrRedirect`, which now exists.
+
+```powershell
+pnpm typecheck
+pnpm lint
+```
+
+Expected: both exit 0.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web/lib/api-client.ts apps/web/test/api-client.test.ts apps/web/test/token-leak.test.ts
+git commit -m "feat(web): server-only API client factory, token read from the JWE
+
+Reads the access token by decrypting the HTTP-only session cookie, never
+from the Auth.js session object — that object is what the browser's
+/api/auth/session returns, so a token there would hand the browser a
+bearer credential.
+
+Uses decode({token,secret,salt}) rather than getToken, whose request-like
+argument is coupled to Auth.js internals and has churned across betas.
+The cookie name is the salt in v5.
+
+Builds a FRESH client per request. The generated @irp/client is a
+module-level singleton, so a per-user token on it would leak across
+concurrent requests.
+
+403 redirects to /not-registered, never /signin — the session is valid, so
+/signin would bounce straight back and loop forever."
+```
+
+---
+
+## Task 8: The sign-in page and the not-registered page
+
+**Files:**
+- Create: `apps/web/app/(auth)/signin/page.tsx`, `apps/web/app/(auth)/signin/dev-identity-picker.tsx`, `apps/web/app/(auth)/not-registered/page.tsx`, `apps/web/test/signin.test.tsx`
+
+**Interfaces:**
+- Consumes: `CycleRibbon` (Task 3), `DEV_IDENTITIES` (Task 6), `signIn` (Task 5).
+- Produces: routes `/signin` and `/not-registered`.
+
+The split treatment: ribbon left on `--surface`, sign-in action right. Chosen from three mockups.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/signin.test.tsx`:
+
+```tsx
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { DevIdentityPicker } from "@/app/(auth)/signin/dev-identity-picker";
+
+vi.mock("next-auth/react", () => ({
+  signIn: vi.fn(),
+}));
+
+describe("DevIdentityPicker", () => {
+  it("offers every dev identity as its own button", () => {
+    render(<DevIdentityPicker />);
+    expect(screen.getByRole("button", { name: /Mentor \(Admin\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Student$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Unregistered user/ })).toBeInTheDocument();
+  });
+
+  it("says plainly that the unregistered identity is expected to 403", () => {
+    render(<DevIdentityPicker />);
+    expect(screen.getByRole("button", { name: /expect 403/ })).toBeInTheDocument();
+  });
+
+  it("warns that this is a development bypass", () => {
+    render(<DevIdentityPicker />);
+    expect(screen.getByText(/development/i)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test signin
+```
+
+Expected: FAIL — cannot resolve the picker module.
+
+- [ ] **Step 3: Create the picker (a Client Component)**
+
+Create `apps/web/app/(auth)/signin/dev-identity-picker.tsx`:
+
+```tsx
+"use client";
+
+import { signIn } from "next-auth/react";
+import { DEV_IDENTITIES } from "@/lib/dev-identities";
+
+export function DevIdentityPicker() {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs" style={{ color: "var(--st-late)" }}>
+        Development sign-in. Tokens are minted with a local key; Microsoft Entra is not contacted.
+      </p>
+
+      {DEV_IDENTITIES.map((identity) => (
+        <button
+          key={identity.id}
+          type="button"
+          onClick={() => void signIn("dev-identity", { identityId: identity.id, redirectTo: "/" })}
+          className="rounded-[var(--radius-control)] border px-4 py-2 text-left"
+          style={{ borderColor: "var(--line-strong)", color: "var(--ink)" }}
+        >
+          {identity.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+> **Note:** importing `DEV_IDENTITIES` from `lib/dev-identities.ts` into a Client Component ships the identity *list* to the browser — labels and oids, which are not secrets. The **private key never leaves the server**, because `keyPair` and `mintDevToken` live in `lib/dev-identity.ts` and are only ever called from `authorize()` on the server.
+>
+> Do not confirm this with `grep -r "privateKey" apps/web/.next/static`. That proves nothing: the identifier `privateKey` minifies away in a production build, and the key was never a string literal to begin with — a clean grep result would be true whether or not the guarantee held. The real guarantee is structural, not textual, and checkable two ways:
+>
+> 1. `lib/dev-identity.ts` carries `import "server-only"` as its first line, so `next build` fails outright if any Client Component — this picker included — imports it.
+> 2. `lib/dev-identities.ts`, the module this picker *does* import, contains no key material at all: no `jose` import, no `generateKeyPair`, no `next-auth` import — only the `DevIdentity` interface, the `DEV_IDENTITIES` array, and `DEV_ISSUER`.
+>
+> Task 12's Step 6 verification below checks both directly.
+
+- [ ] **Step 4: Create the sign-in page**
+
+Create `apps/web/app/(auth)/signin/page.tsx`:
+
+```tsx
+import { signIn } from "@/auth";
+import { CycleRibbon, type RibbonDay } from "@/components/cycle-ribbon/cycle-ribbon";
+import { DevIdentityPicker } from "./dev-identity-picker";
+
+// Illustrative only. The ribbon is the real component (Plan 7 extends it with
+// real data); these marks exist so the register idea lands before sign-in.
+const ILLUSTRATION: RibbonDay[] = [
+  { date: "2026-07-10", mark: "ok" },
+  { date: "2026-07-13", mark: "ok" },
+  { date: "2026-07-14", mark: "late" },
+  { date: "2026-07-15", mark: "ok" },
+  { date: "2026-07-16", mark: "absent" },
+  { date: "2026-07-17", mark: "ok" },
+  { date: "2026-07-20", mark: "partial", fill: 0.55 },
+  { date: "2026-07-21", mark: "missed" },
+  { date: "2026-07-22", mark: "ok" },
+  { date: "2026-07-23", mark: "partial", fill: 0.4, isToday: true },
+  { date: "2026-07-24", mark: "future" },
+];
+
+const bypassEnabled = process.env.AUTH_DEV_BYPASS === "true";
+
+export default function SignInPage() {
+  return (
+    <div className="flex" style={{ minHeight: "100dvh" }}>
+      <section
+        className="flex flex-1 flex-col justify-center border-r px-16"
+        style={{ background: "var(--surface)", borderColor: "var(--line)" }}
+      >
+        <CycleRibbon
+          days={ILLUSTRATION}
+          extraAfter={["2026-07-10"]}
+          label="Cycle 2 · 10 Jul – 9 Aug"
+        />
+        <p className="mt-8 max-w-[42ch] text-base" style={{ color: "var(--ink-muted)" }}>
+          A mark per working day. A page per month.
+        </p>
+      </section>
+
+      <section className="flex flex-1 flex-col justify-center px-16">
+        <span aria-hidden="true" className="mb-6 text-xl" style={{ color: "var(--primary)" }}>
+          &#9670;
+        </span>
+        <h1 className="mb-2 text-2xl font-bold" style={{ color: "var(--ink)" }}>
+          Hearts Academy
+        </h1>
+        <p className="mb-8 text-sm" style={{ color: "var(--ink-muted)" }}>
+          Industry Readiness Programme
+        </p>
+
+        {bypassEnabled ? (
+          <DevIdentityPicker />
+        ) : (
+          <form
+            action={async () => {
+              "use server";
+              await signIn("microsoft-entra-id", { redirectTo: "/" });
+            }}
+          >
+            <button
+              type="submit"
+              className="rounded-[var(--radius-control)] px-4 py-2 font-semibold"
+              style={{ background: "var(--primary)", color: "#ffffff" }}
+            >
+              Sign in with Microsoft
+            </button>
+          </form>
+        )}
+
+        <p className="tabular mt-8 text-xs" style={{ color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>
+          Asia/Colombo &middot; UTC+05:30
+        </p>
+      </section>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 5: Create the not-registered page**
+
+Create `apps/web/app/(auth)/not-registered/page.tsx`. **Terminal state — it must never link to `/signin`,** or a valid session bounces straight back and loops.
+
+```tsx
+import { signOut } from "@/auth";
+
+export default function NotRegisteredPage() {
+  return (
+    <div className="flex items-center justify-center" style={{ minHeight: "100dvh" }}>
+      <div className="max-w-[52ch] px-8">
+        <h1 className="mb-3 text-2xl font-bold" style={{ color: "var(--ink)" }}>
+          Your account is not registered
+        </h1>
+        <p className="mb-6 text-base" style={{ color: "var(--ink-muted)" }}>
+          You signed in successfully, but no one has registered you on the programme yet.
+          There is no self-registration — ask a mentor to add you, then sign in again.
+        </p>
+
+        {/* Deliberately sign-out, NOT a link to /signin. The session is valid,
+            so /signin would redirect back here and loop forever. */}
+        <form
+          action={async () => {
+            "use server";
+            await signOut({ redirectTo: "/signin" });
+          }}
+        >
+          <button
+            type="submit"
+            className="rounded-[var(--radius-control)] border px-4 py-2"
+            style={{ borderColor: "var(--line-strong)", color: "var(--ink)" }}
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```powershell
+pnpm --filter @irp/web test signin
+```
+
+Expected: PASS, 3 tests.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add "apps/web/app/(auth)" apps/web/test/signin.test.tsx
+git commit -m "feat(web): split sign-in page and the terminal not-registered state
+
+Ribbon left on --surface, sign-in action right. Uses the real CycleRibbon
+with illustrative marks.
+
+/not-registered offers sign-out, never a link to /signin: the session is
+valid there, so /signin would bounce straight back and loop forever. That
+is the 403 trap the spec designs around rather than discovers."
+```
+
+---
+
+## Task 9: The middleware guard and the authenticated page
+
+**Files:**
+- Create: `apps/web/middleware.ts`, `apps/web/app/(app)/page.tsx`, `apps/web/test/middleware.test.ts`
+
+**Interfaces:**
+- Consumes: `authConfig` (Task 5), `getCurrentUserOrRedirect` (Task 7).
+- Produces: route `/`, and a matcher excluding `api` wholesale, `signin`, `not-registered`, `_next`, static files.
+
+**`not-registered` MUST be in the exclusion list.** If middleware guards it, a 403 user is redirected there, middleware sees a valid session, allows it — fine. But if it were *not* excluded and the session later expired, the user would bounce to `/signin` from a page meant to be terminal. Excluding it keeps the state genuinely terminal.
+
+> **Post-implementation correction (Fix pass 1, plan defect, Critical).** The
+> matcher below originally excluded only `api/auth`, not `api` wholesale. That
+> left `/api/dev-jwks` guarded: a `GET` to it was redirected 307 to `/signin`
+> instead of returning the JWKS. `apps/api` is configured with
+> `JWKS_URI=http://localhost:3000/api/dev-jwks` and validates tokens via
+> `jose`'s `createRemoteJWKSet`, which fetches with `redirect: 'manual'` and
+> throws on any non-200 response (`jose/dist/webapi/jwks/remote.js`) — so
+> every dev-minted token failed validation and dev sign-in was broken end to
+> end. This regression had no prior instance to break, since no middleware
+> existed before this task. The fix excludes `api` wholesale instead of
+> growing the exclusion list one route at a time: redirecting *any* API
+> route to an HTML sign-in page is wrong on principle (a machine caller can't
+> consume HTML), and `apps/api` is the actual security boundary for `/api/*`
+> regardless. The code block and test block below are corrected to match
+> what was actually committed.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/web/test/middleware.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { config } from "@/middleware";
+
+function matches(pathname: string): boolean {
+  return config.matcher.some((pattern) => new RegExp(pattern).test(pathname));
+}
+
+describe("middleware matcher", () => {
+  it("guards application routes", () => {
+    for (const path of ["/", "/roster", "/review", "/cycles/2"]) {
+      expect(matches(path)).toBe(true);
+    }
+  });
+
+  it("does not guard the Auth.js routes, or sign-in would be unreachable", () => {
+    expect(matches("/api/auth/signin")).toBe(false);
+    expect(matches("/api/auth/callback/dev-identity")).toBe(false);
+  });
+
+  it("does not guard /signin", () => {
+    expect(matches("/signin")).toBe(false);
+  });
+
+  it("does not guard /not-registered, which must stay terminal", () => {
+    // Guarding it means an expired session bounces the user to /signin from a
+    // page whose whole purpose is to be an endpoint, not a waypoint.
+    expect(matches("/not-registered")).toBe(false);
+  });
+
+  it("does not guard Next internals or static assets", () => {
+    for (const path of ["/_next/static/chunk.js", "/favicon.ico"]) {
+      expect(matches(path)).toBe(false);
+    }
+  });
+
+  it("does not guard any /api route, including dev-jwks — jose's createRemoteJWKSet fetches with redirect: 'manual' and throws on any non-200 response, so a redirected JWKS endpoint breaks dev sign-in end to end", () => {
+    expect(matches("/api/dev-jwks")).toBe(false);
+    expect(matches("/api/auth/signin")).toBe(false);
+    expect(matches("/api/anything-else")).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+```powershell
+pnpm --filter @irp/web test middleware
+```
+
+Expected: FAIL — cannot resolve `@/middleware`.
+
+- [ ] **Step 3: Create `apps/web/middleware.ts`**
+
+```ts
+import NextAuth from "next-auth";
+import { authConfig } from "./auth.config";
+
+/**
+ * A UX redirect, NOT the security boundary.
+ *
+ * Next.js middleware has had bypass CVEs, and layouts are cached across
+ * navigations, so neither is a control. The boundary is apps/api: a global
+ * fail-closed onRequest hook, jose validation against the JWKS, and 403 for a
+ * valid token with no User row.
+ *
+ * Uses authConfig (edge-safe) rather than auth.ts, which pulls in Node-only
+ * modules the Edge runtime cannot load.
+ */
+export const { auth: middleware } = NextAuth(authConfig);
+
+export const config = {
+  // `api` is excluded wholesale, not just `api/auth`. Redirecting *any* API
+  // route to an HTML sign-in page is wrong on principle: a machine caller
+  // (fetch/curl/jose's JWKS client) cannot consume a sign-in page, and
+  // apps/api is the actual security boundary for /api/* anyway — it runs its
+  // own fail-closed auth check. Excluding only `api/auth` (as originally
+  // written here) left `/api/dev-jwks` guarded: middleware redirected it to
+  // /signin (307), createRemoteJWKSet's fetch (redirect: 'manual') threw on
+  // the non-200 response, and every dev-minted token failed validation —
+  // dev sign-in was broken end to end. See "Post-implementation correction"
+  // above.
+  matcher: ["/((?!api|signin|not-registered|_next/static|_next/image|favicon.ico).*)"],
+};
+```
+
+- [ ] **Step 4: Create `apps/web/app/(app)/page.tsx`**
+
+This is the payoff — the real user, from the real API, through the generated client.
+
+```tsx
+import { getCurrentUserOrRedirect } from "@/lib/api-client";
+
+export default async function TodayPage() {
+  const user = await getCurrentUserOrRedirect();
+
+  return (
+    <div>
+      <h1 className="mb-6 text-2xl font-bold" style={{ color: "var(--ink)" }}>
+        Today
+      </h1>
+
+      <dl
+        className="max-w-[48ch] rounded-[var(--radius-panel)] border p-6"
+        style={{ background: "var(--surface)", borderColor: "var(--line)" }}
+      >
+        <dt className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
+          Signed in as
+        </dt>
+        <dd className="mb-4 text-base" style={{ color: "var(--ink)" }} data-testid="user-name">
+          {user.displayName}
+        </dd>
+
+        <dt className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
+          Email
+        </dt>
+        <dd className="mb-4 text-base" style={{ color: "var(--ink)" }}>{user.email}</dd>
+
+        <dt className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
+          Role
+        </dt>
+        {/* From GET /api/v1/me — the User row, the only source of truth. Never
+            from the session cookie. */}
+        <dd className="text-base" style={{ color: "var(--ink)" }} data-testid="user-role">
+          {user.role}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```powershell
+pnpm --filter @irp/web test middleware
+pnpm typecheck
+pnpm lint
+```
+
+Expected: 6 middleware-matcher tests PASS (5 original + the `/api` wholesale-exclusion test added in the Fix pass 1 correction above); typecheck and lint exit 0.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/web/middleware.ts "apps/web/app/(app)/page.tsx" apps/web/test/middleware.test.ts
+git commit -m "feat(web): middleware redirect guard and the authenticated page
+
+The matcher excludes /not-registered, which must stay terminal — guarding
+it would bounce an expired session to /signin from a page whose purpose is
+to be an endpoint, not a waypoint.
+
+The guard is UX only. Comments say so, because middleware has had bypass
+CVEs and the boundary is apps/api.
+
+Role is rendered from GET /api/v1/me, never the session cookie."
+```
+
+---
+
+## Task 10: The global fail-closed hook in `apps/api`
+
+**Files:**
+- Create: `apps/api/src/plugins/require-auth.ts`, `apps/api/test/fail-closed.test.ts`
+- Modify: `apps/api/src/server.ts:35-45`
+
+**Interfaces:**
+- Consumes: `authPlugin`'s `app.authenticate` decorator.
+- Produces: `requireAuthPlugin`, a `fastify-plugin` with `dependencies: ["auth"]`.
+
+**Why:** the spec's document-level `security` default is fail-closed, but the implementation is opt-in per route. Plan 2B closed the gap with a route-discovery *test*; this closes it *structurally*. `/health` stays public — it is a container liveness probe and takes no credentials.
+
+- [ ] **Step 1: Write the failing test**
+
+> **Corrected after the fact — read this before trusting the block below.**
+> The original version of this step signed a token for `dev-admin-1` in the
+> "authenticates ONCE per request" test but never created that row, unlike
+> every other database test in the suite. It relied on manually-seeded local
+> dev data. That made the suite **non-idempotent** — green only on a first run
+> immediately after a manual seed, 403 on any later run — and **red in CI**,
+> where no seed step exists at all (the seed step belongs to a later, unbuilt
+> e2e job; `ci.yml` runs `prisma migrate deploy` then `pnpm -r test` with
+> nothing in between). It also lacked the `describe.skipIf(!dbUrl)` guard that
+> `integration.test.ts` and `user-repo.test.ts` both use, so a DB-less
+> developer run died with a Prisma 500 instead of skipping. The corrected block
+> below creates its own fixture via `resetDb` + `prisma.user.create` — the same
+> pattern `integration.test.ts` uses — and adds the guard. It also asserts on a
+> bare `/api` and `/api?x=1`, covering the query-string-stripping fix in Step 3.
+
+Create `apps/api/test/fail-closed.test.ts`:
+
+```ts
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { buildTestServer } from "./helpers/build-test-server.js";
+import { resetDb } from "./helpers/db.js";
+import { dbUrl } from "./helpers/require-db.js";
+import { signToken } from "./helpers/keys.js";
+
+describe.skipIf(!dbUrl)("the global fail-closed hook", () => {
+  let app: FastifyInstance;
+  let prisma: Awaited<ReturnType<typeof buildTestServer>>["prisma"];
+
+  beforeAll(async () => {
+    ({ app, prisma } = await buildTestServer(dbUrl!));
+    // The "authenticates ONCE per request" test below signs a token for
+    // dev-admin-1 and needs that row to actually exist. Create the fixture
+    // here, the same way integration.test.ts does — do NOT rely on manually
+    // seeded dev data; that made this suite non-idempotent and red in CI.
+    await resetDb(prisma);
+    await prisma.user.create({
+      data: { externalId: "dev-admin-1", email: "mentor@dev.local", displayName: "Dev Mentor", role: "ADMIN" },
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await prisma.$disconnect();
+  });
+
+  it("rejects an unauthenticated request to a registered /api/ route", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/v1/me" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects an unauthenticated request to an UNREGISTERED /api/ path", async () => {
+    // The point of a global hook: a route nobody remembered to protect, and a
+    // path that does not exist at all, must both fail closed rather than 404
+    // with information about what is there.
+    const res = await app.inject({ method: "GET", url: "/api/v1/anything-at-all" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a bare /api with no trailing slash", async () => {
+    // startsWith("/api/") alone misses this exactly — no route is registered
+    // here today, so the gap was invisible as a 404, but a future route at
+    // exactly /api would otherwise be public.
+    const res = await app.inject({ method: "GET", url: "/api" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects /api with a query string and no path segment", async () => {
+    const res = await app.inject({ method: "GET", url: "/api?x=1" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("leaves /health public — it is a liveness probe taking no credentials", async () => {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("returns RFC 7807 Problem Details carrying a traceId", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/v1/me" });
+    const body = res.json<{ type: string; title: string; traceId?: string }>();
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    expect(body.type).toContain("unauthorized");
+    expect(body.traceId).toBeTypeOf("string");
+  });
+
+  it("authenticates ONCE per request, not once per layer", async () => {
+    // /api/v1/me sits behind BOTH the global hook and its own preHandler. Both
+    // call app.authenticate. Without idempotency that is two JWT verifications
+    // and two findByExternalId round-trips per request — a measurable cost
+    // against NFR-1 (p95 < 250 ms at 50 RPS) and NFR-2's burst target.
+    const spy = vi.spyOn(prisma.user, "findFirst");
+    spy.mockClear();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${await signToken({ oid: "dev-admin-1" })}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+});
+```
+
+> **Note on `findFirst`:** `createUserRepo`'s `findByExternalId` uses a soft-delete
+> filter, so confirm which Prisma method it actually calls by reading
+> `apps/api/src/db/user-repo.ts`, and spy on that one. If it is `findUnique`,
+> spy on `prisma.user.findUnique` instead. The assertion is "exactly one
+> database round-trip", not the method name.
+
+- [ ] **Step 2: Run it and CONFIRM IT FAILS**
+
+```powershell
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+pnpm --filter @irp/api test fail-closed
+```
+
+Expected: FAIL on "rejects an unauthenticated request to an UNREGISTERED /api/ path" — currently a 404, because protection is per-route.
+
+**Record the observed status code in your task report.** This is the gate proof.
+
+- [ ] **Step 3: Create `apps/api/src/plugins/require-auth.ts`**
+
+```ts
+import fp from "fastify-plugin";
+
+/**
+ * Fail-closed by default for everything under /api/.
+ *
+ * The OpenAPI document declares a document-level `security` requirement, which
+ * is fail-closed. The implementation was opt-in per route, so a handler added
+ * without `preHandler: [app.authenticate]` would be public — and would lint and
+ * test clean. Plan 2B caught that with a route-discovery test; this closes it
+ * structurally.
+ *
+ * onRequest, not preHandler, so it runs before routing and therefore also
+ * covers /api/ paths with no registered route. Those return 401 rather than
+ * 404, which is the correct posture: an unauthenticated caller learns nothing
+ * about what exists.
+ *
+ * /health is deliberately outside /api/ — a container liveness probe that takes
+ * no credentials.
+ *
+ * Matched against the path with the query string stripped, and the bare
+ * `/api` path (no trailing slash) is covered deliberately: `startsWith("/api/")`
+ * alone misses both `/api` and `/api?x=1`. No route is registered at exactly
+ * `/api` today, so that gap is invisible — a 404 rather than a 401 — but a
+ * future route landing there would otherwise be public, exactly the class of
+ * bug this hook exists to close.
+ */
+export const requireAuthPlugin = fp(
+  (app) => {
+    app.addHook("onRequest", async (req, reply) => {
+      const path = req.url.split("?")[0] ?? "";
+      if (path !== "/api" && !path.startsWith("/api/")) return;
+      await app.authenticate(req, reply);
+    });
+  },
+  { name: "require-auth", dependencies: ["auth"] },
+);
+```
+
+> **Corrected after the fact:** the original version of this plugin checked
+> only `req.url.startsWith("/api/")`, which misses a bare `/api` and
+> `/api?x=1` (the query string sits before routing, so the leading path never
+> starts with `/api/` in either case). No route was registered at exactly
+> `/api`, so the gap surfaced as an unremarkable 404 rather than a 401 — but a
+> future route landing there would have been silently public, which is
+> precisely the class of bug this hook exists to close. Fixed by stripping the
+> query string and comparing the bare path.
+
+- [ ] **Step 4: Register it in `apps/api/src/server.ts`**
+
+Add the import beside the other plugin imports:
+
+```ts
+import { requireAuthPlugin } from "./plugins/require-auth.js";
+```
+
+Then register it **after** `authPlugin` and **before** the routes:
+
+```ts
+  await app.register(authPlugin, {
+    getKey: deps.getKey,
+    issuer: deps.config.jwtIssuer,
+    audience: deps.config.jwtAudience,
+    userRepo: deps.userRepo,
+  });
+  // Fail-closed for /api/* before routing. Order is enforced by fastify-plugin's
+  // dependency graph, not by convention — a wrong order throws at boot.
+  await app.register(requireAuthPlugin);
+  await app.register(healthRoutes);
+  await app.register(meRoutes);
+```
+
+- [ ] **Step 4a: Make `authenticate` idempotent per request**
+
+`/api/v1/me` sits behind both the global hook and its own `preHandler`, and both call `app.authenticate`. Without this, every protected request pays two JWT verifications and two database round-trips.
+
+Keeping both layers is deliberate: the global hook is the structural guarantee, and Plan 2B's route-discovery test asserts the `preHandler` is present. Idempotency is how we keep both without paying twice.
+
+In `apps/api/src/plugins/auth.ts`, add this as the **first** statement inside the `app.decorate("authenticate", ...)` callback, before the `authorization` header is read:
+
+```ts
+      // Both the global fail-closed hook (plugins/require-auth.ts) and a
+      // route's own preHandler call this. Verifying twice would mean two JWT
+      // verifications and two findByExternalId round-trips per request, which
+      // bears directly on NFR-1 (p95 < 250 ms at 50 RPS) and NFR-2's burst
+      // target. req.user is per-request state, so an already-populated value
+      // means this request has already authenticated successfully.
+      //
+      // A FAILED authentication throws, so it never reaches this line — there
+      // is no path where a rejected request is later treated as authenticated.
+      if (req.user !== null) return;
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```powershell
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+pnpm --filter @irp/api test
+```
+
+Expected: PASS. 7 new tests (5 originally planned plus the bare-`/api` and
+`/api?x=1` cases added in the correction above); the existing 48 still green,
+55 total in `apps/api`.
+
+If "authenticates ONCE per request" still fails, check that `app.decorateRequest("user", null)` gives each request its own `null` rather than a shared reference, and that the early return is before the header read.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/api/src/plugins/require-auth.ts apps/api/src/server.ts apps/api/test/fail-closed.test.ts
+git commit -m "feat(api): global fail-closed onRequest hook for /api/*
+
+The OpenAPI document's security requirement is fail-closed; the
+implementation was opt-in per route, so a handler added without a
+preHandler would be public and would still lint and test clean.
+
+Uses onRequest rather than preHandler so it runs before routing and also
+covers /api/ paths with no registered route — 401 rather than 404, so an
+unauthenticated caller learns nothing about what exists.
+
+Demonstrated red: GET /api/v1/anything-at-all returned 404 before this."
+```
+
+---
+
+## Task 11: Distinguish JWKS retrieval failure from token invalidity
+
+**Files:**
+- Modify: `apps/api/src/plugins/auth.ts:34-53`
+- Create: `apps/api/test/auth-jwks-failure.test.ts`
+- Modify (added in fix pass 1): `spec/openapi.yaml` (`/api/v1/me` gains a
+  `503` response referencing a new `ServiceUnavailable` component),
+  regenerating `packages/types` and `packages/client`.
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: `apps/api/src/errors.ts` gains `ServiceUnavailableError`.
+
+**Why:** `catch` around `jwtVerify` is unconditional and swallows errors thrown by the **key-getter** too. Inert with a local key set. Once Task 6's dev JWKS or a real Entra endpoint is in play, a JWKS outage tells every user *"your token is invalid"* (401) while the true fault is ours (5xx) — actively misleading during an incident. Plan 2B logged this as a Plan 3 obligation precisely because this is the plan that makes it real.
+
+**FIX PASS 1 NOTE:** the guard as originally written here (Step 4) was itself
+too broad — it set `keyRetrievalFailed = true` on *any* throw from the
+key-getter, including `jose.errors.JWKSNoMatchingKey` /
+`JWKSMultipleMatchingKeys`, which jose raises only after the key set has
+already been (re)fetched successfully. That meant a forged token bearing an
+unrecognised `kid` was reported as our 503 outage rather than the caller's
+401 — a security-relevant defect, proved against a live, healthy JWKS server.
+See the corrected Step 4 code below and the added test in Step 1's file. The
+new 503 status this task introduces also had to be documented in
+`spec/openapi.yaml` before it could ship, per CLAUDE.md's spec-first rule —
+the original plan pass didn't anticipate that a bugfix to an internal `catch`
+would surface a new externally-visible status code.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/api/test/auth-jwks-failure.test.ts`. **CORRECTED IN FIX PASS 1:**
+the version below needs no database — every path this suite exercises throws
+before `userRepo.findByExternalId` is ever consulted, so a `fakeUserRepo([])`
+stub is honest and sufficient. An earlier draft built a real Prisma client and
+wrapped the suite in `describe.skipIf(!dbUrl)`, which needlessly skipped this
+pure-auth coverage on every DB-less run. It also adds a second `describe`
+block absent from the first draft, proving the discriminating guard in Step 4
+the other way: a **healthy, reachable** key set that simply doesn't recognise
+the token's `kid` (a forged or rotated-out signing key) must 401, not 503.
+
+```ts
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { SignJWT, generateKeyPair } from "jose";
+import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { createTracerProvider } from "../src/telemetry.js";
+import { buildServer } from "../src/server.js";
+import { signToken, getLocalKeySet, testIssuer, testAudience } from "./helpers/keys.js";
+import { fakeUserRepo } from "./helpers/fake-user-repo.js";
+
+// This suite exercises only the auth plugin's key-getter branching — it never
+// reaches `userRepo.findByExternalId` on any of the 503/401 paths below, so it
+// needs no database. The stub repo is structurally required by `buildServer`
+// but is never consulted.
+const userRepo = fakeUserRepo([]);
+
+describe("when the JWKS endpoint is unreachable", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildServer({
+      config: {
+        port: 3001, databaseUrl: "unused", jwksUri: "unused",
+        jwtIssuer: testIssuer, jwtAudience: testAudience,
+        version: "0.0.0", nodeEnv: "test",
+      },
+      userRepo,
+      // Stands in for createRemoteJWKSet against a dead endpoint.
+      getKey: () => {
+        throw new Error("ECONNREFUSED: the JWKS endpoint is unreachable");
+      },
+      tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it("returns 503, not 401 — the token is fine, our key source is down", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${await signToken()}` },
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it("does not tell the user their token is invalid", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${await signToken()}` },
+    });
+    const body = res.json<{ title: string; detail: string }>();
+    expect(body.detail).not.toMatch(/invalid|expired/i);
+    expect(body.title).toMatch(/unavailable/i);
+  });
+
+  it("still returns 401 for a genuinely malformed token", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: "Bearer not-a-jwt" },
+    });
+    // Malformed input fails before the key-getter is ever consulted.
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("when a token's kid matches no published key", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildServer({
+      config: {
+        port: 3001, databaseUrl: "unused", jwksUri: "unused",
+        jwtIssuer: testIssuer, jwtAudience: testAudience,
+        version: "0.0.0", nodeEnv: "test",
+      },
+      userRepo,
+      // A REAL key-getter over a healthy, reachable key set — this is not a
+      // simulated outage. It simply does not contain the kid the forged
+      // token below claims, which is exactly what a live server sees when
+      // presented a token signed with an unpublished or rotated-out key.
+      getKey: await getLocalKeySet(),
+      tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it("returns 401, not 503 — the key source is healthy, the token is forged", async () => {
+    // A self-signed key pair standing in for an attacker's: it signs a
+    // structurally valid, correctly-issued token, but its public half was
+    // never published to the server's key set, so the server cannot find a
+    // key for `kid: "rotated-key-99"`.
+    const forgedKeys = await generateKeyPair("RS256", { extractable: true });
+
+    const token = await new SignJWT({ oid: "oid-1" })
+      .setProtectedHeader({ alg: "RS256", kid: "rotated-key-99" })
+      .setIssuedAt()
+      .setIssuer(testIssuer)
+      .setAudience(testAudience)
+      .setExpirationTime("5m")
+      .sign(forgedKeys.privateKey);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(401);
+    const body = res.json<{ title: string; detail: string }>();
+    expect(body.detail).not.toMatch(/retry/i);
+  });
+});
+```
+
+- [ ] **Step 2: Run it and CONFIRM IT FAILS**
+
+```powershell
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+pnpm --filter @irp/api test auth-jwks-failure
+```
+
+Expected: FAIL — 401 received where 503 expected, on the first two tests. **Record the observed behaviour.**
+
+(Fix pass 1's fourth test, above, was verified the other direction: with the
+Step 4 guard's `if` condition removed, this test fails with 503 instead of
+401 — proving the guard is load-bearing, not decorative. Restore the guard
+before committing.)
+
+- [ ] **Step 3: Add `ServiceUnavailableError` to `apps/api/src/errors.ts`**
+
+Append:
+
+```ts
+export class ServiceUnavailableError extends HttpError {
+  constructor(detail = "A dependency required to serve this request is unavailable.") {
+    super(
+      503,
+      `${PROBLEM_BASE}/service-unavailable`,
+      "Service temporarily unavailable",
+      detail,
+    );
+  }
+}
+```
+
+- [ ] **Step 4: Rewrite the `catch` in `apps/api/src/plugins/auth.ts`**
+
+Replace the `let oid: unknown;` block through the end of its `catch` with:
+
+```ts
+      let oid: unknown;
+      // The key-getter is a separate failure domain from the token. A JWKS
+      // endpoint outage is OUR fault (5xx); an unverifiable token is the
+      // caller's (401). One catch around both reports an outage as "your token
+      // is invalid", which is actively misleading during an incident.
+      let keyRetrievalFailed = false;
+      const trackingGetKey: JWTVerifyGetKey = async (protectedHeader, input) => {
+        try {
+          return await opts.getKey(protectedHeader, input);
+        } catch (cause) {
+          // A kid that matches no published key is the TOKEN's problem, not
+          // ours: jose raises this from the key-getter only AFTER attempting a
+          // refetch, so the endpoint is demonstrably reachable. Treating it as
+          // an outage would report a forged token as 503 "please retry",
+          // masking an attack and emitting 5xx for a caller error (NFR-2).
+          //
+          // CORRECTED IN FIX PASS 1: the original version of this plan set
+          // keyRetrievalFailed = true unconditionally, so a token with an
+          // unknown `kid` — e.g. a forged/self-signed token, or one signed
+          // with a rotated-out key — was reported as a 503 outage rather
+          // than a 401. A reviewer proved this against a live, healthy JWKS
+          // server. jose's own error classes for "reachable but no match"
+          // live at `jose.errors.JWKSNoMatchingKey` /
+          // `jose.errors.JWKSMultipleMatchingKeys` (an `errors` namespace
+          // export, not top-level names — the first attempt at this fix
+          // imported them as top-level named exports, which are `undefined`
+          // in jose 6.x, so `instanceof undefined` threw and silently
+          // defeated the guard).
+          if (
+            !(
+              cause instanceof joseErrors.JWKSNoMatchingKey ||
+              cause instanceof joseErrors.JWKSMultipleMatchingKeys
+            )
+          ) {
+            keyRetrievalFailed = true;
+          }
+          throw cause;
+        }
+      };
+
+      try {
+        const { payload } = await jwtVerify(token, trackingGetKey, {
+          issuer: opts.issuer,
+          audience: opts.audience,
+          // Entra signs with RS256. Stating it means the accepted set is a
+          // decision in the code rather than whatever jose defaults to.
+          algorithms: ["RS256"],
+          // Zero tolerance is the default, so ordinary skew between Entra's
+          // clock and the container's produces spurious 401s on freshly
+          // issued tokens.
+          clockTolerance: "60s",
+        });
+        oid = payload.oid;
+      } catch (cause) {
+        if (keyRetrievalFailed) {
+          req.log.error({ err: cause }, "JWKS key retrieval failed");
+          throw new ServiceUnavailableError(
+            "Could not retrieve the signing keys needed to verify your session. Please retry.",
+          );
+        }
+        // Malformed, bad signature, wrong issuer/audience, or expired.
+        throw new UnauthorizedError("The bearer token is invalid or has expired.");
+      }
+```
+
+Update the imports at the top of the file:
+
+```ts
+import { jwtVerify, errors as joseErrors, type JWTVerifyGetKey } from "jose";
+import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from "../errors.js";
+```
+
+The `authenticate` decorator's signature must now accept the request for logging — it already receives `req`.
+
+**CORRECTED IN FIX PASS 1 — the discriminating guard needed a spec change too.**
+Once the guard above distinguishes "key retrieval failed" from "key not found
+for this kid," an authenticated route can return **503** in addition to the
+existing 200/400/401/403/500 — and `spec/openapi.yaml` is the hand-written
+source of truth that changes *before* handlers, per CLAUDE.md. The original
+version of this task never touched the spec, so `/api/v1/me` under-documented
+its own contract and `packages/client` could not discriminate the new status.
+Added a `ServiceUnavailable` response component (referencing `Problem`, with
+description + `application/problem+json` example, matching the neighbouring
+responses) and referenced it as `/api/v1/me`'s `503`. This does not disturb
+the required 200/400/401/500 set the custom Redocly assertion enforces. After
+editing the spec: `pnpm generate` then `pnpm --filter @irp/client build`.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```powershell
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+pnpm --filter @irp/api test
+```
+
+Expected: PASS. 4 tests in this file (the original 3 for a JWKS outage, plus
+a fix-pass-1 addition proving a forged token with an unknown `kid` against a
+**healthy** key set gets 401, not 503); 59 total in `apps/api` as of fix pass 1.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/api/src/plugins/auth.ts apps/api/src/errors.ts apps/api/test/auth-jwks-failure.test.ts
+git commit -m "fix(api): distinguish JWKS retrieval failure from token invalidity
+
+The catch around jwtVerify was unconditional and swallowed key-getter
+errors too. Inert with a local key set — but this is the plan that makes
+createRemoteJWKSet real, and a JWKS outage would have told every user
+'your token is invalid' (401) while the true fault was ours (5xx).
+
+A wrapper around the key-getter records whether retrieval itself failed,
+so the catch can tell the two domains apart: 503 for our outage, 401 for
+an unverifiable token. A malformed token still 401s, because it fails
+before the key-getter is consulted.
+
+Demonstrated red: 401 was returned where 503 was expected.
+Closes a Plan 2B carried-forward item."
+```
+
+---
+
+## Task 12: The Playwright end-to-end smoke test
+
+**Files:**
+- Create: `apps/web/playwright.config.ts`, `apps/web/e2e/signin.spec.ts`, `apps/web/e2e/README.md`
+- Modify: `.gitignore`
+
+**Interfaces:**
+- Consumes: everything above.
+- Produces: `pnpm --filter @irp/web e2e`.
+
+**This is the only test that proves the slice's thesis.** Everything else asserts a part.
+
+**Prerequisite — the dev `User` rows must exist.** The `INSERT`s are in Step 3 and go into the runbook in Task 14.
+
+- [ ] **Step 1: Add Playwright artefacts to `.gitignore`**
+
+Append:
+
+```gitignore
+# Playwright
+test-results/
+playwright-report/
+.playwright/
+```
+
+- [ ] **Step 2: Create `apps/web/playwright.config.ts`**
+
+```ts
+import { defineConfig, devices } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./e2e",
+  // No retries. A flaky end-to-end test that passes on retry teaches nothing,
+  // and this repo has been bitten twice by gates that looked green.
+  retries: 0,
+  fullyParallel: false,
+  reporter: process.env.CI ? "github" : "list",
+  use: {
+    baseURL: "http://localhost:3000",
+    // Desktop only, min 1280px (NFR-13).
+    viewport: { width: 1440, height: 900 },
+    trace: "retain-on-failure",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  webServer: [
+    {
+      command: "pnpm --filter @irp/api dev",
+      url: "http://localhost:3001/health",
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      command: "pnpm --filter @irp/web dev",
+      url: "http://localhost:3000/signin",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
+});
+```
+
+- [ ] **Step 3: Create `apps/web/e2e/README.md`**
+
+```markdown
+# End-to-end smoke test
+
+Proves the chain this slice exists to prove: browser → Auth.js → encrypted
+cookie → decrypt → `@irp/client` → `apps/api` → Postgres → rendered user.
+
+## Prerequisites
+
+1. Postgres running and migrated:
+
+   ```powershell
+   $env:IRP_DB_PORT = "5433"
+   docker compose -f apps/api/docker-compose.yml up -d
+   $env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+   pnpm --filter @irp/api exec prisma migrate deploy
+   ```
+
+2. The two registered dev users. `dev-unknown-1` is deliberately absent —
+   the test asserts it produces a 403.
+
+   ```sql
+   INSERT INTO "User" ("id", "externalId", "email", "displayName", "role", "createdAt", "updatedAt")
+   VALUES
+     (gen_random_uuid(), 'dev-admin-1',   'mentor@dev.local',  'Dev Mentor',  'ADMIN',   now(), now()),
+     (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now())
+   ON CONFLICT ("externalId") DO NOTHING;
+   ```
+
+3. `apps/api/.env` and `apps/web/.env.local` from their `.env.example` files,
+   with `AUTH_DEV_BYPASS=true` and the API pointed at the dev JWKS:
+
+   ```bash
+   # apps/api/.env
+   JWKS_URI=http://localhost:3000/api/dev-jwks
+   JWT_ISSUER=http://localhost:3000/api/dev-jwks
+   JWT_AUDIENCE=api://irp-progress-management
+   ```
+
+## Run
+
+```powershell
+pnpm --filter @irp/web exec playwright install chromium
+pnpm --filter @irp/web e2e
+```
+```
+
+- [ ] **Step 4: Write the failing test**
+
+Create `apps/web/e2e/signin.spec.ts`:
+
+```ts
+import { expect, test } from "@playwright/test";
+
+test.describe("the sign-in chain", () => {
+  test("a registered mentor signs in and sees their own name from the API", async ({ page }) => {
+    await page.goto("/signin");
+
+    // The split treatment: the ribbon is present before sign-in.
+    await expect(page.getByText("A mark per working day.")).toBeVisible();
+
+    await page.getByRole("button", { name: /Mentor \(Admin\)/ }).click();
+
+    // Every layer ran: cookie minted, decrypted server-side, bearer token
+    // attached by @irp/client, JWT verified against the dev JWKS, User row
+    // found in Postgres, name rendered.
+    await expect(page.getByTestId("user-name")).toHaveText("Dev Mentor");
+    await expect(page.getByTestId("user-role")).toHaveText("Admin");
+  });
+
+  test("a registered student sees the Student role from the User row", async ({ page }) => {
+    await page.goto("/signin");
+    await page.getByRole("button", { name: /^Student$/ }).click();
+    await expect(page.getByTestId("user-name")).toHaveText("Dev Student");
+    await expect(page.getByTestId("user-role")).toHaveText("Student");
+  });
+
+  test("an unregistered user reaches the terminal 403 page, not a redirect loop", async ({ page }) => {
+    await page.goto("/signin");
+    await page.getByRole("button", { name: /Unregistered user/ }).click();
+
+    await expect(page).toHaveURL(/\/not-registered$/);
+    await expect(page.getByRole("heading", { name: /not registered/i })).toBeVisible();
+
+    // The trap: this page must offer sign-out, never a link back to /signin,
+    // or a valid session bounces straight back and loops forever.
+    await expect(page.getByRole("button", { name: /Sign out/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /sign in/i })).toHaveCount(0);
+  });
+
+  test("an unauthenticated visitor is redirected to sign-in", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/signin/);
+  });
+
+  test("the browser is never given a bearer token", async ({ page }) => {
+    await page.goto("/signin");
+    await page.getByRole("button", { name: /Mentor \(Admin\)/ }).click();
+    await expect(page.getByTestId("user-name")).toBeVisible();
+
+    // The decisive assertion for spec §4.1. If this body carried the token,
+    // any script on the page could call the API directly.
+    const body = await page.evaluate(async () => {
+      const res = await fetch("/api/auth/session");
+      return res.text();
+    });
+
+    expect(body).not.toMatch(/accessToken/i);
+    expect(body).not.toMatch(/\beyJ[A-Za-z0-9_-]{8,}/);
+  });
+});
+```
+
+- [ ] **Step 5: Install the browser and run**
+
+```powershell
+pnpm --filter @irp/web exec playwright install chromium
+$env:IRP_DB_PORT = "5433"
+docker compose -f apps/api/docker-compose.yml up -d
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+pnpm --filter @irp/api exec prisma migrate deploy
+```
+
+Insert the dev users with the SQL from Step 3 via `docker compose exec`:
+
+```powershell
+docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+```
+
+Then:
+
+```powershell
+pnpm --filter @irp/web e2e
+```
+
+Expected: 5 tests PASS.
+
+> **If the JWKS fetch fails,** `apps/api` will now correctly return **503** rather than 401 — Task 11's behaviour. Check `JWKS_URI` in `apps/api/.env` points at `http://localhost:3000/api/dev-jwks` and that `apps/web` is up. The clear error is the fix working.
+
+- [ ] **Step 6: Verify the private key never reached the browser**
+
+> **CORRECTED 2026-07-29 (fix pass 1).** The original check built the app and grepped the
+> output for the string `"privateKey"`. That proves nothing: a minifier renames identifiers
+> in a production build, and the key material was never a string literal to begin with — a
+> clean grep result would be true whether or not the guarantee actually held. The real
+> guarantee is structural: `lib/dev-identity.ts` (the keypair, `mintDevToken`, the provider)
+> carries `import "server-only"` as its first line, so `next build` fails outright if any
+> Client Component imports it; and `lib/dev-identities.ts` (the module the picker *does*
+> import) contains no key material at all to leak — check the source, not the bundle.
+
+```powershell
+Select-String -Path apps/web/lib/dev-identity.ts -Pattern 'server-only' -List
+Select-String -Path apps/web/lib/dev-identities.ts -Pattern 'jose|next-auth|generateKeyPair' -List
+pnpm --filter @irp/web build
+```
+
+Expected: the first `Select-String` matches (confirming the guard is present); the second returns nothing (confirming the data module carries no key-capable imports); the build succeeds, which — given the `server-only` guard — is itself proof no Client Component reaches into `lib/dev-identity.ts`. If the second `Select-String` matches anything, stop and fix before committing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web/playwright.config.ts apps/web/e2e .gitignore
+git commit -m "test(web): Playwright smoke test for the whole sign-in chain
+
+The only test that proves what this slice exists to prove: browser →
+Auth.js → encrypted cookie → server-side decrypt → @irp/client →
+apps/api → Postgres → rendered user.
+
+Asserts all three dev identities, the redirect for anonymous visitors,
+that /not-registered offers sign-out and no link back to /signin, and —
+decisively for spec §4.1 — that GET /api/auth/session hands the browser
+nothing token-shaped.
+
+retries: 0. A flaky e2e test that passes on retry teaches nothing."
+```
+
+---
+
+## Task 13: CI wiring
+
+**Files:**
+- Modify: `.github/workflows/ci.yml`
+
+**Interfaces:**
+- Consumes: everything above.
+- Produces: a `real-token` job gated on `vars.ENTRA_REAL_TOKEN_TESTS`.
+
+The `verify` job's timezone matrix and Postgres service stay exactly as they are.
+
+> **CORRECTED 2026-07-29 (Task 13 execution).** Three defects found while wiring this, now folded into the steps below:
+>
+> 1. **The plan never added a `next build` step.** Plain `tsc` (the existing `Typecheck` step) does not run Next's own checks — it missed both a `typedRoutes` error and a middleware export error that broke the production build for four tasks in this plan. Only `pnpm --filter @irp/web build` catches those, so it is now its own gate, placed after `Typecheck`/`Lint`. It must run with `AUTH_DEV_BYPASS` **unset** — with the flag set, `next build` sets `NODE_ENV=production` and `auth.config.ts`'s `assertBypassNotInProduction` correctly refuses to build. The job-level env added in Step 1 below deliberately omits it for exactly this reason.
+> 2. **Step 2's suggested `JWKS_URI` for the e2e step (`http://localhost:3000/api/dev-jwks`) does not match what `apps/web/playwright.config.ts` actually sets** for the `api` webServer (`http://127.0.0.1:3000/api/dev-jwks` — deliberately `127.0.0.1` because it is fetched over the network, per that file's own comment; `localhost` is reserved for `JWT_ISSUER`, which is only ever string-compared). The code block below now matches `playwright.config.ts`'s real values.
+> 3. **The four env vars this step sets (`AUTH_DEV_BYPASS`, `JWKS_URI`, `JWT_ISSUER`, `JWT_AUDIENCE`) have no effect on either spawned webServer today.** Playwright merges each webServer's environment as `{ ...process.env, ...webServer.env }` (`playwright/lib/runner/index.js`), and `playwright.config.ts` sets all four of these unconditionally in its own `webServer.env` blocks — so the config-level value always wins over whatever this CI step exports. They are kept anyway, corrected per point 2, as documentation of the same contract `playwright.config.ts` already enforces, and so they take effect immediately if that file is ever changed to read from `process.env` with a fallback the way its `DATABASE_URL` and `AUTH_SECRET` already do.
+>
+> **CORRECTED 2026-07-29 (whole-branch review, Important finding 2).** The "Upload the Playwright report on failure" step below uploaded `apps/web/playwright-report/`, but `apps/web/playwright.config.ts` set `reporter: "github"` under CI, and the `github` reporter writes **no files at all** — only inline PR annotations. `playwright-report/` is produced solely by the `html` reporter, and `trace: "retain-on-failure"` writes to `test-results/`, which was never uploaded either. `upload-artifact@v4` defaults to `if-no-files-found: warn`, so the step went green on an empty artifact and an e2e failure in CI shipped zero diagnostics — a gate that did nothing, by this repo's own standard. Fixed two ways: `apps/web/playwright.config.ts`'s CI reporter is now `[["github"], ["html", { open: "never" }]]` (kept `github` for inline annotations, added `html` so files actually exist to upload; `open: "never"` so it never tries to launch a browser on a runner), and the upload step below now uploads **both** `apps/web/playwright-report/` and `apps/web/test-results/`, so traces come too. `if-no-files-found` was deliberately left at its default (`warn`), not hardened to `error`: this step's `if` also fires when some *other* step failed on the UTC leg before Playwright ever ran, in which case both directories legitimately don't exist, and `error` would turn an unrelated failure into a second, misleading one. Proven locally: with `CI=1` set and one assertion in `apps/web/e2e/signin.spec.ts` temporarily broken, both directories filled with real files (an `index.html` report, a `trace.zip`, an `error-context.md`) after the run.
+
+- [ ] **Step 1: Add web env and Playwright to the `verify` job**
+
+In `.github/workflows/ci.yml`, extend the `verify` job's `env:` block:
+
+```yaml
+      # apps/web. AUTH_DEV_BYPASS is deliberately absent — the unit suite must
+      # not depend on it, and Task 5's guard test sets NODE_ENV itself.
+      AUTH_SECRET: ci-only-secret-at-least-32-bytes-xx
+      AUTH_URL: http://localhost:3000
+      API_BASE_URL: http://localhost:3001
+```
+
+- [ ] **Step 2: Add `next build`, then a Playwright step, after the existing `Test` step**
+
+```yaml
+      # Plain tsc (Typecheck, above) does not run Next's own checks — it
+      # missed both a typedRoutes error and a middleware export error that
+      # broke the production build for four tasks. Only `next build` catches
+      # those, so it runs as its own gate rather than being folded into
+      # Typecheck. AUTH_DEV_BYPASS is unset at job level for this step on
+      # purpose: with it set, `next build` sets NODE_ENV=production and
+      # auth.config.ts's assertBypassNotInProduction correctly refuses to
+      # build — see apps/web/auth.config.ts.
+      - name: Build @irp/web
+        run: pnpm --filter @irp/web build
+
+      # (existing "Apply database migrations" and "Test" steps stay where they are)
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @irp/web exec playwright install --with-deps chromium
+
+      - name: Seed the dev users the e2e test expects
+        run: |
+          psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+
+      - name: End-to-end smoke test
+        env:
+          AUTH_DEV_BYPASS: "true"
+          JWKS_URI: http://127.0.0.1:3000/api/dev-jwks
+          JWT_ISSUER: http://localhost:3000/api/dev-jwks
+          JWT_AUDIENCE: api://irp-progress-management
+        run: pnpm --filter @irp/web e2e
+
+      # playwright.config.ts's CI reporter is [["github"], ["html", { open:
+      # "never" }]], not bare "github" — the github reporter alone writes NO
+      # files (only inline PR annotations), so this step used to upload an
+      # empty playwright-report/ and go green on an e2e failure with zero
+      # diagnostics attached. test-results/ is uploaded too: that is where
+      # `trace: "retain-on-failure"` writes, and traces are the actually
+      # useful artifact for debugging a CI-only failure.
+      #
+      # Deliberately NOT setting if-no-files-found: error. This step's `if`
+      # also fires when some OTHER step on the UTC leg failed before
+      # Playwright ever ran — in that case both directories legitimately
+      # don't exist, and hardening this into a hard failure would turn an
+      # unrelated failure into a second, misleading one. Leave the default
+      # (`warn`) so that scenario stays a warning, not a red X.
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.timezone }}
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+```
+
+> These env values are inert today (see the correction note above) — `playwright.config.ts` overrides all four unconditionally for its own webServers. They are kept, corrected to match `playwright.config.ts`'s real values, as documentation and as a forward guard. The job-level `JWKS_URI: https://jwks.invalid/keys` remains deliberately unresolvable for every other step; the unit suite must never depend on reaching the network.
+
+- [ ] **Step 3: Add the dormant real-token job**
+
+Append as a sibling of `verify`:
+
+```yaml
+  # The Entra path, proven against a real token. Dormant until the tenant
+  # exists: set the repository VARIABLE ENTRA_REAL_TOKEN_TESTS to 'true'.
+  #
+  # Gated on a VARIABLE, not on secret presence, because variables are readable
+  # when secrets are not. That is what lets this job tell "expected but absent"
+  # (hard fail) from "not configured yet" (do not run) — the same reasoning as
+  # apps/api/test/helpers/require-db.ts, with the flag explicit instead of
+  # inferred. A conditionally-skipped job is the false-green shape this repo has
+  # been bitten by twice.
+  real-token:
+    if: vars.ENTRA_REAL_TOKEN_TESTS == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: irp
+          POSTGRES_PASSWORD: irp
+          POSTGRES_DB: irp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U irp -d irp"
+          --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      DATABASE_URL: postgresql://irp:irp@localhost:5432/irp?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hard-fail if the secrets are expected but absent
+        env:
+          ENTRA_TENANT_ID: ${{ secrets.ENTRA_TENANT_ID }}
+          ENTRA_K6_CLIENT_ID: ${{ secrets.ENTRA_K6_CLIENT_ID }}
+          ENTRA_K6_CLIENT_SECRET: ${{ secrets.ENTRA_K6_CLIENT_SECRET }}
+          ENTRA_API_AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+        run: |
+          missing=0
+          for name in ENTRA_TENANT_ID ENTRA_K6_CLIENT_ID ENTRA_K6_CLIENT_SECRET ENTRA_API_AUDIENCE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is missing, but ENTRA_REAL_TOKEN_TESTS=true says these tests are expected."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate
+        run: |
+          pnpm generate
+          pnpm --filter @irp/api exec prisma generate
+          pnpm --filter @irp/core build
+
+      - name: Apply database migrations
+        run: pnpm --filter @irp/api exec prisma migrate deploy
+
+      - name: Acquire a real Entra token via the k6 service principal
+        id: token
+        env:
+          TENANT: ${{ secrets.ENTRA_TENANT_ID }}
+          CLIENT_ID: ${{ secrets.ENTRA_K6_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.ENTRA_K6_CLIENT_SECRET }}
+          AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+        run: |
+          # Client credentials, so no browser is involved. This service
+          # principal is required by Deliverable 4 anyway (NFR-3), so this is
+          # D4's prerequisite built early rather than extra scaffolding.
+          resp=$(curl -sS -X POST \
+            "https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token" \
+            -d "client_id=${CLIENT_ID}" \
+            -d "client_secret=${CLIENT_SECRET}" \
+            -d "scope=${AUDIENCE}/.default" \
+            -d "grant_type=client_credentials")
+          token=$(echo "$resp" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            echo "::error::Token acquisition failed: $(echo "$resp" | jq -c '.error_description // .')"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Register the service principal as a User, then call /api/v1/me
+        env:
+          ACCESS_TOKEN: ${{ steps.token.outputs.token }}
+          TENANT: ${{ secrets.ENTRA_TENANT_ID }}
+          AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+          JWKS_URI: https://login.microsoftonline.com/${{ secrets.ENTRA_TENANT_ID }}/discovery/v2.0/keys
+          JWT_ISSUER: https://login.microsoftonline.com/${{ secrets.ENTRA_TENANT_ID }}/v2.0
+          JWT_AUDIENCE: ${{ secrets.ENTRA_API_AUDIENCE }}
+        run: |
+          # The oid of a client-credentials token is the service principal's
+          # object id. A User row must exist for it, or the API correctly 403s.
+          oid=$(echo "$ACCESS_TOKEN" | cut -d. -f2 \
+            | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r '.oid')
+          psql "$DATABASE_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), '${oid}', 'k6@ci.local', 'k6 Load Principal', 'ADMIN', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+
+          pnpm --filter @irp/api dev &
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:3001/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+          status=$(curl -sS -o /tmp/me.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            http://localhost:3001/api/v1/me)
+
+          echo "GET /api/v1/me → $status"
+          cat /tmp/me.json
+          if [ "$status" != "200" ]; then
+            echo "::error::A real Entra token did not authenticate against the API."
+            exit 1
+          fi
+```
+
+- [ ] **Step 4: Validate the workflow parses**
+
+```powershell
+pnpm dlx yaml-lint .github/workflows/ci.yml
+```
+
+Expected: no errors. If `yaml-lint` is unavailable, push the branch and confirm GitHub does not report a workflow syntax error.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "ci: web unit tests, Playwright e2e, and a dormant real-token job
+
+The real-token job is gated on the repository VARIABLE
+ENTRA_REAL_TOKEN_TESTS rather than on secret presence. Variables are
+readable when secrets are not, which is what lets the job distinguish
+'expected but absent' (hard fail) from 'not configured yet' (do not run).
+A conditionally-skipped job is the false-green shape this repo has been
+bitten by twice.
+
+The practical effect: Plan 3 merges with the job written and the variable
+unset, so the Entra blocker gates only the final wiring, never the plan.
+
+The e2e step overrides JWKS_URI for itself only. The job-level value stays
+deliberately unresolvable so the unit suite cannot depend on the network."
+```
+
+---
+
+## Task 14: ADRs, version pins, and documentation reconciliation
+
+**Files:**
+- Create: `docs/adr/0010-authjs-v5-over-msal.md`, `docs/adr/0011-bicep-graph-extension-over-bootstrap-script.md`, `docs/adr/0012-dev-auth-bypass-by-issuer-swap.md`
+- Modify: `CLAUDE.md`, `docs/manual-setup-steps.md`, `handoff.md`, `docs/superpowers/specs/2026-07-28-slice-1-integration-skeleton-design.md`
+
+- [ ] **Step 1: Write ADR-0010 — Auth.js v5 over MSAL**
+
+Create `docs/adr/0010-authjs-v5-over-msal.md`. Follow the house format exactly (see `docs/adr/0008`): Status, Date, Deciders, Requirements, Relates to, then Context / Decision / Consequences (Positive, Negative) / Alternatives considered / Revisit when.
+
+Content it must carry:
+
+- **Context:** `apps/web` is Next.js 16 App Router. FR-1 requires Azure AD SSO with no local passwords (NFR-14). Slice-1 spec §6 named Auth.js v5 as expected and reserved the final call to the Impl Lead.
+- **Decision:** `next-auth@5.0.0-beta.32` with the Microsoft Entra provider.
+- **Record explicitly that this is a beta.** `next-auth@latest` is `4.24.15`. `CLAUDE.md`'s rule is "newest version the surrounding ecosystem actually supports" — for App Router, that is v5, because v4 predates it and has no Server Component or middleware integration. Shipping a `beta` is a deliberate exception to the pin discipline and this is where it is recorded. Mitigation: the version is pinned exactly, not carets, so a beta bump is a reviewed change.
+- **Rejected — MSAL Node:** no Next.js integration. Session storage, callback routes, cookie encryption and middleware would all be hand-built, in a plan whose first decision was to be thin. Every one of those is a place to get auth subtly wrong.
+- **Rejected — a hand-rolled OIDC client:** `jose` is already a dependency and the flow is well documented, so it is *possible*. Rejected because PKCE, state and nonce handling, token refresh, and cookie encryption are exactly the code where a subtle error is both easy to make and hard to detect, and none of it is differentiating work.
+- **Revisit when:** Auth.js v5 reaches a stable release (bump the pin); or Bistec training-tenant access is granted (FR-1 becomes fully satisfied by an issuer swap).
+
+- [ ] **Step 2: Write ADR-0011 — Bicep Graph extension over a bootstrap script**
+
+Create `docs/adr/0011-bicep-graph-extension-over-bootstrap-script.md`.
+
+Content it must carry:
+
+- **Context:** Entra app registrations are **Microsoft Graph objects, not ARM resources**. `CLAUDE.md` bans hand-run `az` for anything that should be Bicep, and bans checked-in deploy scripts.
+- **Decision:** the Microsoft Graph Bicep extension, `Microsoft.Graph/applications@v1.0`. Verified sufficient: it supports `api.oauth2PermissionScopes`, `appRoles` with `allowedMemberTypes`, `web`/`spa.redirectUris`, `identifierUris`, `requiredResourceAccess`, and `requestedAccessTokenVersion`. `uniqueName` is required and is the idempotency key.
+- **State that this supersedes slice-1 spec §7**, which chose a committed `az ad app` bootstrap script. Note that the file now lands in **Plan 4**, not Plan 3 — the timing changed because the dev bypass (ADR-0012) removed Plan 3's dependency on the registrations, and Bicep written against a tenant that cannot be deployed or tested is unverifiable.
+- **Two limits that are Microsoft safeguards, not gaps in our automation** — both belong in the runbook: Bicep **cannot emit a client secret** (`passwordCredentials.secretText` is read-only), so it is minted once with `az ad app credential reset`; and **admin consent requires a portal click**.
+- **Also record:** Graph replication lag can fail a first deploy, because service-principal IDs may not have propagated when dependent resources deploy. And assigning an app role needs elevated consent with no narrower permission available.
+- **Rejected — a committed idempotent `az ad app` script:** re-runnable and reviewable, and it was slice-1's choice. Rejected because `CLAUDE.md`'s no-checked-in-scripts rule needs no exception once the Bicep extension is GA and sufficient, and two mechanisms for creating infrastructure is one more than needed.
+- **Rejected — portal clicks:** banned outright, produces no reviewable artefact, and Deliverable 3 is graded on infrastructure as code with no portal drift.
+- **Revisit when:** the Graph extension proves insufficient for a registration property we need.
+
+- [ ] **Step 3: Write ADR-0012 — dev auth bypass by issuer swap**
+
+Create `docs/adr/0012-dev-auth-bypass-by-issuer-swap.md`. **This is the important one.**
+
+Content it must carry:
+
+- **Context:** Damian's work account has no Entra admin access, so the dedicated directory may not be creatable. 50 of 75 remaining graded points sit behind having something deployed, and slice 1 must be deployed and traced before slice 2 begins.
+- **Decision:** a dev-only Auth.js provider that mints a **real** RS256 JWT with a local key and publishes the matching public key at `/api/dev-jwks`. `apps/api` validates it through `createRemoteJWKSet` with its real `jose` code path. **The bypass swaps the token issuer; it does not skip authentication.**
+- **Two guards:** a startup throw when `AUTH_DEV_BYPASS=true` meets `NODE_ENV=production` (checked case-insensitively, so a container that sets `NODE_ENV=Production` still trips it — the two comparisons are deliberately asymmetric: `AUTH_DEV_BYPASS` must match `"true"` exactly, so `"1"`/`"TRUE"`/`"yes"` neither enable the bypass nor trip the guard, while `NODE_ENV` is matched loosely so the guard errs toward firing); and the dev module never being **evaluated** in production, because the dynamic import that loads it is gated on the same flag — this is not the module being excluded from the production bundle, which a dynamic import with a literal specifier does not achieve, since Turbopack still emits it as a lazy chunk. The throw is demonstrated red by two mutations: removing it, and loosening the `AUTH_DEV_BYPASS` comparison.
+- **Positive consequences:** the API has no mode branch, so the 403 rule, role handling and token validation are exercised identically in both modes; dev exercises `createRemoteJWKSet` — the production mechanism — every day rather than only in the dormant CI job; and the cutover is four config steps with no code change, which makes slice-1 §6's "issuer swap, not a rewrite" claim demonstrated rather than asserted.
+- **Negative consequences, stated plainly:** an auth bypass exists in the codebase, and that is a permanent liability requiring both guards to hold; a dev-signed token is not an Entra token, so app-role claim shapes remain unproven until the real-token job wakes; and restarting `apps/web` rotates the key and invalidates sessions.
+- **Rejected — a trusted header (`x-dev-user`) that skips JWT validation:** simplest possible bypass. Rejected because it would make the 403 rule, the role claims and token validation *production-only* code paths — the most security-critical logic in the system would become the least exercised, which is exactly backwards.
+- **Rejected — a containerised mock OIDC server** (Dex, `mock-oauth2-server`): more faithful to the real authorization-code flow. Rejected because it adds a container, a compose service and a startup dependency to every dev run and every CI job, in order to test a flow Auth.js itself owns, and it would not remove the need for a local key anyway.
+- **Revisit when:** the Entra directory exists — then perform the §7 cutover, wake the CI job, and **delete this bypass rather than leaving it dormant.** Record that deletion as the intended end state.
+
+- [ ] **Step 4: Pin the new versions in `CLAUDE.md`**
+
+Add these rows to the pinned-versions table, matching the existing format:
+
+| Tool | Pinned | Newest | Why not newest |
+|---|---|---|---|
+| `next-auth` | **5.0.0-beta.32** | 4.24.15 (`latest`) | v5 is the only version with App Router support — Server Components, `middleware`, and the `handlers` export. v4 predates all of it. `latest` being an *older* major is why this row looks inverted. Shipping a beta is a deliberate exception to the pin rule; ADR-0010 |
+| React | 19.2.8 | — | Required by Next.js 16 |
+| Tailwind CSS | 4.3.3 | — | v4's CSS-first `@theme` config takes the OKLCH tokens directly; ADR-0001 |
+| `@playwright/test` | 1.62.0 | — | Dev-only. The end-to-end smoke test is the only thing proving the whole sign-in chain |
+| `server-only` | 0.0.1 | — | Makes "the token never reaches the browser" a build-time error rather than a convention |
+
+Also add a house-rules paragraph:
+
+```markdown
+**The dev auth bypass is temporary and must be deleted, not left dormant.**
+`AUTH_DEV_BYPASS=true` makes `apps/web` mint tokens with a local key. It swaps
+the token *issuer* — `apps/api` still validates every token with its real `jose`
+path — so it is not an auth skip. Two guards keep it out of production: a
+startup throw when the flag meets `NODE_ENV=production` (matched
+case-insensitively, so the guard fires more often, not less — a container
+that sets `NODE_ENV=Production` must still trip it); and `apps/web/lib/dev-identity.ts`
+never being **evaluated** in production, because the dynamic import that
+loads it is gated on the same flag. **This second guard is not bundle
+exclusion** — a dynamic `await import()` with a literal specifier is
+statically analyzable, and Turbopack still emits it as a lazy chunk rather
+than removing it from the production bundle; do not write or repeat the
+claim that it is excluded from the bundle. The startup throw
+(`assertBypassNotInProduction`, in `apps/web/auth.config.ts`) is the guard
+that structurally enforces the block, and it runs at that module's own
+top level so both `apps/web/auth.ts` and `apps/web/middleware.ts` (which
+imports `auth.config.ts` directly, since it is not edge-safe to go through
+`auth.ts`) are covered by the same single call. **Never weaken either
+guard**, and never loosen the exact-match comparison on `AUTH_DEV_BYPASS` or
+the case-insensitivity of the `NODE_ENV` comparison — the two checks are
+intentionally asymmetric, one narrow and one broad, and both directions
+matter. Once the Entra directory exists, perform the cutover in the Plan 3
+spec §7 and remove the bypass. ADR-0012.
+```
+
+- [ ] **Step 5: Update `docs/manual-setup-steps.md`**
+
+Add a new §1.0 **before** §1.1, since the bypass changes what is urgent:
+
+```markdown
+## 1.0 Read this first — nothing here blocks Plan 3 any more
+
+Plan 3 ships a **dev auth bypass** (ADR-0012), so the whole application runs,
+tests and demos with no Entra directory at all. Everything in §1 is still
+needed to *deploy on Azure with real Microsoft sign-in*, but none of it blocks
+building or merging.
+
+**What the bypass does not excuse:** it must be deleted, not left dormant. The
+cutover is four config steps — see the Plan 3 spec §7.
+```
+
+Then append to §1.3 the dev-identity `INSERT`s and the cutover:
+
+```markdown
+### 1.3a Register the dev users (local development)
+
+`dev-unknown-1` is deliberately absent — it must produce a 403 and land on
+`/not-registered`.
+
+```powershell
+$env:IRP_DB_PORT = "5433"
+docker compose -f apps/api/docker-compose.yml up -d
+docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+```
+
+### 1.3b The Entra cutover, when the directory exists
+
+1. `UPDATE "User" SET "externalId" = '<entra-oid>'` for each real person.
+2. Unset `AUTH_DEV_BYPASS` in `apps/web/.env.local` and the deployed config.
+3. Point `JWKS_URI` and `JWT_ISSUER` at the tenant.
+4. Set the repository **variable** `ENTRA_REAL_TOKEN_TESTS=true` to wake the CI job.
+5. Delete `apps/web/lib/dev-identity.ts`, its route, and its tests.
+
+No application code changes in steps 1–4. That is the design working.
+```
+
+- [ ] **Step 6: Record the supersession in the slice-1 spec**
+
+In `docs/superpowers/specs/2026-07-28-slice-1-integration-skeleton-design.md`, insert immediately under the `### The Bicep exception, stated honestly` heading:
+
+```markdown
+> **SUPERSEDED, 2026-07-29.** The decision below — a committed, documented,
+> idempotent `az ad app` bootstrap script — was replaced by the **Microsoft
+> Graph Bicep extension** (`Microsoft.Graph/applications@v1.0`), which is GA and
+> sufficient. See **ADR-0011**. The file lands in **Plan 4**, not Plan 3,
+> because the dev bypass (ADR-0012) removed Plan 3's dependency on the
+> registrations. The paragraph is kept for the reasoning it records.
+```
+
+- [ ] **Step 7: Update `handoff.md`**
+
+Replace the "Carried forward — open items created by Plan 2B" bullet about the auth `catch` with:
+
+```markdown
+- ~~**The auth plugin's `catch` around `jwtVerify` is unconditional**~~ — **fixed in Plan 3.**
+  A wrapper around the key-getter records whether retrieval itself failed, so a JWKS outage now
+  returns **503** while an unverifiable token still returns 401.
+```
+
+Leave the `SIGTERM` and `$disconnect` items — both are still Plan 4's.
+
+- [ ] **Step 8: Verify everything still passes**
+
+```powershell
+$env:DATABASE_URL = "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public"
+pnpm typecheck
+pnpm lint
+pnpm spec:lint
+pnpm test
+```
+
+Expected: all four exit 0. `pnpm test` reports **112 core + 55 api + web unit tests**, zero skipped.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add docs/adr CLAUDE.md docs/manual-setup-steps.md handoff.md docs/superpowers/specs
+git commit -m "docs: ADRs 0010-0012, version pins, and doc reconciliation
+
+ADR-0010 Auth.js v5 over MSAL — records that next-auth 5.0.0-beta.32 is a
+beta and why that is a deliberate exception to the pin rule: 'latest' is
+an older major with no App Router support.
+
+ADR-0011 Bicep Graph extension over a bootstrap script. Supersedes
+slice-1 spec §7, annotated in place.
+
+ADR-0012 the dev auth bypass. Records that it swaps the issuer rather
+than skipping auth, both guards, and that the intended end state is
+DELETION, not dormancy.
+
+CLAUDE.md gains the new pins and a house rule forbidding either guard
+from being weakened."
+```
+
+---
+
+## Self-Review
+
+**1. Spec coverage** — every section mapped to a task:
+
+| Spec § | Task |
+|---|---|
+| §2.1 bypass in scope | 5, 6 |
+| §2.2 `entra.bicep` → Plan 4 | 14 (ADR-0011 records it) |
+| §2.3 split sign-in | 8 |
+| §4 two token sources | 5, 6, 7 |
+| §4.1 `decode` not session | 7 |
+| §4.1a one source of truth for role | 5 (session callback), 9 (renders from API) |
+| §4.2 per-request client + subpath export | 1, 7 |
+| §5 layout, §5.1 route groups | 1, 4 |
+| §5.2 guard authority | 9, 10 |
+| §5.3 `CycleRibbon` | 3 |
+| §5.4 typography | 2 |
+| §6 the bypass, guards, identities | 5, 6 |
+| §7 user assignment + cutover | 12 (README), 14 (runbook) |
+| §8 four error states | 7, 8, 9 |
+| §9 three API changes | 10, 11 |
+| §10 testing | every task; 12 for e2e |
+| §11 CI | 13 |
+| §12 ADRs | 14 |
+| §13 definition of done | all |
+
+**2. Placeholder scan** — no `TBD`, no "add error handling", no "similar to Task N". Every code step carries complete code. Task 14's ADR steps specify required *content* rather than full prose, which is the intended granularity for a document whose value is the argument, not the boilerplate — the house format is pinned by reference to `docs/adr/0008`.
+
+**3. Type consistency** — verified across tasks: `RibbonDay`/`DayMark`/`RibbonProps` (Task 3) match their use in Task 8. `DevIdentity`/`DEV_IDENTITIES`/`mintDevToken`/`devJwks`/`DEV_ISSUER` (Task 6) match Tasks 5, 8 and their tests. `SESSION_COOKIE_NAMES`/`readAccessToken`/`resolveSessionToken`/`apiClient`/`getCurrentUserOrRedirect`/`WebUser` (Task 7) match Tasks 4 and 9. `assertBypassNotInProduction`/`authConfig` (Task 5) match Tasks 7 and 9. `requireAuthPlugin` (Task 10) matches the `server.ts` edit. `ServiceUnavailableError` (Task 11) is defined before use.
+
+**Two known integration risks**, flagged rather than hidden:
+
+1. **`decode` from `next-auth/jwt` and the cookie-name-as-salt convention** (Task 7) are v5-beta internals. If `readAccessToken`'s tests fail at Step 5 in a way that suggests the salt or cookie name is wrong, log the actual cookie name from `document.cookie` after a dev sign-in. Fix pass 2 removed the env-derived guess entirely: `apiClient` now looks the cookie up in the jar under both possible names (`SESSION_COOKIE_NAMES`) and uses whichever it actually finds as the salt, so there is no derived constant left to adjust — the tests pin the lookup-and-decrypt behaviour together.
+2. **`generateKeyPair` at module scope** (Task 6) uses top-level `await`, matching the existing `apps/api/test/helpers/keys.ts` pattern. If Next's bundler objects, move it behind a memoised `getKeyPair()` and adjust the three call sites.
+
+**Scope note:** 14 tasks. The spec's §15 anticipated this and named the split: **Tasks 10 and 11 are `apps/api`-only and independent of all web work.** If execution runs long, they lift cleanly into their own plan without reordering anything else.

@@ -23,3 +23,14 @@ export class ForbiddenError extends HttpError {
     super(403, `${PROBLEM_BASE}/not-registered`, "Not a registered user", detail);
   }
 }
+
+export class ServiceUnavailableError extends HttpError {
+  constructor(detail = "A dependency required to serve this request is unavailable.") {
+    super(
+      503,
+      `${PROBLEM_BASE}/service-unavailable`,
+      "Service temporarily unavailable",
+      detail,
+    );
+  }
+}
