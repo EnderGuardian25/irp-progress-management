@@ -1769,8 +1769,8 @@ three-outcome demonstration still applies verbatim.
 **Corrections found during review (fix pass, after the initial Task 6 commit):**
 
 1. **The Prisma `.ts`/extensionless import problem is not a Linux-vs-Windows quirk — it is
-   tsconfig discovery.** The original Task 6 report (and this plan's earlier draft, since
-   corrected) attributed Prisma emitting `./enums.ts` vs. `./enums` to the build OS. That is
+   tsconfig discovery.** The original Task 6 report attributed Prisma emitting `./enums.ts`
+   vs. `./enums` to the build OS — the plan itself never made that claim. That is
    false: `prisma-client`'s generator (`rBe`/`UBt` in the installed `prisma@7.9.1` CLI) picks the
    extension based on whether it finds a tsconfig near the output directory — no tsconfig found
    emits `.ts` (Docker's `generated` stage never copies `apps/api/tsconfig.json`, hitting this
