@@ -69,6 +69,7 @@ Verified against the registry on 2026-07-28. **The rule is *newest version the s
 | `@opentelemetry/sdk-trace-base` | 2.10.0 | — | Dev-only; supplies `InMemorySpanExporter`, the test double injected into the exporter seam `createTracerProvider` exposes |
 | `@opentelemetry/resources` | 2.10.0 | — | `resourceFromAttributes` sets the service name on the trace resource |
 | `@opentelemetry/semantic-conventions` | 1.43.0 | — | `ATTR_SERVICE_NAME` constant, avoids a hand-typed attribute key |
+| `@azure/monitor-opentelemetry-exporter` | **1.0.0-beta.43** | 1.0.0-preview.6 | Pinned **exactly, no caret**. This line has never had a stable release; `latest` is the *older* `1.0.0-beta.32`, and `1.0.0-beta.43` is what the GA `@azure/monitor-opentelemetry@1.18.2` depends on. **`^1.0.0-beta.43` resolves to `1.0.0-preview.6`** — semver compares prerelease identifiers alphabetically and `"preview" > "beta"` — which is a 2020 build requiring `@opentelemetry/api ^0.10.2`. ADR-0014 |
 | `fastify-plugin` | ^5.1.0 | — | Declares plugin `dependencies` so `tracing` → `problem-details` → `auth` ordering is enforced at boot, not by convention |
 | `tsx` | 4.23.1 | — | Dev-only; runs `src/index.ts` directly for `pnpm dev` without a separate build step |
 | `next-auth` | **5.0.0-beta.32** | 4.24.15 (`latest`) | v5 is the only version with App Router support — Server Components, `middleware`, and the `handlers` export. v4 predates all of it. `latest` being an *older* major is why this row looks inverted. Shipping a beta is a deliberate exception to the pin rule; ADR-0010 |
