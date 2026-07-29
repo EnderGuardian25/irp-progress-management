@@ -10,6 +10,16 @@ matters — start it now, because it gates two whole plans and takes real elapse
 
 ## 1. Blocks Plan 3 and Plan 4 — start today
 
+### 1.0 Read this first — nothing here blocks Plan 3 any more
+
+Plan 3 ships a **dev auth bypass** (ADR-0012), so the whole application runs,
+tests and demos with no Entra directory at all. Everything in §1 is still
+needed to *deploy on Azure with real Microsoft sign-in*, but none of it blocks
+building or merging.
+
+**What the bypass does not excuse:** it must be deleted, not left dormant. The
+cutover is four config steps — see the Plan 3 spec §7.
+
 ### 1.1 Create an Azure free account — ✅ DONE, 2026-07-28
 
 Signed up successfully with the work account. Current state:
@@ -123,6 +133,27 @@ Two other things in this area are also human-only, for the same reason:
   narrower permission available.
 
 I will tell you exactly which app and which permissions when Plan 3 reaches that point.
+
+### 1.3a Register the dev users (local development)
+
+`dev-unknown-1` is deliberately absent — it must produce a 403 and land on
+`/not-registered`.
+
+```powershell
+$env:IRP_DB_PORT = "5433"
+docker compose -f apps/api/docker-compose.yml up -d
+docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+```
+
+### 1.3b The Entra cutover, when the directory exists
+
+1. `UPDATE "User" SET "externalId" = '<entra-oid>'` for each real person.
+2. Unset `AUTH_DEV_BYPASS` in `apps/web/.env.local` and the deployed config.
+3. Point `JWKS_URI` and `JWT_ISSUER` at the tenant.
+4. Set the repository **variable** `ENTRA_REAL_TOKEN_TESTS=true` to wake the CI job.
+5. Delete `apps/web/lib/dev-identity.ts`, its route, and its tests.
+
+No application code changes in steps 1–4. That is the design working.
 
 ### 1.4 Add GitHub Actions secrets
 

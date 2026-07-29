@@ -240,6 +240,14 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 **Branch:** `feat/plan-3-auth-and-web-shell` · **Next:** finish the Plan 3 **brainstorm** (Sections 2–3), write the spec, then `writing-plans` · **Ledger:** none yet — Plan 2B's workspace was deleted at merge, and Plan 3's is created by `sdd-workspace` when execution starts
 
+> **Correction, 2026-07-29 (Plan 3 Task 14): the claim below is wrong.** The installed
+> `scripts/sdd-workspace` **ignores its argument** and returns the flat `.superpowers/sdd/` path
+> regardless of which plan file is passed. It does **not** resolve a per-plan workspace, so
+> **`CLAUDE.md`'s manual-archiving convention still applies** — move everything except
+> `progress.md` and `.gitignore` into `.superpowers/sdd/plan-<N>/` before the first task of a new
+> plan. The paragraph immediately below is kept for context but describes intended, not actual,
+> behaviour of the installed script version.
+>
 > **Ledger path convention changed.** The `subagent-driven-development` skill now resolves a
 > **per-plan** workspace via `scripts/sdd-workspace <plan-file>` — `.superpowers/sdd/<plan-basename>/`
 > — so plans no longer overwrite each other's records and the old manual archiving step is
@@ -370,8 +378,10 @@ because this is the plan that makes it real.
 5. **Blocked on Damian:** the dedicated Entra directory (§3) must exist before any of Plan 3's
    auth can be wired against something real. Everything else in the plan — the Next.js scaffold,
    the design-system frame, the `transpilePackages` wiring — proceeds without it.
-6. For new plans, `subagent-driven-development` creates its own workspace via `sdd-workspace` — no
-   manual archiving.
+6. **Correction:** the installed `scripts/sdd-workspace` ignores its argument and always returns
+   the flat `.superpowers/sdd/` path — it does **not** create a per-plan workspace. Before the
+   first task of a new plan, manually archive per `CLAUDE.md`: move everything except
+   `progress.md` and `.gitignore` into `.superpowers/sdd/plan-<N>/`, then reset `progress.md`.
 
 ### Local environment facts that cost real debugging time
 
@@ -407,12 +417,22 @@ New, and all of them cost a round trip or a corrected plan. Formal doc/spec reco
 - **No `SIGTERM`/`SIGINT` handler exists anywhere in `apps/api`.** Azure Container Apps sends
   `SIGTERM` on scale-down and redeploy, so in-flight requests are dropped on every deploy. This
   bears directly on the NFR "200 RPS burst, zero 5xx" target. **A Plan 4 obligation.**
-- **The auth plugin's `catch` around `jwtVerify` is unconditional** and also swallows errors thrown
-  by the key-getter itself. Harmless with a local key set, but once **Plan 3** wires a real
-  `createRemoteJWKSet`, a JWKS-endpoint outage will present to clients as `401 "your token is
-  invalid"` rather than a 5xx — actively misleading during an incident.
+- ~~**The auth plugin's `catch` around `jwtVerify` is unconditional**~~ — **fixed in Plan 3.**
+  A wrapper around the key-getter records whether retrieval itself failed, so a JWKS outage now
+  returns **503** while an unverifiable token still returns 401.
 - **`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`.** If
   `buildServer` itself rejects, the client leaks. Low stakes since the process exits.
+- **`middleware.ts` → `proxy.ts` migration, owed an ADR, Plan 4's.** `next build` warns that
+  `middleware.ts` is deprecated in favour of `proxy.ts`. This is **not a rename**: per
+  `next/dist/build/entries.js:231-243`, `isProxyFile` routes to `onServer()` unconditionally,
+  while `isMiddlewareFile` routes to `onEdgeServer()` unless `runtime === "nodejs"` — so adopting
+  `proxy.ts` moves the auth guard from the **Edge** runtime to **Node**, a behavioural change on
+  the auth path, not a cosmetic one. Next hard-errors if both files exist, so there is no
+  incremental migration path; it is one atomic swap. Deferred to Plan 4 because Azure Container
+  Apps runs Node in a container with no Edge network — the Edge bundle is dead weight there, and
+  the deploy target settles which runtime should own the guard. The build warning is accepted as
+  noise for Plan 3. Needs an ADR before the swap, per `CLAUDE.md`'s two-rejected-alternatives
+  rule, since "just rename it" is a plausible-looking wrong answer.
 
 ### Superseded constraints from Plan 2A (kept for context)
 

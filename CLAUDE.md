@@ -71,6 +71,11 @@ Verified against the registry on 2026-07-28. **The rule is *newest version the s
 | `@opentelemetry/semantic-conventions` | 1.43.0 | — | `ATTR_SERVICE_NAME` constant, avoids a hand-typed attribute key |
 | `fastify-plugin` | ^5.1.0 | — | Declares plugin `dependencies` so `tracing` → `problem-details` → `auth` ordering is enforced at boot, not by convention |
 | `tsx` | 4.23.1 | — | Dev-only; runs `src/index.ts` directly for `pnpm dev` without a separate build step |
+| `next-auth` | **5.0.0-beta.32** | 4.24.15 (`latest`) | v5 is the only version with App Router support — Server Components, `middleware`, and the `handlers` export. v4 predates all of it. `latest` being an *older* major is why this row looks inverted. Shipping a beta is a deliberate exception to the pin rule; ADR-0010 |
+| React | 19.2.8 | — | Required by Next.js 16 |
+| Tailwind CSS | 4.3.3 | — | v4's CSS-first `@theme` config takes the OKLCH tokens directly; ADR-0001 |
+| `@playwright/test` | 1.62.0 | — | Dev-only. The end-to-end smoke test is the only thing proving the whole sign-in chain |
+| `server-only` | 0.0.1 | — | Makes "the token never reaches the browser" a build-time error rather than a convention |
 
 Before bumping anything, check the peer ranges of what depends on it. The TypeScript 7 case is the worked example of why.
 
@@ -131,6 +136,64 @@ irp-progress-management/
 **Prove a gate fails before trusting it.** Two of this project's four CI gates looked correct and did nothing until a review tested them with a deliberately broken input. Adding a gate means demonstrating it goes red.
 
 **No hand-written fetch in the frontend.** `apps/web` imports only from `packages/client`. A raw `fetch()` to our own API is a bug.
+
+**The dev auth bypass is temporary and must be deleted, not left dormant.**
+`AUTH_DEV_BYPASS=true` makes `apps/web` mint tokens with a local key. It swaps
+the token *issuer* — `apps/api` still validates every token with its real `jose`
+path — so it is not an auth skip. Two guards keep it out of production: a
+startup throw when the flag meets `NODE_ENV=production` (matched
+case-insensitively, so the guard fires more often, not less — a container
+that sets `NODE_ENV=Production` must still trip it); and `apps/web/lib/dev-identity.ts`
+never being **evaluated** in production, because the dynamic import that
+loads it is gated on the same flag. **This second guard is not bundle
+exclusion** — a dynamic `await import()` with a literal specifier is
+statically analyzable, and Turbopack still emits it as a lazy chunk rather
+than removing it from the production bundle; do not write or repeat the
+claim that it is excluded from the bundle. The startup throw
+(`assertBypassNotInProduction`, in `apps/web/auth.config.ts`) is the guard
+that structurally enforces the block, and it runs at that module's own
+top level so both `apps/web/auth.ts` and `apps/web/middleware.ts` (which
+imports `auth.config.ts` directly, since it is not edge-safe to go through
+`auth.ts`) are covered by the same single call. **Never weaken either
+guard**, and never loosen the exact-match comparison on `AUTH_DEV_BYPASS` or
+the case-insensitivity of the `NODE_ENV` comparison — the two checks are
+intentionally asymmetric, one narrow and one broad, and both directions
+matter. Once the Entra directory exists, perform the cutover in the Plan 3
+spec §7 and remove the bypass. ADR-0012.
+
+**Hard-won facts from Plan 3, worth not rediscovering:**
+
+- **`pnpm typecheck` is not sufficient for `apps/web`.** Plain `tsc` does not run Next's own
+  checks: it missed a `typedRoutes` error and a `middleware.ts` export-shape error that broke
+  the production build for four tasks before a reviewer ran the real build. `pnpm --filter
+  @irp/web build` is part of the required verification set for any change touching `apps/web`.
+- **Next canonicalises loopback hostnames to the literal string `localhost`**
+  (`NextURL.parseURL` / `REGEX_LOCALHOST_HOSTNAME` in `next/dist/server/web/next-url.js`).
+  Driving a browser at `127.0.0.1` breaks two things: the dev server 403s `/_next/*` as
+  cross-origin (its allowlist is `localhost`/`*.localhost`), killing the HMR upgrade Next
+  connects *before* hydrating — so React never hydrates, no click handler is attached, the page
+  renders perfectly via SSR and nothing throws; and Auth.js computes its base origin as
+  `localhost` regardless of `AUTH_URL`, so a callback redirect lands on an origin without the
+  cookie. **The `::1` hazard that motivates `127.0.0.1` elsewhere applies to servers we bind
+  ourselves** — Fastify listens IPv4-only, Next's dev server listens on both. So `apps/api` is
+  addressed as `127.0.0.1` and the browser as `localhost`.
+- **`JWT_ISSUER` is string-compared against the token's `iss` claim; `JWKS_URI` is fetched.**
+  They need not match and here deliberately do not.
+- **jose 6.2.4 ships a single WebCrypto build with no `node` export condition**, and jsdom's VM
+  realm fails jose's `instanceof Uint8Array` check — `// @vitest-environment node` is the
+  established fix. Its error classes live under `jose.errors`, **not** as top-level exports; a
+  top-level import is `undefined` and `instanceof undefined` throws.
+- **Vitest orders test files by cached duration then file size, not filename.** Any test relying
+  on execution order is unstable across machines. Every database test must create the rows it
+  needs in-file, because the `apps/api` suites `TRUNCATE` the `User` table.
+- **`pnpm --filter @irp/web build` fails locally unless you pass `AUTH_DEV_BYPASS=false`**, and
+  that is the guard working, not a bug. `next build` sets `NODE_ENV=production`, and Next loads
+  `apps/web/.env.local` — which sets the bypass flag for development — into `process.env`, so
+  `assertBypassNotInProduction` correctly refuses to build. Set the flag explicitly to `false`
+  for a local build; an explicit value wins because Next does not override an already-set
+  variable. **CI is unaffected**: `.env.local` is git-ignored and CI never sets the flag, which
+  is why the CI build step deliberately runs with it absent. If a local `next build` ever
+  succeeds with `AUTH_DEV_BYPASS=true`, guard one has broken — investigate immediately.
 
 **Time handling.** Store every timestamp in UTC. Evaluate every deadline, late flag, and cycle boundary in **Asia/Colombo (UTC+05:30)**. Never rely on the server's local timezone — the deploy region is not Sri Lanka. Cycles run the 10th → the 9th of the following month.
 
