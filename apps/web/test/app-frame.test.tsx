@@ -28,17 +28,32 @@ describe("Sidebar", () => {
     expect(screen.getByRole("navigation")).toHaveStyle({ width: "216px" });
   });
 
-  it("renders the primary destinations", () => {
+  it("renders every destination as a non-interactive item — none has a page yet", () => {
+    // "/" has no page.tsx either (only apps/web/app/(app)/layout.tsx exists;
+    // Task 9 adds the page). typedRoutes rejects a Link to any of the five,
+    // so none render as links until their task lands.
     render(<Sidebar />);
     for (const item of ["Today", "Roster", "Review", "Cycles", "Students"]) {
-      expect(screen.getByRole("link", { name: new RegExp(item) })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: new RegExp(item) })).not.toBeInTheDocument();
+      const el = screen.getByText(new RegExp(item));
+      expect(el).toHaveAttribute("aria-disabled", "true");
     }
   });
 
-  it("shows a review count badge only when there is something to review", () => {
+  it("shows a review count on the (non-link) Review item only when there is something to review", () => {
+    // getByText matches on each node's own direct text ("Review"), not the
+    // nested badge span's "3" — so read the full textContent to confirm the
+    // rendered name is "Review 3" with a space, not "Review3" run together.
+    // That spacing requirement is the same one a link's accessible name
+    // would need; it still applies now that the item is a plain span.
     const { rerender } = render(<Sidebar reviewCount={3} />);
-    expect(screen.getByRole("link", { name: /Review 3/ })).toBeInTheDocument();
+    const withCount = screen.getByText(/^Review$/);
+    expect(withCount).toHaveAttribute("aria-disabled", "true");
+    expect(withCount.textContent).toBe("Review 3");
+
     rerender(<Sidebar reviewCount={0} />);
-    expect(screen.getByRole("link", { name: /^Review$/ })).toBeInTheDocument();
+    const withoutCount = screen.getByText(/^Review$/);
+    expect(withoutCount).toHaveAttribute("aria-disabled", "true");
+    expect(withoutCount.textContent).toBe("Review");
   });
 });
