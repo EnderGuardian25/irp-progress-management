@@ -6,6 +6,40 @@ export default defineConfig({
   // and this repo has been bitten twice by gates that looked green.
   retries: 0,
   fullyParallel: false,
+  // These are NOT a retry in disguise, and they are not padding — the default
+  // 5000ms expect budget was measurably the wrong budget, and it made the
+  // first test a coin flip in CI.
+  //
+  // The suite must run against `next dev`, not a production build: the sign-in
+  // chain needs AUTH_DEV_BYPASS=true, and assertBypassNotInProduction refuses
+  // that in a production build by design (ADR-0012). So on-demand Turbopack
+  // compilation is inherent here, not an artefact to be tuned away — and the
+  // first test's first assertion is where it all lands. Measured on two
+  // consecutive CI runs of the same commit range:
+  //
+  //            GET /api/auth/providers   GET /       click -> `/` rendered
+  //   green:   2.2s (cold compile)       2.3s        ~5.5s, PASSED by ~0.3s
+  //   red:     2.6s (cold compile)       2.6s        ~5.9s, FAILED by ~0.4s
+  //
+  // Two cold compiles — the NextAuth route on the first signIn() call, then
+  // the `/` page on the post-callback redirect — total ~4.9s and sit entirely
+  // inside `expect(getByTestId("user-name")).toHaveText(...)`'s window, since
+  // click() resolves as soon as the click is dispatched. A ~5s workload
+  // against a 5s deadline is a ~50/50 gate, which is worse than a slow one:
+  // it fails on commits that changed nothing (it failed on a docs-only
+  // commit) and it teaches the next reader to re-run CI rather than read it.
+  //
+  // Neither assertion is weakened: every expectation still has to pass, and
+  // the per-test timeout still bounds a genuine hang. Raising the deadline
+  // only stops the assertion from also measuring compiler latency.
+  //
+  // The alternative — warming the routes in a globalSetup — was rejected as
+  // insufficient on its own: `/api/auth/providers` warms fine, but `/` is
+  // behind the proxy.ts auth guard, so an unauthenticated warm-up redirects
+  // without ever compiling the page module. It would remove about half the
+  // cold cost and leave a smaller version of the same coin flip.
+  timeout: 60_000,
+  expect: { timeout: 20_000 },
   // `github` alone writes NO files — it only emits inline PR annotations —
   // so a CI failure produced an artifact upload with nothing in it (the
   // "Upload the Playwright report on failure" step in ci.yml went green on
