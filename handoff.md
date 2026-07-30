@@ -264,13 +264,36 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `main` — Plan 3 merged as PR #6 · **Next:** Plan 4 (infra, deploy, observability), which
-now also owns `infra/entra.bicep` · **Ledger:** Plan 3's is at `.superpowers/sdd/progress.md` and is
-worth reading before Plan 4 — it records every defect the review loop caught and why
+**Branch:** `feat/plan-4a-containerisation`, open as **PR #8** against `main` · **In flight:**
+Plan 4A (containerisation, runtime hardening, exporter seam) · **Ledger:**
+`.superpowers/sdd/progress.md` — **git-ignored, so it does not travel with a clone or a push.**
+It is the authoritative resume map and it carries a `RESUME HERE` section; read it first.
 
-**Start Plan 4 with `brainstorming`**, then a spec, then `writing-plans`, then
-`subagent-driven-development`. Before its first task, **archive Plan 3's SDD workspace** per the
-correction below.
+### Plan 4A — where it stands (halted 2026-07-30, mid-plan, deliberately)
+
+Plan 4 was split into 4A (containerisation) and 4B (deploy). 4A is a 10-task plan;
+**Tasks 1-8 are complete and reviewed clean.** The repo now has a single `Dockerfile` build
+graph with four targets (`migrate`, `api`, `web`, plus shared stages), a root `compose.yaml`
+running `db → migrate → api → web`, and an `images` job in CI that builds all three images and
+smoke-tests the stack.
+
+**Task 9 is implemented, reviewed, and its three Important findings fixed — but its re-review
+never ran.** That is the first thing to do on resume. **Task 10 (documentation reconciliation)
+has not started**, and this section is deliberately *not* that reconciliation: several docs
+below, and CLAUDE.md's dev-bypass section, still carry prose Task 10 owns. The ledger's roll-up
+lists each item and which task owes it.
+
+Two facts from 4A worth knowing before touching anything:
+
+- **CI runs on `pull_request` and pushes to `main` only.** A bare push to a feature branch
+  triggers **nothing** — PR #8 exists because that had to be discovered the hard way.
+- **The dev-bypass guard gained a fourth entry point**, `apps/web/instrumentation.ts`. A
+  containerised `next start` does not import route modules at boot, so the module-scope guard in
+  `auth.config.ts` fired only on the first request and the container stayed up serving 500s
+  rather than refusing to start. CLAUDE.md still describes three entry points; Task 10 owns
+  correcting it.
+
+**Plan 4B** (infra, deploy, observability) has not started and still owns `infra/entra.bicep`.
 
 ### What Plan 3 cost, and the one lesson worth carrying
 
