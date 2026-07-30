@@ -2557,6 +2557,29 @@ The YAML block in Step 1 below and Task 8 Step 1's `compose.yaml` block are both
 match what was actually implemented, so a future reader copying either verbatim does not
 reintroduce any of the three holes.
 
+**CORRECTION 5 (applied 2026-07-30, from Task 9's re-review — the run that CORRECTION 4 was
+never re-reviewed by).** CORRECTION 4's three fixes are all correctly implemented in
+`.github/workflows/ci.yml` and `compose.yaml`; verified line by line. But finding 1 was stated
+more broadly than it was fixed. It named three missing bounds — "no `timeout` in the `run:`
+script, no step `timeout-minutes`, no job-level `timeout-minutes`" — and closed only the first.
+The general case stayed open, and it is not hypothetical:
+
+- **No job in this workflow had `timeout-minutes`.** GitHub's default is 360 minutes, so any hang
+  outside the one `timeout 60`-wrapped command still burned six hours of runner and never reached
+  its `if: always()` teardown.
+- **`docker compose up --wait` is one such hang.** Every healthcheck in `compose.yaml` is bounded
+  by `retries` x `interval`, so an unhealthy `api` or `web` makes `--wait` *fail* rather than
+  block — that part is sound. But `migrate` has no healthcheck and `api` gates on
+  `service_completed_successfully`, so a migration wedged on an advisory lock has nothing to time
+  it out and `--wait` blocks forever.
+
+**Fixed:** `timeout-minutes` on all three jobs — `verify: 20` (observed ~3.5 min), `real-token:
+15`, `images: 30` (observed ~5.5 min). These are backstops with roughly 5x headroom, not
+performance targets; they should only ever fire on a genuine hang. Bounding `--wait` itself with
+`--wait-timeout`, or giving `migrate` a healthcheck, is the narrower fix and is deliberately
+**not** done here: the job backstop covers every hang in the job including ones not yet
+enumerated, which is the property finding 1 was actually asking for.
+
 - [ ] **Step 1: Add the job**
 
 Append to `.github/workflows/ci.yml`, at the same indentation as `verify:` and `real-token:`:
@@ -2806,6 +2829,38 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `handoff.md`
 - Modify: `CLAUDE.md`
 - Modify: `docs/manual-setup-steps.md`
+- Modify: `apps/web/.env.example` — **added by CORRECTION 6**
+- Modify: `apps/web/instrumentation.ts` — **added by CORRECTION 6** (comment only)
+- Modify: `apps/web/e2e/README.md` — **added by CORRECTION 6**
+
+**CORRECTION 6 (applied 2026-07-30, on resume).** This task's file list was incomplete, and its
+steps did not cover the one correction the halt-point commit explicitly assigned to it — the
+dev-bypass guard's **fourth** entry point. Four additions, all doc/comment-only:
+
+1. **`CLAUDE.md`'s dev-bypass section said THREE entry points.** `apps/web/instrumentation.ts` is a
+   fourth. Step 3 as written only appended container facts and would have left the section wrong.
+   The section is now a numbered list of four, each with the reason it needed its own guard, and it
+   also no longer refers to `middleware.ts` — which Step 5's grep would otherwise have flagged in
+   the very file the step tells you to fix.
+2. **`apps/web/.env.example` repeated the same three-entry-point claim** in a long comment. It is
+   the file a developer actually reads when setting the flag, so leaving it stale is worse than
+   leaving `CLAUDE.md` stale. Now says four entry points and three call sites.
+3. **`apps/web/instrumentation.ts`'s own comment asserted something false:** that "Next only builds
+   an Edge instrumentation bundle when there is Edge runtime code — since ADR-0013 proxy.ts runs on
+   Node, there is currently none." Next builds it **unconditionally**. Both `next dev` and `next
+   build` emit `A Node.js API is used (process.exit ...) which is not supported in the Edge Runtime`
+   / `Ecmascript file had an error` on every run — ~35 times per dev session, once per build as
+   "Turbopack build encountered 1 warnings" — after which the build reports "Compiled
+   successfully". The warning is expected and harmless; Turbopack matches `process.exit`
+   statically, so the runtime `typeof` check cannot suppress it. The comment now records the
+   observed behaviour and says explicitly not to "fix" the warning by weakening the exit. This
+   matters because this repo's stated rule is that coverage claims about the bypass get checked,
+   not trusted — and this was an unchecked claim sitting in the guard itself.
+4. **`apps/web/e2e/README.md`'s seed command does not work on Windows PowerShell 5.1.** The `-c
+   "...\"User\"..."` form loses its escapes through a native command's argument list: `psql`
+   receives `INSERT INTO " User\` plus a stack of "extra command-line argument ignored" warnings.
+   Replaced with piping a `.sql` file on stdin, noting that the `-c` form is fine on bash. The
+   instructions are PowerShell-labelled, so this was a broken instruction, not a portability nicety.
 
 **Why this is a task and not a footnote.** `handoff.md` is the resume map for a fresh session. A
 plan that changes the roadmap and closes three recorded obligations without updating it leaves the

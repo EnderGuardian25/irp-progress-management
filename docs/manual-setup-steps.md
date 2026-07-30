@@ -8,15 +8,19 @@ matters — start it now, because it gates two whole plans and takes real elapse
 
 ---
 
-## 1. Blocks Plan 4 — start today
+## 1. Blocks Plan 4B — start today
 
-### 1.0 Read this first — none of this blocked Plan 3, and Plan 3 has merged
+### 1.0 Read this first — none of this blocked Plan 3 or Plan 4A, and both have shipped
+
+**Update, 2026-07-30.** Plan 4 was split. **Plan 4A needs nothing from this
+section** — it containerises and hardens the runtime with no Azure account.
+Everything in §1 now blocks **Plan 4B**.
 
 Plan 3 shipped a **dev auth bypass** (ADR-0012), so the whole application runs,
 tests and demos with no Entra directory at all. **Plan 3 merged as PR #6 without
-any of §1 being done.**
+any of §1 being done**, and Plan 4A was built and CI-verified the same way.
 
-What §1 is still needed for: **Plan 4** — deploying on Azure with real Microsoft
+What §1 is still needed for: **Plan 4B** — deploying on Azure with real Microsoft
 sign-in, `infra/entra.bicep`, and waking the dormant real-token CI job.
 
 **What the bypass does not excuse:** it must be deleted, not left dormant. The
@@ -185,7 +189,10 @@ when Plan 4 generates them; the names will be:
 **Never paste any of these into the chat.** Put them straight into GitHub. If one is ever
 exposed, rotate it rather than hoping.
 
-### 1.5 Decide whether the container images are public — one question, then it's automated
+### 1.5 Decide whether the container images are public — **Plan 4B's question, not 4A's**
+
+Plan 4A builds images locally and in CI but **pushes them nowhere**, so nothing is blocked on this
+today. Answer it before 4B's deploy workflow lands.
 
 Images go to **GitHub Container Registry**, not ACR (decided 2026-07-29; ~$5/mo saved, and it
 keeps everything in one place). That leaves exactly one choice for you:

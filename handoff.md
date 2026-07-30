@@ -188,7 +188,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
 | | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | ✅ **Merged, PR #5** |
 | | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
-| | 4 · Infra, deploy, observability | T-19 – T-23, plus `infra/entra.bicep` moved here from Plan 3 | D3 | **Next.** Needs the Entra directory (§3) before Graph Bicep can deploy from CI |
+| | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **This plan** |
+| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23, plus `infra/entra.bicep` | D3 | **Next.** Needs the Entra directory (§3) and the Azure setup in `manual-setup-steps.md` §1.1a/§1.2/§1.2a |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
@@ -196,6 +197,11 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
 | | 10 · Winner + PDF | T-18 | — | Not started |
 | **4 — Proving it** | 11 · Load test + retro | T-24 – T-26 | D4 | Not started |
+
+**Plan 4 was split on 2026-07-30.** Everything that needs no Azure account is 4A; everything that
+does is 4B. The split does **not** relax the ordering rule below: **slice 1 is not "deployed and
+traced" until 4B ships**, and Deliverable 3 stays at zero and Deliverable 4 stays unstartable until
+then. What 4A buys is that 4B is Bicep plus a workflow against images already proven to run.
 
 **The one ordering rule that matters:** slice 1 must be deployed and traced before slice 2
 begins. Features land on a pipeline already known to work — never the other way round.
@@ -265,35 +271,48 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 ## 3. Current position
 
 **Branch:** `feat/plan-4a-containerisation`, open as **PR #8** against `main` · **In flight:**
-Plan 4A (containerisation, runtime hardening, exporter seam) · **Ledger:**
-`.superpowers/sdd/progress.md` — **git-ignored, so it does not travel with a clone or a push.**
-It is the authoritative resume map and it carries a `RESUME HERE` section; read it first.
+Plan 4A (containerisation, runtime hardening, exporter seam) — all ten tasks done, awaiting the
+whole-branch review · **Next:** Plan 4B (infra, deploy, observability), which still owns
+`infra/entra.bicep`
 
-### Plan 4A — where it stands (halted 2026-07-30, mid-plan, deliberately)
+**On the SDD ledger.** `.superpowers/sdd/progress.md` is **git-ignored, so it does not travel with
+a clone or a push.** Earlier notes called it "the authoritative resume map" — that is only true on
+the machine that wrote it. It was **not present** when this branch was resumed on a second device,
+so the resume had to be reconstructed from the plan file and `git log`. Treat this section, the
+plan file, and the commit history as the durable record; treat the ledger as a local convenience
+that may simply be absent.
 
-Plan 4 was split into 4A (containerisation) and 4B (deploy). 4A is a 10-task plan;
-**Tasks 1-8 are complete and reviewed clean.** The repo now has a single `Dockerfile` build
-graph with four targets (`migrate`, `api`, `web`, plus shared stages), a root `compose.yaml`
-running `db → migrate → api → web`, and an `images` job in CI that builds all three images and
-smoke-tests the stack.
+### Plan 4A — where it stands
 
-**Task 9 is implemented, reviewed, and its three Important findings fixed — but its re-review
-never ran.** That is the first thing to do on resume. **Task 10 (documentation reconciliation)
-has not started**, and this section is deliberately *not* that reconciliation: several docs
-below, and CLAUDE.md's dev-bypass section, still carry prose Task 10 owns. The ledger's roll-up
-lists each item and which task owes it.
+Plan 4 was split into 4A (containerisation) and 4B (deploy). All ten tasks are complete. The repo
+has a single `Dockerfile` build graph with four targets (`migrate`, `api`, `web`, plus shared
+stages), a root `compose.yaml` running `db → migrate → api → web`, and an `images` job in CI that
+builds all three images and smoke-tests the stack.
 
-Two facts from 4A worth knowing before touching anything:
+**Task 9's re-review ran on resume (2026-07-30) and found one residual item, now fixed.**
+CORRECTION 4's three fixes were all correctly implemented, but its finding 1 was stated more
+broadly than it was closed: it named a missing job-level `timeout-minutes` and fixed only the one
+`docker run` command. No job in the workflow had a timeout, so any hang outside that single
+command still burned GitHub's 360-minute default and never reached its `if: always()` teardown —
+and `docker compose up --wait` is such a hang, because `migrate` has no healthcheck and `api`
+gates on `service_completed_successfully`. All three jobs now carry `timeout-minutes`. Recorded as
+CORRECTION 5 in the plan.
+
+Three facts from 4A worth knowing before touching anything:
 
 - **CI runs on `pull_request` and pushes to `main` only.** A bare push to a feature branch
   triggers **nothing** — PR #8 exists because that had to be discovered the hard way.
-- **The dev-bypass guard gained a fourth entry point**, `apps/web/instrumentation.ts`. A
+- **The dev-bypass guard has a fourth entry point**, `apps/web/instrumentation.ts`. A
   containerised `next start` does not import route modules at boot, so the module-scope guard in
   `auth.config.ts` fired only on the first request and the container stayed up serving 500s
-  rather than refusing to start. CLAUDE.md still describes three entry points; Task 10 owns
-  correcting it.
-
-**Plan 4B** (infra, deploy, observability) has not started and still owns `infra/entra.bicep`.
+  rather than refusing to start.
+- **The Playwright sign-in test was a coin flip, not a passing gate.** Its first assertion had to
+  absorb two cold Turbopack compiles (~4.9s) inside Playwright's default 5000ms `expect` budget,
+  so it passed by ~0.3s on one run and failed by ~0.4s on the next — the failing one being a
+  **docs-only commit**. `playwright.config.ts` now sets `expect: { timeout: 20_000 }` and
+  `timeout: 60_000`, with the measurements recorded there. The suite must run against `next dev`
+  (the bypass cannot exist in a production build), so on-demand compilation is inherent and has
+  to be budgeted for rather than tuned away.
 
 ### What Plan 3 cost, and the one lesson worth carrying
 
@@ -327,24 +346,27 @@ build for four tasks unnoticed.
 > — so plans no longer overwrite each other's records and the old manual archiving step is
 > obsolete. The flat `.superpowers/sdd/progress.md` path referenced by older notes is dead.
 
-**Plan 3 is merged (PR #6).** Its SDD ledger is **kept** at `.superpowers/sdd/progress.md` rather
-than deleted, because it is the only record of what the review loop caught and why several
-decisions changed mid-plan. Archive it into `.superpowers/sdd/plan-3/` before Plan 4's first task.
+**Plan 3 is merged (PR #6).** An earlier note here said its SDD ledger was "kept" at
+`.superpowers/sdd/progress.md` as the only record of what the review loop caught, and told the next
+session to archive it into `.superpowers/sdd/plan-3/`. **Both instructions are now dead.** The
+directory is git-ignored, so on the machine that resumed Plan 4A it contained nothing but
+`.gitignore` — no Plan 3 ledger, no Plan 4A ledger, nothing to archive. **Do not plan around the
+ledger surviving.** If a record needs to outlive the machine that made it, it goes in the plan
+file, this file, or a commit message.
 
-### Plan 4's inherited obligations — all four are recorded, none are optional
+### Plan 4's inherited obligations — three closed in 4A, one carried to 4B
 
-1. **`infra/entra.bicep`** — moved here from Plan 3 (ADR-0011). Decision 4's premise, "Plan 3
-   cannot work without the registrations", became false once the bypass existed.
-2. **A `SIGTERM`/`SIGINT` handler in `apps/api`.** None exists. Container Apps sends `SIGTERM` on
-   every scale-down and redeploy, so in-flight requests are dropped — and scale-to-zero (ADR-0009)
-   makes that routine rather than deploy-only. Bears directly on NFR-2's "200 RPS burst, zero 5xx".
-3. **The `middleware.ts` → `proxy.ts` migration, with an ADR.** Next 16 deprecates `middleware.ts`,
-   but this is **not a rename**: `isProxyFile` routes to `onServer()` while `isMiddlewareFile`
-   routes to `onEdgeServer()`, so it moves the auth guard from Edge to Node, and Next hard-errors
-   if both files exist. Container Apps runs Node in a container with no Edge network, so the deploy
-   target settles it — but it changes a runtime on the auth path, so it needs the ADR.
-4. **`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`** — if
-   `buildServer` itself rejects, the client leaks. Low stakes since the process exits.
+1. **`infra/entra.bicep`** — **still open, now 4B's.** Moved here from Plan 3 (ADR-0011); deferred
+   again in 4A because it cannot be applied without the Entra directory. **This is its third
+   deferral** — treat it as owed, not optional.
+2. ~~**A `SIGTERM`/`SIGINT` handler in `apps/api`**~~ — **closed in 4A.**
+   `apps/api/src/shutdown.ts` drains via `app.close()`, disconnects Prisma, and force-exits
+   non-zero if the drain overruns, rather than being `SIGKILL`ed. Proven by `docker compose stop`
+   returning exit code 0 in CI.
+3. ~~**The `middleware.ts` → `proxy.ts` migration, with an ADR**~~ — **closed in 4A.** ADR-0013.
+   The guard now runs on Node, not the Edge, and `apps/web/middleware.ts` no longer exists.
+4. ~~**`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`**~~ —
+   **closed in 4A** by `apps/api/src/bootstrap.ts`.
 
 Plus four Minors the whole-branch review triaged as safe to carry: a gratuitous
 `{ extractable: true }` in `apps/api/test/auth-jwks-failure.test.ts`; `devKeyPairForTest` exporting
@@ -523,27 +545,29 @@ New, and all of them cost a round trip or a corrected plan. Formal doc/spec reco
 | **`vitest.config.ts` sets `fileParallelism: false`** | Both database suites `TRUNCATE` the same table. Enabling parallelism would make them race. Load-bearing |
 | **The generated Prisma client lives in `apps/api/src/generated/prisma/`** | A **third** git-ignored, eslint-ignored generated directory — same discipline as `@irp/types`/`@irp/client`: never committed, regenerated by `prisma generate`, and CI must generate it **before** typecheck |
 
-### Carried forward — open items created by Plan 2B
+### Carried forward — open items created by Plan 2B (all four now closed)
 
-- **No `SIGTERM`/`SIGINT` handler exists anywhere in `apps/api`.** Azure Container Apps sends
-  `SIGTERM` on scale-down and redeploy, so in-flight requests are dropped on every deploy. This
-  bears directly on the NFR "200 RPS burst, zero 5xx" target. **A Plan 4 obligation.**
+**All four are closed as of Plan 4A.** Kept with their original reasoning because each explains
+*why* the fix takes the shape it does.
+
+- ~~**No `SIGTERM`/`SIGINT` handler exists anywhere in `apps/api`.**~~ — **closed in Plan 4A.**
+  Container Apps sends `SIGTERM` on scale-down and redeploy, so in-flight requests were dropped on
+  every deploy, against NFR-2's "200 RPS burst, zero 5xx". `apps/api/src/shutdown.ts` now drains
+  via `app.close()`, disconnects Prisma, and force-exits non-zero if the drain overruns. CI asserts
+  `docker compose stop api` yields exit code 0, not 137.
 - ~~**The auth plugin's `catch` around `jwtVerify` is unconditional**~~ — **fixed in Plan 3.**
   A wrapper around the key-getter records whether retrieval itself failed, so a JWKS outage now
   returns **503** while an unverifiable token still returns 401.
-- **`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`.** If
-  `buildServer` itself rejects, the client leaks. Low stakes since the process exits.
-- **`middleware.ts` → `proxy.ts` migration, owed an ADR, Plan 4's.** `next build` warns that
-  `middleware.ts` is deprecated in favour of `proxy.ts`. This is **not a rename**: per
-  `next/dist/build/entries.js:231-243`, `isProxyFile` routes to `onServer()` unconditionally,
-  while `isMiddlewareFile` routes to `onEdgeServer()` unless `runtime === "nodejs"` — so adopting
-  `proxy.ts` moves the auth guard from the **Edge** runtime to **Node**, a behavioural change on
-  the auth path, not a cosmetic one. Next hard-errors if both files exist, so there is no
-  incremental migration path; it is one atomic swap. Deferred to Plan 4 because Azure Container
-  Apps runs Node in a container with no Edge network — the Edge bundle is dead weight there, and
-  the deploy target settles which runtime should own the guard. The build warning is accepted as
-  noise for Plan 3. Needs an ADR before the swap, per `CLAUDE.md`'s two-rejected-alternatives
-  rule, since "just rename it" is a plausible-looking wrong answer.
+- ~~**`index.ts` only `$disconnect()`s Prisma inside the `catch` around `app.listen`.**~~ —
+  **closed in Plan 4A** by `apps/api/src/bootstrap.ts`. If `buildServer` itself rejected, the
+  client leaked; low stakes since the process exits, but now handled.
+- ~~**`middleware.ts` → `proxy.ts` migration, owed an ADR.**~~ — **closed in Plan 4A, ADR-0013.**
+  It was **not a rename**: per `next/dist/build/entries.js:231-243`, `isProxyFile` routes to
+  `onServer()` unconditionally, while `isMiddlewareFile` routes to `onEdgeServer()` unless
+  `runtime === "nodejs"` — so adopting `proxy.ts` moved the auth guard from the **Edge** runtime to
+  **Node**, a behavioural change on the auth path, not a cosmetic one. Next hard-errors if both
+  files exist, so there was no incremental path; it was one atomic swap. `apps/web/middleware.ts`
+  no longer exists — **do not reintroduce a reference to it.**
 
 ### Superseded constraints from Plan 2A (kept for context)
 

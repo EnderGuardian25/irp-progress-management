@@ -29,11 +29,19 @@ cookie → decrypt → `@irp/client` → `apps/api` → Postgres → rendered us
    ON CONFLICT ("externalId") DO NOTHING;
    ```
 
-   Via `docker compose exec` (PowerShell):
+   Via `docker compose exec`. **Pipe the SQL in on stdin — do not pass it with
+   `-c`.** Windows PowerShell 5.1 does not preserve the `\"` escapes needed to
+   quote Postgres's case-sensitive identifiers through a native command's
+   argument list: it re-splits the string, and `psql` receives
+   `INSERT INTO " User\` plus a pile of "extra command-line argument ignored"
+   warnings. Save the block above as `seed.sql` and:
 
    ```powershell
-   docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
+   Get-Content seed.sql -Raw | docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -v ON_ERROR_STOP=1
    ```
+
+   On bash, `-c` with the SQL inline works fine — this is a PowerShell quoting
+   limitation, not a Postgres or Docker one.
 
 3. `apps/api/.env` and `apps/web/.env.local` from their `.env.example` files,
    with `AUTH_DEV_BYPASS=true` and the API pointed at the dev JWKS:

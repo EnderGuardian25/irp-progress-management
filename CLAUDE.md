@@ -153,32 +153,60 @@ than removing it from the production bundle; do not write or repeat the
 claim that it is excluded from the bundle. The startup throw
 (`assertBypassNotInProduction`, in `apps/web/auth.config.ts`) is the guard
 that structurally enforces the block, but its coverage is **per entry
-point, not automatic**: it runs at `auth.config.ts`'s own top level, which
-covers `apps/web/auth.ts` and `apps/web/middleware.ts` (which imports
-`auth.config.ts` directly, since it is not edge-safe to go through
-`auth.ts`) — but a **third** entry point, `apps/web/app/api/dev-jwks/route.ts`,
-imports `apps/web/lib/dev-identity.ts` directly and does not pull in
-`auth.config.ts` by any other path, so it needed — and now has — its own
-explicit call to `assertBypassNotInProduction(process.env)` at module scope.
-A whole-branch review proved the gap before the fix: a production `next
-start` with the flag on correctly 500'd on `/` and `/api/auth/session`, but
-served a live, freshly generated JWKS with 200 from `/api/dev-jwks`. **The
-rule going forward: any new module that imports `lib/dev-identity` directly
-must call the guard itself** — do not assume importing something that
-imports `auth.config.ts` is enough, and do not assume the guard's coverage
-is exhaustive just because it is described as "the same call." **Never
-weaken either guard**, and never loosen the exact-match comparison on
-`AUTH_DEV_BYPASS` or the case-insensitivity of the `NODE_ENV` comparison —
-the two checks are intentionally asymmetric, one narrow and one broad, and
-both directions matter. Once the Entra directory exists, perform the
-cutover in the Plan 3 spec §7 and remove the bypass. ADR-0012.
+point, not automatic**. There are **four**, and each one was discovered the
+hard way rather than reasoned about correctly in advance:
+
+1. `apps/web/auth.ts` — covered transitively; it imports `auth.config.ts`.
+2. `apps/web/proxy.ts` — covered directly. It imports `auth.config.ts`
+   itself rather than going through `auth.ts`. (Until Plan 4A this was
+   `middleware.ts`, and the reason was that it had to be edge-safe; ADR-0013
+   moved the guard to Node, and `middleware.ts` no longer exists. Do not
+   reintroduce a reference to it.)
+3. `apps/web/app/api/dev-jwks/route.ts` — its **own explicit call**. It
+   imports `apps/web/lib/dev-identity.ts` directly and pulls in
+   `auth.config.ts` by no other path. A Plan 3 whole-branch review proved the
+   gap before the fix: a production `next start` with the flag on correctly
+   500'd on `/` and `/api/auth/session` but served a live, freshly generated
+   JWKS with 200 from `/api/dev-jwks`.
+4. `apps/web/instrumentation.ts` — its **own explicit call**, added in Plan
+   4A. Next calls `register()` once per runtime at **server boot**, and that
+   is the only hook that runs when no request ever arrives. A containerised
+   `next start` does not import route modules at boot: `server.js` reads
+   `required-server-files.json` and opens a socket, and route modules load
+   lazily on the first matching request. So with the flag on, the container
+   started, reported "Ready", stayed Up indefinitely, and 500'd every
+   request. That is still fail-closed and no bypass session was reachable,
+   but "refuses to start" is a materially stronger guarantee than "serves
+   errors" — and a container sitting Up while failing everything reads as
+   healthy to any orchestrator without a route-level probe. It **catches and
+   calls `process.exit(1)` rather than just throwing**, because throwing out
+   of `register()` does not stop the server: Next wraps the hook and
+   surfaces the failure as an unhandledRejection, for which it has installed
+   its own listener that pre-empts Node's crash-on-unhandled-rejection. This
+   was measured, not assumed.
+
+**The rule going forward: any new module that imports `lib/dev-identity`
+directly, or that is a new process-level entry point, must call the guard
+itself** — do not assume importing something that imports `auth.config.ts`
+is enough, and do not assume the guard's coverage is exhaustive just because
+it is described as "the same call." Four successive claims that coverage was
+complete have now been false. Note the shape: **four entry points, three call
+sites** — the count of calls has never equalled the count of things needing
+cover, which is exactly why "it's the same call" keeps being wrong.
+**Never weaken any of these guards**, and
+never loosen the exact-match comparison on `AUTH_DEV_BYPASS` or the
+case-insensitivity of the `NODE_ENV` comparison — the two checks are
+intentionally asymmetric, one narrow and one broad, and both directions
+matter. Once the Entra directory exists, perform the cutover in the Plan 3
+spec §7 and remove the bypass. ADR-0012.
 
 **Hard-won facts from Plan 3, worth not rediscovering:**
 
 - **`pnpm typecheck` is not sufficient for `apps/web`.** Plain `tsc` does not run Next's own
-  checks: it missed a `typedRoutes` error and a `middleware.ts` export-shape error that broke
-  the production build for four tasks before a reviewer ran the real build. `pnpm --filter
-  @irp/web build` is part of the required verification set for any change touching `apps/web`.
+  checks: it missed a `typedRoutes` error and an export-shape error in the then-`middleware.ts`
+  (now `proxy.ts`, ADR-0013) that broke the production build for four tasks before a reviewer ran
+  the real build. `pnpm --filter @irp/web build` is part of the required verification set for any
+  change touching `apps/web`.
 - **Next canonicalises loopback hostnames to the literal string `localhost`**
   (`NextURL.parseURL` / `REGEX_LOCALHOST_HOSTNAME` in `next/dist/server/web/next-url.js`).
   Driving a browser at `127.0.0.1` breaks two things: the dev server 403s `/_next/*` as
@@ -206,6 +234,39 @@ cutover in the Plan 3 spec §7 and remove the bypass. ADR-0012.
   variable. **CI is unaffected**: `.env.local` is git-ignored and CI never sets the flag, which
   is why the CI build step deliberately runs with it absent. If a local `next build` ever
   succeeds with `AUTH_DEV_BYPASS=true`, guard one has broken — investigate immediately.
+
+**Container facts from Plan 4A:**
+
+- **`node:24-slim`, never alpine.** Debian/glibc matches Prisma's `debian-openssl-3.0.x` binary
+  target. Alpine is musl, needs a different target, and fails at *runtime* rather than at build
+  time.
+- **The generated Prisma client is pure TypeScript** (no engine binaries — Prisma 7 with a driver
+  adapter, ADR-0008), so `tsc` compiles it into `dist/generated/prisma/` and the API runtime image
+  needs `apps/api/dist` **only**. Do not copy `src/generated` into an image.
+- **`prisma generate` in a Docker build needs a throwaway `DATABASE_URL` build arg.** It must
+  parse; it never connects.
+- **`outputFileTracingRoot` must be the repository root.** Tracing from `apps/web` misses workspace
+  dependencies and yields an image that builds and then fails at runtime on a missing module.
+- **`.next/static` is not traced into `.next/standalone`** and must be copied separately, or every
+  `/_next/static` request 404s and the page renders unstyled — which no status-code check catches.
+- **`node:24-slim` ships neither `curl` nor `wget`.** Container healthchecks use `node -e` with
+  `fetch`.
+- **Copy the whole `prod-deps` stage, not individual `node_modules` paths.** A path-by-path copy
+  breaks pnpm's relative symlinks, and `packages/core/node_modules` does not exist under `--prod`
+  (it has devDependencies only), so a `COPY` of it fails the build.
+- **`apps/web/public/` does not exist.** A `COPY` of it fails the build.
+- **A containerised `next start` is a distinct entry point for the dev-bypass guard.** CI asserts
+  the web container exits non-zero with `AUTH_DEV_BYPASS=true`, *and* that it does so with the
+  guard's own error string — a bare non-zero exit proves nothing, since a missing env var or a bad
+  `CMD` also exits non-zero.
+- **CI runs on `pull_request` and pushes to `main` only.** A bare push to a feature branch triggers
+  **nothing**. Push the branch *and* open the PR, or you are reading stale checks.
+- **The Playwright suite must run against `next dev`**, because the sign-in chain needs
+  `AUTH_DEV_BYPASS=true` and that cannot exist in a production build. On-demand Turbopack
+  compilation is therefore inherent to the suite, and its cost lands inside the first test's first
+  assertion — two cold compiles, ~4.9s. `playwright.config.ts` budgets for it explicitly
+  (`expect: { timeout: 20_000 }`); the default 5000ms made that gate a coin flip. **Do not "tidy"
+  those timeouts back down.**
 
 **Time handling.** Store every timestamp in UTC. Evaluate every deadline, late flag, and cycle boundary in **Asia/Colombo (UTC+05:30)**. Never rely on the server's local timezone — the deploy region is not Sri Lanka. Cycles run the 10th → the 9th of the following month.
 

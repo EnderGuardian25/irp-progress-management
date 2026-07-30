@@ -64,12 +64,35 @@ export async function register(): Promise<void> {
     // is strictly worse than being visibly dead.
     console.error(error);
 
-    // The Edge runtime has no process.exit. Next only builds an Edge
-    // instrumentation bundle when there is Edge runtime code — since ADR-0013
-    // proxy.ts runs on Node, there is currently none — but this file must not
-    // become the thing that breaks if that changes. Re-throwing is the best
-    // available behaviour there; on Node it is exit(1) that makes the
-    // container actually stop.
+    // The Edge runtime has no process.exit, so this branch is load-bearing:
+    // re-throwing is the best available behaviour there, and on Node it is
+    // exit(1) that makes the container actually stop.
+    //
+    // CORRECTED, 2026-07-30. An earlier version of this comment claimed Next
+    // "only builds an Edge instrumentation bundle when there is Edge runtime
+    // code — since ADR-0013 proxy.ts runs on Node, there is currently none."
+    // That is false, and the CI logs disprove it: Next compiles an Edge
+    // instrumentation bundle unconditionally, and both `next dev` and `next
+    // build` report
+    //
+    //   ./apps/web/instrumentation.ts:76:5
+    //   A Node.js API is used (process.exit ...) which is not supported in
+    //   the Edge Runtime.
+    //   Ecmascript file had an error
+    //
+    // on every run — ~35 times per `next dev` session, and once as "Turbopack
+    // build encountered 1 warnings" during `next build`, which then reports
+    // "Compiled successfully". **This warning is expected and the build is
+    // green.** Turbopack flags `process.exit` by STATIC analysis, so the
+    // runtime `typeof` check below cannot suppress it; the Edge bundle is
+    // simply never the one that runs here.
+    //
+    // Do not "fix" the warning by deleting the exit or by hiding the call
+    // behind an indirection to defeat the static check. The exit is the only
+    // thing that makes "refuses to start" true on Node (see above), and
+    // obscuring it would trade a harmless log line for a weaker guard. If
+    // this warning ever disappears, something changed about how Next builds
+    // instrumentation — check that the Node path still exits.
     if (typeof process.exit !== "function") {
       throw error;
     }
