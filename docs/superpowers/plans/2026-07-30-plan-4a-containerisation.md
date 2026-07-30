@@ -2059,10 +2059,27 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `Dockerfile` (append the `web` target)
+- Create: `apps/web/instrumentation.ts` (the boot-time bypass guard — see Step 4)
+- Create: `apps/web/test/instrumentation.test.ts`
 
 **Interfaces:**
 - Consumes: stage `build` from Task 6, and the standalone layout from Task 4.
-- Produces: target `web`, used by Task 8's compose file.
+- Produces: target `web`, used by Task 8's compose file. Also produces a **fourth**
+  entry point for `assertBypassNotInProduction`, alongside `auth.ts`, `proxy.ts` and
+  `app/api/dev-jwks/route.ts`. Task 10 owns updating CLAUDE.md's guard prose to say four.
+
+**CORRECTION 3 (applied 2026-07-30, decided by the user).** As originally written this task
+was Dockerfile-only and Step 4 expected the container to exit non-zero on
+`AUTH_DEV_BYPASS=true`. It did not, and the reason is structural rather than a defect in the
+guard — see Step 4. Closing it needs an `apps/web` source file, so the file list above grew.
+Two facts were established empirically and neither was guessable from the code:
+1. A standalone `next start` does not import route modules at boot, so the module-scope guard
+   in `auth.config.ts` first fires on the first matching **request**, not at startup.
+2. **Throwing from `register()` does not stop the server.** Next catches the hook's rejection,
+   logs `An error occurred while loading the instrumentation hook`, and its own process-level
+   `unhandledRejection` listener pre-empts Node's default crash-on-unhandled-rejection. The
+   container was observed still `Up`, exit code `0`. An explicit `process.exit(1)` is what
+   makes "refuses to start" true here.
 
 **Layout fact from Task 4.** A monorepo standalone build emits
 `apps/web/.next/standalone/apps/web/server.js` plus `apps/web/.next/standalone/node_modules`.
@@ -2130,51 +2147,108 @@ docker logs irp-web-test
 Expected: no 404s for `/_next/static/*`. Better, open `http://localhost:3000/signin` in a browser
 and confirm it is **styled**, not unstyled HTML. Record which check you ran.
 
-- [ ] **Step 4: Prove the bypass guard refuses the container**
+- [ ] **Step 4: Add the boot-time guard — `apps/web/instrumentation.ts`**
 
-This is a **brand-new entry point** for `assertBypassNotInProduction` — a containerised
-`next start` has never been exercised against it.
+A containerised `next start` is a **brand-new entry point** for
+`assertBypassNotInProduction`, and the module-scope call in `auth.config.ts` does not cover
+it. `server.js` is a generic launcher: it reads `required-server-files.json`, opens a socket,
+and requires route modules lazily on the first matching request. So with
+`AUTH_DEV_BYPASS=true` the container starts, prints `Ready`, and stays `Up` — then 500s every
+request once something touches a route.
+
+That is fail-closed and no bypass session is reachable, but it is weaker than "refuses to
+start", and it holds only because every reachable route happens to import the guard
+transitively. That coincidence is exactly what did **not** hold in Plan 3, when
+`/api/dev-jwks` served a live JWKS while `/` correctly 500'd.
+
+Create `apps/web/instrumentation.ts`. Next calls `register()` once per runtime at boot.
+
+Three things about its shape are load-bearing, all three measured:
+
+- **The import of `@/auth.config` must be dynamic and inside the `try`.** `auth.config.ts`
+  calls the guard at its own module scope, so a static top-level import throws during module
+  evaluation of `instrumentation.ts` — before `register()` is entered, and outside any catch it
+  could install. The observed stack frame was `at module evaluation`, not inside `register()`.
+- **It must `process.exit(1)`, not throw.** See Correction 3 above. Throwing leaves the
+  container `Up` with exit code `0`.
+- **The export must be named exactly `register`.** A rename or default export silently never
+  runs — an unguarded boot with no error. Pin it with a test.
+
+Guard the exit for the Edge runtime, which has no `process.exit` (Next only builds an Edge
+instrumentation bundle when Edge runtime code exists; since ADR-0013 `proxy.ts` runs on Node,
+so there is currently none — but this file must not be what breaks if that changes).
+
+Add `apps/web/test/instrumentation.test.ts`. Assert `process.exit(1)` with a spy, **not** a
+thrown error — the exit call is the guarantee, so it is what gets pinned. Cover: the export
+shape; production + bypass exits 1 and logs the message; `NODE_ENV=Production` capitalised
+exits 1; the check happens at call time (import the module under a safe environment first, so
+only the explicit call inside `register()` can fire); and a production boot **without** the
+bypass does not exit — a false positive here takes production down, which is the opposite
+failure and just as bad.
+
+- [ ] **Step 5: Prove the container refuses to start**
 
 ```powershell
-docker rm -f irp-web-test 2>$null
-docker run --rm --name irp-web-bypass `
+docker build --target web -t irp-web .
+$out = & docker run --rm --name irp-web-bypass `
   -e AUTH_SECRET="container-only-secret-at-least-32b" `
   -e AUTH_URL="http://localhost:3000" `
   -e API_BASE_URL="http://host.docker.internal:3001" `
-  -e AUTH_DEV_BYPASS=true `
-  irp-web
-echo "exit code: $LASTEXITCODE"
+  -e AUTH_DEV_BYPASS=true irp-web 2>&1
+"exit code: $LASTEXITCODE"
 ```
 
-Expected: the container **exits non-zero**, printing "AUTH_DEV_BYPASS is set in a production build.
-Refusing to start."
+Expected: **exit code 1**, printing "AUTH_DEV_BYPASS is set in a production build. Refusing to
+start.", with the process ending on its own and never serving a request.
 
-**If it starts successfully, stop everything and investigate.** That is guard one broken, and it
-means the dev bypass could reach a deployed environment. Do not work around it, do not weaken the
-guard, and do not proceed to Task 8.
+**If it starts successfully and stays up, stop everything and investigate.** That is guard one
+broken, and it means the dev bypass could reach a deployed environment. Do not work around it,
+do not weaken the guard, and do not proceed to Task 8.
 
 Also confirm the case-insensitivity of the `NODE_ENV` half:
 
 ```powershell
-docker run --rm -e AUTH_SECRET="container-only-secret-at-least-32b" `
+$out = & docker run --rm -e AUTH_SECRET="container-only-secret-at-least-32b" `
   -e AUTH_URL="http://localhost:3000" -e API_BASE_URL="http://host.docker.internal:3001" `
-  -e AUTH_DEV_BYPASS=true -e NODE_ENV=Production irp-web
-echo "exit code: $LASTEXITCODE"
+  -e AUTH_DEV_BYPASS=true -e NODE_ENV=Production irp-web 2>&1
+"exit code: $LASTEXITCODE"
 ```
 
-Expected: also non-zero. Record both exit codes.
+Expected: also `1`. Record both exit codes.
 
-- [ ] **Step 5: Clean up**
+**Capture the exit code by assignment, not through a pipe.** Piping `docker run` into
+`Select-String` or `Select-Object` makes `$LASTEXITCODE` reflect the cmdlet, not docker — it
+reported `-1` for a run that genuinely exited `1`. Assign to `$out` and read `$LASTEXITCODE`
+on the next line.
+
+Then re-run Step 3 against the rebuilt image. Adding `instrumentation.ts` changes the
+standalone tree, so the `/signin` and static-asset evidence from before this step is stale.
+
+- [ ] **Step 6: Clean up**
 
 ```powershell
-docker rm -f irp-web-test irp-web-bypass 2>$null
+docker rm -f irp-web-test irp-web-bypass irp-web-bypass2 2>$null
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Verify and commit**
+
+Required verification set (`pnpm typecheck` alone is NOT sufficient for `apps/web`):
 
 ```bash
-git add Dockerfile
-git commit -m "build(web): standalone runtime image
+pnpm --filter @irp/web test --run
+pnpm lint
+pnpm typecheck
+AUTH_DEV_BYPASS=false pnpm --filter @irp/web build
+```
+
+Prove the new test actually fails before trusting it: empty `register()`'s body, confirm the
+suite goes red, restore it. **`git checkout` cannot restore `instrumentation.ts` during this
+task** — the file is still untracked, so back it up first and diff against the backup after.
+
+```bash
+git add Dockerfile apps/web/instrumentation.ts apps/web/test/instrumentation.test.ts \
+        docs/superpowers/plans/2026-07-30-plan-4a-containerisation.md
+git commit -m "build(web): standalone runtime image that refuses a production bypass
 
 Copies the traced standalone tree plus .next/static — static assets are not
 traced into standalone, and omitting them 404s every /_next/static request and
@@ -2183,10 +2257,22 @@ serves the page unstyled, which no status-code check would catch.
 apps/web/public does not exist in this repository; a COPY of it would fail the
 build, and the Dockerfile says so.
 
-Verified that the container REFUSES to start with AUTH_DEV_BYPASS=true, and
-also with NODE_ENV=Production capitalised. A containerised next start is a
-brand-new entry point for assertBypassNotInProduction and had never been
-exercised against it.
+A containerised next start is a brand-new entry point for
+assertBypassNotInProduction, and it was not covered. server.js requires route
+modules lazily, so with AUTH_DEV_BYPASS=true the container started, printed
+Ready, and stayed Up — 500ing every request instead of refusing to boot. That
+is fail-closed but weaker than documented, and it held only because every
+reachable route happens to import the guard transitively; Plan 3 already
+shipped a case where that coincidence did not hold.
+
+instrumentation.ts makes it structural: register() runs once at boot, on a path
+no route can route around. It exits rather than throwing because throwing does
+not stop a Next server — Next catches the hook's rejection and its own
+unhandledRejection listener pre-empts Node's default crash, leaving the
+container Up with exit code 0. Measured, not assumed.
+
+Verified in the container: exit code 1 with AUTH_DEV_BYPASS=true, and also with
+NODE_ENV=Production capitalised, both before serving any request.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```

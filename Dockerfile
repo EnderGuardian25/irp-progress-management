@@ -208,3 +208,25 @@ USER node
 WORKDIR /repo/apps/api
 EXPOSE 3001
 CMD ["node", "dist/index.js"]
+
+###############################  web  ###############################
+FROM base AS web
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# The standalone tree is already self-contained: Next traced exactly the files
+# the server needs (outputFileTracingRoot is the repo root — see
+# apps/web/next.config.ts). In a monorepo it emits apps/web/server.js and a
+# node_modules at its own root, so copying it to /repo reproduces that layout.
+COPY --from=build /repo/apps/web/.next/standalone/ ./
+# Static assets are deliberately NOT traced into standalone and must be copied
+# separately, or every /_next/static request 404s and the page renders unstyled.
+COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
+
+# NOTE: there is no apps/web/public/ in this repository. A COPY of it would
+# fail the build. Add one here if that directory is ever created.
+
+USER node
+EXPOSE 3000
+CMD ["node", "apps/web/server.js"]
