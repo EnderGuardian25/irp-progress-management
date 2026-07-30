@@ -2,6 +2,23 @@ generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
   runtime  = "nodejs"
+  // Pins the extension on the generator's own relative imports (e.g. the
+  // client's `from "./enums"` re-export) so it is deterministic across
+  // environments. Without this, Prisma's generator (rBe/UBt in the installed
+  // prisma@7.9.1 CLI) picks the extension by asking whether it can find a
+  // tsconfig near the output directory, not by OS: no tsconfig found emits
+  // ".ts" (Docker's `generated` stage never copies apps/api/tsconfig.json, so
+  // it hit this branch); a tsconfig found with moduleResolution "Bundler"
+  // (tsconfig.base.json's setting) emits extensionless (a plain local
+  // `prisma generate` hits this branch instead). Neither is runnable by plain
+  // `node` against compiled dist/: Node's ESM loader cannot resolve a literal
+  // ".ts" specifier, and an extensionless specifier resolves to nothing at
+  // all. Pinning to "js" here makes every `prisma generate` run — tsconfig
+  // visible or not — emit "./enums.js", which TypeScript's .js -> .ts
+  // substitution resolves under moduleResolution: Bundler (apps/api's own
+  // config), and which is exactly what dist/ contains after `tsc` compiles
+  // it. See apps/api/src/db/client.ts:2 for the consumer that relies on this.
+  importFileExtension = "js"
 }
 
 datasource db {

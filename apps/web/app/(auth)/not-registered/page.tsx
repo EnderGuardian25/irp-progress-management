@@ -2,7 +2,7 @@ import { signOut } from "@/auth";
 
 // Terminal state — never link to /signin. The session here is VALID (the
 // user authenticated fine), it is just not registered on the programme, so
-// middleware's `authorized` check would see a valid session and bounce a
+// proxy.ts's `authorized` check would see a valid session and bounce a
 // /signin link straight back here: an infinite loop. Signing out first is
 // the only way out, which is why the only control on this page is sign-out.
 export default function NotRegisteredPage() {

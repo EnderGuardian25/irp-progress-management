@@ -1,23 +1,55 @@
 import { createRemoteJWKSet } from "jose";
-import { ConsoleSpanExporter } from "@opentelemetry/sdk-trace-node";
+import { bootstrap } from "./bootstrap.js";
 import { loadConfig } from "./config.js";
 import { createPrismaClient } from "./db/client.js";
 import { createUserRepo } from "./db/user-repo.js";
-import { createTracerProvider } from "./telemetry.js";
+import { selectSpanExporter } from "./exporter.js";
 import { buildServer } from "./server.js";
+import { registerShutdown } from "./shutdown.js";
+import { createTracerProvider } from "./telemetry.js";
+
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
 const prisma = createPrismaClient(config.databaseUrl);
-const userRepo = createUserRepo(prisma);
-const getKey = createRemoteJWKSet(new URL(config.jwksUri));
-const tracerProvider = createTracerProvider(new ConsoleSpanExporter());
 
-const app = await buildServer({ config, userRepo, getKey, tracerProvider });
+const rawTimeout = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? DEFAULT_SHUTDOWN_TIMEOUT_MS);
+const timeoutMs =
+  Number.isInteger(rawTimeout) && rawTimeout > 0 ? rawTimeout : DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
-try {
-  await app.listen({ port: config.port, host: "0.0.0.0" });
-} catch (err) {
-  app.log.error(err);
-  await prisma.$disconnect();
-  process.exit(1);
-}
+await bootstrap({
+  start: async () => {
+    const userRepo = createUserRepo(prisma);
+    const getKey = createRemoteJWKSet(new URL(config.jwksUri));
+    const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
+    const app = await buildServer({ config, userRepo, getKey, tracerProvider });
+
+    registerShutdown({
+      close: () => app.close(),
+      disconnect: () => prisma.$disconnect(),
+      exit: (code) => {
+        process.exit(code);
+      },
+      log: (event, err) => {
+        if (err === undefined) {
+          app.log.info(event);
+        } else {
+          app.log.error({ err }, event);
+        }
+      },
+      timeoutMs,
+      signals: ["SIGTERM", "SIGINT"],
+      on: (signal, handler) => {
+        process.on(signal, handler);
+      },
+    });
+
+    await app.listen({ port: config.port, host: "0.0.0.0" });
+  },
+  disconnect: () => prisma.$disconnect(),
+  // No app.log here on purpose: if buildServer rejected there is no app.
+  fatal: (err) => {
+    console.error(err);
+    process.exit(1);
+  },
+});

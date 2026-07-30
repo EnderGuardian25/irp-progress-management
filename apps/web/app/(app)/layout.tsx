@@ -9,7 +9,7 @@ import { getCurrentUserOrRedirect } from "@/lib/api-client";
 //
 // This layout deliberately does NOT guard. Next.js layouts are cached across
 // navigations and its own docs warn against relying on them for
-// authorization — see Task 9's middleware.ts and, authoritatively, apps/api.
+// authorization — see proxy.ts and, authoritatively, apps/api.
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUserOrRedirect();
 

@@ -4,17 +4,28 @@ import { authConfig } from "./auth.config";
 /**
  * A UX redirect, NOT the security boundary.
  *
- * Next.js middleware has had bypass CVEs, and layouts are cached across
+ * Next.js has had middleware bypass CVEs, and layouts are cached across
  * navigations, so neither is a control. The boundary is apps/api: a global
  * fail-closed onRequest hook, jose validation against the JWKS, and 403 for a
  * valid token with no User row.
  *
- * Uses authConfig (edge-safe) rather than auth.ts, which pulls in Node-only
- * modules the Edge runtime cannot load.
+ * This file replaced middleware.ts in Plan 4A. That was not a rename — per
+ * next/dist/build/entries.js, isProxyFile routes to onServer() while
+ * isMiddlewareFile routes to onEdgeServer(), so the guard moved from the Edge
+ * runtime to Node. See ADR-0013. Next hard-errors if both files exist.
+ *
+ * The export MUST be named `proxy`. Next resolves the handler as
+ * `(isProxy ? mod.proxy : mod.middleware) || mod.default` and throws
+ * ProxyMissingExportError otherwise — a failure `tsc` cannot see.
+ *
+ * Uses authConfig rather than auth.ts. auth.ts pulls in Node-only modules that
+ * were unusable on the Edge; on Node they would now load, but importing it here
+ * would still be a wider surface for no benefit, and auth.config.ts is where
+ * assertBypassNotInProduction is invoked at module scope.
  */
 const { auth } = NextAuth(authConfig);
 
-export { auth as middleware };
+export { auth as proxy };
 
 export const config = {
   // `api` is excluded wholesale, not just `api/auth`. Redirecting *any* API
@@ -22,10 +33,10 @@ export const config = {
   // (fetch/curl/jose's JWKS client) cannot consume a sign-in page, and
   // apps/api is the actual security boundary for /api/* anyway — it runs its
   // own fail-closed auth check. A prior version excluded only `api/auth`,
-  // which left `/api/dev-jwks` guarded: middleware redirected it to
-  // /signin (307), createRemoteJWKSet's fetch (redirect: 'manual') threw on
-  // the non-200 response, and every dev-minted token failed validation —
-  // dev sign-in was broken end to end.
+  // which left `/api/dev-jwks` guarded: the redirect to /signin (307) made
+  // createRemoteJWKSet's fetch (redirect: 'manual') throw on the non-200
+  // response, and every dev-minted token failed validation — dev sign-in was
+  // broken end to end.
   // `_next` is likewise excluded WHOLESALE rather than just `_next/static` and
   // `_next/image`: nothing under /_next is ever a route a human signs in to, so
   // enumerating subpaths only invites missing one (the dev HMR socket lives at

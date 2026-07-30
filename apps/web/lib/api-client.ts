@@ -128,7 +128,7 @@ export interface WebUser {
 
 /**
  * Four distinct states, not two. Routing a 403 to /signin loops forever: the
- * session is valid, so middleware sends the user straight back. See spec §8.
+ * session is valid, so proxy.ts sends the user straight back. See spec §8.
  */
 export async function getCurrentUserOrRedirect(): Promise<WebUser> {
   const client = await apiClient();

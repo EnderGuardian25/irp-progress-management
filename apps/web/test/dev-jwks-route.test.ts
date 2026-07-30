@@ -6,13 +6,13 @@
 // dev-identity.test.ts), so this file runs under the plain Node environment.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// A whole-branch review found this route had NEITHER guard: middleware.ts
+// A whole-branch review found this route had NEITHER guard: proxy.ts
 // excludes /api wholesale, and this file imported lib/dev-identity directly
 // without ever pulling in auth.config.ts, so a production process with
 // AUTH_DEV_BYPASS=true served a live, freshly generated JWKS with 200 while
 // sign-in itself correctly 500'd. These tests pin the fix: the route now
 // calls assertBypassNotInProduction(process.env) at module scope, imported
-// from auth.config.ts, exactly like auth.ts and middleware.ts.
+// from auth.config.ts, exactly like auth.ts and proxy.ts.
 //
 // Each test imports the route module fresh (vi.resetModules() first) with a
 // literal specifier — a literal import() specifier is statically analyzable,
@@ -55,7 +55,7 @@ describe("GET /api/dev-jwks", () => {
   // Proves the guard is actually wired into THIS module, not just present
   // somewhere else in the codebase: importing the route module itself, with
   // the bypass set in a production environment, must throw — the same
-  // assertion middleware.test.ts makes for auth.config.ts's own module-scope
+  // assertion proxy.test.ts makes for auth.config.ts's own module-scope
   // call. Before the fix, this import succeeded and GET() returned 200.
   it("throws via assertBypassNotInProduction merely by being imported when the bypass is set in production", async () => {
     vi.resetModules();

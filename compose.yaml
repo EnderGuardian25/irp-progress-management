@@ -1,0 +1,104 @@
+# The full stack as production-mode containers. Deliberately separate from
+# apps/api/docker-compose.yml, which stays the db-only dev dependency that the
+# test setup, the e2e README and manual-setup-steps.md all reference.
+#
+#   docker compose up --wait
+#
+# NOTE: there is no working sign-in here, and that is correct rather than a
+# regression. Containers run NODE_ENV=production, so assertBypassNotInProduction
+# refuses the dev bypass (ADR-0012), and no Entra directory exists yet. /signin
+# renders with no provider behind it. Authenticated flows stay proven by the
+# Playwright suite against `pnpm dev`.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: irp
+      POSTGRES_PASSWORD: irp
+      POSTGRES_DB: irp
+    # No published host port on purpose: nothing on the host needs one, and
+    # publishing would collide with apps/api/docker-compose.yml when both are up.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U irp -d irp"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://irp:irp@db:5432/irp?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: api
+      args:
+        # Deliberately the ONLY place APP_VERSION reaches this service — do
+        # not re-add it to `environment:` below. CI's /health assertion
+        # exists to prove the build arg reached the image; runtime env alone
+        # would satisfy that grep even if the Dockerfile stopped baking the
+        # arg in, leaving the assertion green while testing nothing.
+        APP_VERSION: ${APP_VERSION:-dev}
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgresql://irp:irp@db:5432/irp?schema=public
+      # Deliberately unresolvable. createRemoteJWKSet is LAZY — it performs no
+      # network I/O at construction — so the API boots and serves /health
+      # regardless. This only matters once a token arrives, which in this stack
+      # never happens because there is no sign-in. Do not "fix" it.
+      JWKS_URI: https://jwks.invalid/keys
+      JWT_ISSUER: https://issuer.invalid/v2.0
+      JWT_AUDIENCE: api://irp-progress-management
+    ports:
+      - "3001:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # node -e, not curl: node:24-slim ships neither curl nor wget.
+      test:
+        ["CMD", "node", "-e",
+         "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      target: web
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      # Local-only. A real deployment injects this from a secret store.
+      AUTH_SECRET: compose-only-secret-at-least-32-bytes
+      AUTH_URL: http://localhost:3000
+      API_BASE_URL: http://api:3001
+      # AUTH_DEV_BYPASS is deliberately ABSENT. Setting it true here makes the
+      # container refuse to start — see the guard test in the CI images job.
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "node", "-e",
+         "fetch('http://127.0.0.1:3000/signin').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
