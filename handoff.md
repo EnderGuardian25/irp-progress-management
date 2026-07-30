@@ -270,10 +270,25 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/plan-4a-containerisation`, open as **PR #8** against `main` · **In flight:**
-Plan 4A (containerisation, runtime hardening, exporter seam) — all ten tasks done, awaiting the
-whole-branch review · **Next:** Plan 4B (infra, deploy, observability), which still owns
-`infra/entra.bicep`
+**Branch:** `feat/plan-4a-containerisation`, open as **PR #8** against `main` · **Status:** Plan 4A
+complete — all ten tasks done, whole-branch review run, **all CI checks green on `9b64d28`**
+(`verify` x3 and `images` pass, `real-token` correctly skipped). **Ready to merge; not merged.** ·
+**Next:** Plan 4B (infra, deploy, observability), which still owns `infra/entra.bicep`
+
+**The whole-branch review found four things, all fixed on the branch.** Two were gates that did not
+gate (the coin-flip Playwright budget, and the unbounded CI jobs) and two were false statements
+sitting in comments: `instrumentation.ts` claiming Next builds no Edge instrumentation bundle, and
+`app/api/dev-jwks/route.ts` describing the bypass guard's trigger **inverted** ("with the bypass
+flag off" — it fires when the flag is *on* in production). Everything else reviewed clean:
+`shutdown.ts`, `bootstrap.ts`, `exporter.ts`, `proxy.ts`, the `Dockerfile` build graph,
+`compose.yaml`, the `schema.prisma` `importFileExtension` pin, ADRs 0013/0014, and the
+`@azure/monitor-opentelemetry-exporter` pin (which is correctly recorded in `CLAUDE.md` with its
+prerelease-semver trap).
+
+**Known doc debt, deliberately not touched:** `docs/adr/0012` and the Plan 3 plan/spec still say the
+bypass has **three** entry points. ADRs are dated records superseded by later ones rather than
+edited in place, and `CLAUDE.md` now carries the live four-entry-point list. If that convention is
+wrong here, ADR-0012 wants a superseded-by pointer.
 
 **On the SDD ledger.** `.superpowers/sdd/progress.md` is **git-ignored, so it does not travel with
 a clone or a push.** Earlier notes called it "the authoritative resume map" — that is only true on
