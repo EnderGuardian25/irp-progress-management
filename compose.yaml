@@ -30,7 +30,7 @@ services:
       context: .
       target: migrate
     environment:
-      DATABASE_URL: postgresql://irp:irp@db:5432/irp?schema=public
+      DATABASE_URL: postgresql://irp:irp@10.255.255.1:5432/irp?schema=public
     depends_on:
       db:
         condition: service_healthy
