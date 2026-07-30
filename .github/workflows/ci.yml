@@ -366,3 +366,124 @@ jobs:
             echo "::error::A real Entra token did not authenticate against the API."
             exit 1
           fi
+
+  # Image build and container startup. A SEPARATE job rather than a fourth leg
+  # of verify's timezone matrix: nothing here is timezone-sensitive, and three
+  # legs each building three images would triple the slowest job in the
+  # workflow against NFR-5's under-8-minute budget.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build all three targets. Without this the Dockerfile rots silently the
+      # first time a dependency or a build script changes.
+      - name: Build the api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          load: true
+          tags: irp-api:ci
+          build-args: APP_VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          load: true
+          tags: irp-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build the migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          load: true
+          tags: irp-migrate:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A containerised `next start` is a brand-new entry point for
+      # assertBypassNotInProduction and had never been exercised against it
+      # before Plan 4A. This is the only gate covering it. If the container
+      # starts, guard one has broken and the dev bypass could reach a deployed
+      # environment — that is an auth failure, not a test failure.
+      - name: The web container must refuse AUTH_DEV_BYPASS=true
+        run: |
+          set +e
+          docker run --rm \
+            -e AUTH_SECRET=ci-only-secret-at-least-32-bytes-xx \
+            -e AUTH_URL=http://localhost:3000 \
+            -e API_BASE_URL=http://localhost:3001 \
+            -e AUTH_DEV_BYPASS=true \
+            irp-web:ci
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::The web container started with AUTH_DEV_BYPASS=true. Guard one is broken."
+            exit 1
+          fi
+          echo "Refused to start, exit code $code — correct."
+
+      - name: Bring the whole stack up
+        env:
+          APP_VERSION: ${{ github.sha }}
+        run: docker compose up --wait --build
+
+      - name: The API is healthy and reports the build version
+        run: |
+          body=$(curl -fsS http://localhost:3001/health)
+          echo "$body"
+          echo "$body" | grep -q "${GITHUB_SHA:0:7}" || {
+            echo "::error::/health did not report the build version. APP_VERSION did not reach the image."
+            exit 1
+          }
+
+      # Fail-closed, in production mode, from a real container. The unit suite
+      # cannot cover NODE_ENV=production behaviour of the problem-details
+      # handler.
+      - name: An unauthenticated /api/v1/me returns 401 with a Problem Details body
+        run: |
+          status=$(curl -sS -o /tmp/me.json -w '%{http_code}' http://localhost:3001/api/v1/me)
+          echo "status=$status"
+          cat /tmp/me.json
+          if [ "$status" != "401" ]; then
+            echo "::error::Expected 401 from an unauthenticated /api/v1/me, got $status."
+            exit 1
+          fi
+          grep -q '"type"' /tmp/me.json || {
+            echo "::error::The 401 body is not RFC 7807 Problem Details."
+            exit 1
+          }
+
+      - name: The web app serves its sign-in page
+        run: curl -fsS -o /dev/null http://localhost:3000/signin
+
+      # ADR-0009 D5 scales to zero, so this is a routine event, not a
+      # deploy-time one. A 137 here is a SIGKILL: dropped in-flight requests on
+      # every scale-down, against NFR-2's zero-5xx target.
+      - name: The API drains on SIGTERM rather than being killed
+        run: |
+          docker compose stop api
+          code=$(docker compose ps -a --format '{{.Service}} {{.ExitCode}}' | awk '$1=="api"{print $2}')
+          echo "api exit code: $code"
+          if [ "$code" != "0" ]; then
+            echo "::error::api exited $code on SIGTERM (137 = SIGKILL). The drain did not complete."
+            exit 1
+          fi
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
