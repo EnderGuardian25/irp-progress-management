@@ -27,6 +27,7 @@ WORKDIR /repo
 # every edit and put NFR-5's 8-minute budget at risk.
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json        ./apps/api/package.json
 COPY apps/web/package.json        ./apps/web/package.json
 COPY packages/core/package.json   ./packages/core/package.json
 COPY packages/types/package.json  ./packages/types/package.json
