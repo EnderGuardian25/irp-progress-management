@@ -8,6 +8,14 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # A backstop, not a performance target. GitHub's default is 360 minutes, so
+    # anything that hangs rather than fails burns six hours of runner per leg
+    # and never reaches its cleanup steps. Task 9's review found one such hang
+    # (`docker run` with no timeout) and bounded that single command; this is
+    # the general case it named but did not close. Observed runtime is ~3.5
+    # minutes, so this is roughly 5x headroom — it should only ever fire on a
+    # genuine hang.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -246,6 +254,9 @@ jobs:
   real-token:
     if: vars.ENTRA_REAL_TOKEN_TESTS == 'true'
     runs-on: ubuntu-latest
+    # See the note on verify. This job talks to Entra over the network, which is
+    # exactly the kind of call that hangs instead of failing.
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -373,6 +384,14 @@ jobs:
   # workflow against NFR-5's under-8-minute budget.
   images:
     runs-on: ubuntu-latest
+    # See the note on verify. This job has the most unbounded waits of the
+    # three: `timeout 60` covers the bypass-refusal run, and every healthcheck
+    # in compose.yaml is bounded by retries x interval, but `docker compose up
+    # --wait` still blocks indefinitely if the `migrate` service hangs — it has
+    # no healthcheck and `api` gates on service_completed_successfully, so a
+    # migration stuck on an advisory lock has nothing to time it out. Observed
+    # runtime is ~5.5 minutes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
