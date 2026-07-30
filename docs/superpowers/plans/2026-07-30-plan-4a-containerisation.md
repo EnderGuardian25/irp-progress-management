@@ -2500,11 +2500,25 @@ matrix to catch reliance on server local time (NFR-12). Nothing about image buil
 startup is timezone-sensitive, so folding this in would triple the cost of the slowest job in the
 workflow for zero extra coverage — against NFR-5's 8-minute budget.
 
-**Where the fifth gate lives.** The spec names five gates. Four are steps in this job. The fifth —
-the generated-output leak guard — is a `RUN` inside the `generated` stage from Task 5, so it
-executes on **every** image build in this job rather than as a separate step. It was demonstrated
-red in Task 5 Step 4; do not re-prove it here, but do note in the report that it is enforced by
-all three build steps below.
+**Where the build-stage gates live — CORRECTED, this was understated.** The spec names five
+gates. Four are steps in this job. The fifth — the generated-output leak guard — is not one
+`RUN` but **two**, and neither is a step in this job:
+
+- the `generated` stage's check, narrowed in Task 5's fix pass to the **two reachable paths**
+  (`packages/types/src`, `packages/client/src`) — the third was structurally inert there, since
+  no `COPY` existed for a leak to arrive through;
+- a **second** gate added in Task 6, in the `build` stage after its `COPY apps/api/`, asserting
+  that `apps/api/src/generated`'s **content is unchanged** by the copies. An existence check
+  cannot work there: `generated`'s own `prisma generate` legitimately pre-populates that path
+  before `build` starts, so the check is a before/after content hash — which is strictly
+  stronger, catching a host file silently *overwriting* a freshly generated one.
+
+Both execute on **every** image build in this job rather than as separate steps. Both were
+demonstrated red (Task 5 Step 4, Task 6). Do not re-prove them here, but note in the report that
+they are enforced by all three build steps below. Note also that Task 6's fix pass **widened**
+the leak gate's manifest commands (`-type d` and `-type l` passes) without re-running the
+three-outcome demonstration against the widened version — this job's builds exercise its green
+path.
 
 - [ ] **Step 1: Add the job**
 
@@ -2659,16 +2673,36 @@ immediately after**:
 | # | Break this | Expect |
 |---|---|---|
 | 1 | Delete `COPY apps/api/package.json ./apps/api/package.json` from the `deps` stage | The api image build fails |
-| 2 | In `apps/web/auth.config.ts`, change `env.NODE_ENV?.toLowerCase() === "production"` to `env.NODE_ENV === "development"` | The bypass-refusal step fails: the container starts |
+| 2 | **LOCAL ONLY — see Correction 2 below.** In `apps/web/auth.config.ts`, change `env.NODE_ENV?.toLowerCase() === "production"` to `env.NODE_ENV === "development"` | The bypass-refusal gate fails: the container starts |
 | 3 | Point `compose.yaml`'s `migrate` `DATABASE_URL` at `10.255.255.1` | `docker compose up --wait` fails |
 | 4 | Change the 401 step's URL from `/api/v1/me` to `/health` | The step fails, proving the assertion is real and not passing on a connection error |
 
+**CORRECTION 2 (applied 2026-07-30, decided by the user in the pre-flight plan review).** As
+originally written, gate 2 mandated committing *and pushing* a weakened `NODE_ENV` comparison to
+get a red CI run. That **contradicts Global Constraint 4**, which says never weaken either
+dev-bypass guard and never loosen the case-insensitivity of the `NODE_ENV` comparison. A
+weakened auth guard must never exist in a pushed commit, not even transiently, and not even
+with a revert queued behind it.
+
+**Prove gate 2 LOCALLY instead:** patch the working tree, build the web image, show
+`docker run -e AUTH_DEV_BYPASS=true` **starting successfully** (the gate's red condition), then
+`git checkout` the file. **Never committed, never pushed.** Gates 1, 3 and 4 still get real
+pushed CI runs.
+
 For gate 2, **restore the guard exactly** — re-read the docblock in `auth.config.ts` explaining why
 the two comparisons are deliberately asymmetric (`AUTH_DEV_BYPASS` matched exactly and narrowly,
-`NODE_ENV` matched loosely and case-insensitively) and confirm both are back as they were.
+`NODE_ENV` matched loosely and case-insensitively) and confirm both are back as they were. Diff
+against `HEAD` to prove the restoration is byte-exact.
 
-**Record all four run URLs and outcomes in the task report.** A gate without a red run recorded
-against it does not count as proven.
+**Gate 2's red condition changed in Task 7 and the local proof must account for it.** Before
+Task 7, a bypass container stayed `Up` serving 500s rather than exiting, so "the container
+started" was ambiguous. `apps/web/instrumentation.ts` now calls `process.exit(1)` at boot, so
+the green path is a clean **exit 1 before any request**. With the guard weakened, expect the
+container to **stay running and serve `/signin` with a 200** — that is the gate red, and it is
+now unambiguous.
+
+**Record the three pushed run URLs and the local outcome for gate 2 in the task report.** A gate
+without a recorded red result does not count as proven.
 
 - [ ] **Step 4: Confirm the branch is green and the timing is acceptable**
 
