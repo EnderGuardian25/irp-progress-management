@@ -188,8 +188,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
 | | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | ✅ **Merged, PR #5** |
 | | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
-| | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **This plan** |
-| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23, plus `infra/entra.bicep` | D3 | **Next.** Needs the Entra directory (§3) and the Azure setup in `manual-setup-steps.md` §1.1a/§1.2/§1.2a |
+| | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **Merged, PR #8** |
+| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23, plus `infra/entra.bicep` | D3 | **In flight.** Needs the Entra directory (§3) and the Azure setup in `manual-setup-steps.md` §1.1a/§1.2/§1.2a |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
@@ -270,14 +270,19 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/plan-4a-containerisation`, open as **PR #8** against `main` · **Status:** Plan 4A
-complete — all ten tasks done, whole-branch review run, **all CI checks green on `9b64d28`**
-(`verify` x3 and `images` pass, `real-token` correctly skipped). **Ready to merge; not merged.** ·
-**Next:** Plan 4B (infra, deploy, observability), which still owns `infra/entra.bicep`
+**Branch:** `feat/plan-4b-infra-deploy-observability` · **Last merged:** Plan 4A as **PR #8**
+(merge commit `720b387`, 2026-07-30) — ten tasks, whole-branch review run, all CI checks green
+(`verify` x3 and `images` pass, `real-token` correctly skipped) · **In flight:** Plan 4B (infra,
+deploy, observability), which owns `infra/entra.bicep` on its **third** deferral
 
-**The whole-branch review found four things, all fixed on the branch.** Two were gates that did not
-gate (the coin-flip Playwright budget, and the unbounded CI jobs) and two were false statements
-sitting in comments: `instrumentation.ts` claiming Next builds no Edge instrumentation bundle, and
+> **Plan 4B is the first plan that the dev bypass does NOT route around.** Plans 3 and 4A both
+> shipped without any Azure or Entra setup. This one cannot: it needs the dedicated Entra directory
+> (`docs/manual-setup-steps.md` §1.1a) and the four **unregistered** Azure resource providers
+> (§1.2a), or the Bicep fails confusingly rather than cleanly. Check both before writing Bicep.
+
+**Plan 4A's whole-branch review found four things, all fixed before the merge.** Two were gates that
+did not gate (the coin-flip Playwright budget, and the unbounded CI jobs) and two were false
+statements sitting in comments: `instrumentation.ts` claiming Next builds no Edge instrumentation bundle, and
 `app/api/dev-jwks/route.ts` describing the bypass guard's trigger **inverted** ("with the bypass
 flag off" — it fires when the flag is *on* in production). Everything else reviewed clean:
 `shutdown.ts`, `bootstrap.ts`, `exporter.ts`, `proxy.ts`, the `Dockerfile` build graph,
