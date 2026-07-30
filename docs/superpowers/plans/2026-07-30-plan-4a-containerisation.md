@@ -2340,12 +2340,16 @@ services:
       context: .
       target: api
       args:
+        # Deliberately the ONLY place APP_VERSION reaches this service — do
+        # not re-add it to `environment:` below. CI's /health assertion
+        # exists to prove the build arg reached the image; runtime env alone
+        # would satisfy that grep even if the Dockerfile stopped baking the
+        # arg in, leaving the assertion green while testing nothing.
         APP_VERSION: ${APP_VERSION:-dev}
     init: true
     environment:
       NODE_ENV: production
       PORT: "3001"
-      APP_VERSION: ${APP_VERSION:-dev}
       DATABASE_URL: postgresql://irp:irp@db:5432/irp?schema=public
       # Deliberately unresolvable. createRemoteJWKSet is LAZY — it performs no
       # network I/O at construction — so the API boots and serves /health
@@ -2520,6 +2524,39 @@ the leak gate's manifest commands (`-type d` and `-type l` passes) without re-ru
 three-outcome demonstration against the widened version — this job's builds exercise its green
 path.
 
+**CORRECTION 4 (applied 2026-07-30, decided by the user after independent review of the merged
+Task 9 job).** The reviewer found three soundness holes in this job's gate assertions, all fixed
+here at the plan's source because the YAML below was prescribed verbatim and copied as-is:
+
+1. **The bypass-refusal step had no timeout anywhere** — no `timeout` in the `run:` script, no
+   step `timeout-minutes`, no job-level `timeout-minutes`. If the guard ever failed open (`next
+   start` serving instead of exiting), `docker run` would block in the foreground forever, the
+   step would never reach `code=$?`, and "Dump container logs" / "Tear down" would never run —
+   burning the runner for GitHub's 360-minute default. **Fixed:** wrap the run in `timeout 60`,
+   with exit code `124` (a hang) treated as its own distinct, clearly-labelled failure, separate
+   from exit code `0` (a clean start).
+2. **`if [ "$code" -eq 0 ]` treated any non-zero exit as proof the guard fired.** A missing env
+   var, a bad `CMD`, or a corrupt layer would also exit non-zero, and the step would print
+   "correct" while proving nothing about the dev-bypass guard — precisely the false-pass class
+   gate 4 (below) exists to rule out for the 401 assertion, but was never applied here. **Fixed:**
+   capture the container's output and require it to contain the guard's actual error string,
+   `AUTH_DEV_BYPASS is set in a production build` (confirmed from a real green CI run; asserted as
+   a substring so it stays robust to the rest of the sentence). A non-zero exit without that
+   string now fails the step with its own `::error::` naming the gate as broken, not just the
+   container.
+3. **The `/health` version assertion could not detect the failure its own error message named.**
+   `apps/api/src/config.ts` reads `APP_VERSION` at runtime, and `compose.yaml`'s `api` service set
+   it **both** as a build arg and in `environment:`. The runtime env alone satisfied CI's grep, so
+   deleting the Dockerfile's `ARG`/`ENV APP_VERSION` would have left the step green while its
+   error message read "APP_VERSION did not reach the image" — untrue. **Fixed:** Task 8's
+   `compose.yaml` no longer sets `APP_VERSION` in the api service's `environment:` block; only
+   `build.args` remains, with a comment explaining why the runtime copy must stay absent. This is
+   a sanctioned change to Task 8's file, decided here, not scope creep discovered later.
+
+The YAML block in Step 1 below and Task 8 Step 1's `compose.yaml` block are both corrected to
+match what was actually implemented, so a future reader copying either verbatim does not
+reintroduce any of the three holes.
+
 - [ ] **Step 1: Add the job**
 
 Append to `.github/workflows/ci.yml`, at the same indentation as `verify:` and `real-token:`:
@@ -2574,22 +2611,45 @@ Append to `.github/workflows/ci.yml`, at the same indentation as `verify:` and `
       # before Plan 4A. This is the only gate covering it. If the container
       # starts, guard one has broken and the dev bypass could reach a deployed
       # environment — that is an auth failure, not a test failure.
+      #
+      # A bare non-zero exit is NOT sufficient evidence the guard fired: a
+      # missing env var, a bad CMD, or a corrupt layer would also make the
+      # container exit non-zero, and the step would print "correct" while
+      # proving nothing about the dev-bypass guard — the same false-pass class
+      # gate 4 exists to rule out for the 401 assertion below, now applied
+      # here too. The container's output is captured and asserted against the
+      # guard's actual error string instead of trusting the exit code alone.
+      # And if the guard fails open — it doesn't throw, `next start` serves —
+      # `docker run` would otherwise block forever with no built-in timeout,
+      # burning the runner for GitHub's 360-minute default and never reaching
+      # "Dump container logs" / "Tear down". `timeout 60` bounds that, and
+      # exit code 124 (timeout's own signal that the command was still
+      # running) is treated as its own distinct, clearly-labelled failure.
       - name: The web container must refuse AUTH_DEV_BYPASS=true
         run: |
           set +e
-          docker run --rm \
+          output=$(timeout 60 docker run --rm \
             -e AUTH_SECRET=ci-only-secret-at-least-32-bytes-xx \
             -e AUTH_URL=http://localhost:3000 \
             -e API_BASE_URL=http://localhost:3001 \
             -e AUTH_DEV_BYPASS=true \
-            irp-web:ci
+            irp-web:ci 2>&1)
           code=$?
           set -e
+          echo "$output"
+          if [ "$code" -eq 124 ]; then
+            echo "::error::The web container did not exit within 60s with AUTH_DEV_BYPASS=true — it is serving instead of refusing. Guard one is broken."
+            exit 1
+          fi
           if [ "$code" -eq 0 ]; then
             echo "::error::The web container started with AUTH_DEV_BYPASS=true. Guard one is broken."
             exit 1
           fi
-          echo "Refused to start, exit code $code — correct."
+          if ! echo "$output" | grep -q "AUTH_DEV_BYPASS is set in a production build"; then
+            echo "::error::The container exited non-zero (code $code) but not with the dev-bypass guard's error — it failed for an unrelated reason, and this gate is no longer testing what it claims."
+            exit 1
+          fi
+          echo "Refused to start with the dev-bypass guard's error, exit code $code — correct."
 
       - name: Bring the whole stack up
         env:

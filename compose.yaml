@@ -41,12 +41,16 @@ services:
       context: .
       target: api
       args:
+        # Deliberately the ONLY place APP_VERSION reaches this service — do
+        # not re-add it to `environment:` below. CI's /health assertion
+        # exists to prove the build arg reached the image; runtime env alone
+        # would satisfy that grep even if the Dockerfile stopped baking the
+        # arg in, leaving the assertion green while testing nothing.
         APP_VERSION: ${APP_VERSION:-dev}
     init: true
     environment:
       NODE_ENV: production
       PORT: "3001"
-      APP_VERSION: ${APP_VERSION:-dev}
       DATABASE_URL: postgresql://irp:irp@db:5432/irp?schema=public
       # Deliberately unresolvable. createRemoteJWKSet is LAZY — it performs no
       # network I/O at construction — so the API boots and serves /health

@@ -416,22 +416,45 @@ jobs:
       # before Plan 4A. This is the only gate covering it. If the container
       # starts, guard one has broken and the dev bypass could reach a deployed
       # environment — that is an auth failure, not a test failure.
+      #
+      # A bare non-zero exit is NOT sufficient evidence the guard fired: a
+      # missing env var, a bad CMD, or a corrupt layer would also make the
+      # container exit non-zero, and the step would print "correct" while
+      # proving nothing about the dev-bypass guard — the same false-pass class
+      # gate 4 exists to rule out for the 401 assertion below, now applied
+      # here too. The container's output is captured and asserted against the
+      # guard's actual error string instead of trusting the exit code alone.
+      # And if the guard fails open — it doesn't throw, `next start` serves —
+      # `docker run` would otherwise block forever with no built-in timeout,
+      # burning the runner for GitHub's 360-minute default and never reaching
+      # "Dump container logs" / "Tear down". `timeout 60` bounds that, and
+      # exit code 124 (timeout's own signal that the command was still
+      # running) is treated as its own distinct, clearly-labelled failure.
       - name: The web container must refuse AUTH_DEV_BYPASS=true
         run: |
           set +e
-          docker run --rm \
+          output=$(timeout 60 docker run --rm \
             -e AUTH_SECRET=ci-only-secret-at-least-32-bytes-xx \
             -e AUTH_URL=http://localhost:3000 \
             -e API_BASE_URL=http://localhost:3001 \
             -e AUTH_DEV_BYPASS=true \
-            irp-web:ci
+            irp-web:ci 2>&1)
           code=$?
           set -e
+          echo "$output"
+          if [ "$code" -eq 124 ]; then
+            echo "::error::The web container did not exit within 60s with AUTH_DEV_BYPASS=true — it is serving instead of refusing. Guard one is broken."
+            exit 1
+          fi
           if [ "$code" -eq 0 ]; then
             echo "::error::The web container started with AUTH_DEV_BYPASS=true. Guard one is broken."
             exit 1
           fi
-          echo "Refused to start, exit code $code — correct."
+          if ! echo "$output" | grep -q "AUTH_DEV_BYPASS is set in a production build"; then
+            echo "::error::The container exited non-zero (code $code) but not with the dev-bypass guard's error — it failed for an unrelated reason, and this gate is no longer testing what it claims."
+            exit 1
+          fi
+          echo "Refused to start with the dev-bypass guard's error, exit code $code — correct."
 
       - name: Bring the whole stack up
         env:
