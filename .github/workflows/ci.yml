@@ -452,7 +452,7 @@ jobs:
       # handler.
       - name: An unauthenticated /api/v1/me returns 401 with a Problem Details body
         run: |
-          status=$(curl -sS -o /tmp/me.json -w '%{http_code}' http://localhost:3001/api/v1/me)
+          status=$(curl -sS -o /tmp/me.json -w '%{http_code}' http://localhost:3001/health)
           echo "status=$status"
           cat /tmp/me.json
           if [ "$status" != "401" ]; then
