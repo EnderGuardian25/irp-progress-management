@@ -382,6 +382,40 @@ jobs:
   # of verify's timezone matrix: nothing here is timezone-sensitive, and three
   # legs each building three images would triple the slowest job in the
   # workflow against NFR-5's under-8-minute budget.
+  # A separate job, not a step in `verify`. `verify` is a three-timezone matrix
+  # and nothing about Bicep compilation is timezone-sensitive, so folding it in
+  # would triple the cost for zero extra coverage — against NFR-5's budget.
+  #
+  # This job needs NO Azure credentials. `az bicep lint` compiles and
+  # type-checks locally; it never calls ARM. That is the whole reason the
+  # template can be gated before a subscription is ready. `az deployment
+  # what-if` and `validate` DO call ARM and are therefore runbook procedures,
+  # not gates — see the Plan 4B design spec §10.
+  infra:
+    runs-on: ubuntu-latest
+    # See the note on verify. Backstop only; observed runtime is well under a
+    # minute.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # ubuntu-latest ships the Azure CLI, but not the Bicep CLI. Needs no
+      # authentication.
+      - name: Install the Bicep CLI
+        run: az bicep install
+
+      # NOT `az bicep lint` directly: it exits 0 on warnings, and BCP053 —
+      # reading a property a resource type does not have — is a warning, so a
+      # bare exit-code check would pass a broken template. The runner fails on
+      # any Error or Warning diagnostic, and also fails if bicepconfig.json was
+      # not loaded, since that silently reverts every rule to its default.
+      - name: Lint and type-check the Bicep template
+        run: node infra/lint.mjs infra/main.bicep
+
   images:
     runs-on: ubuntu-latest
     # See the note on verify. This job has the most unbounded waits of the
