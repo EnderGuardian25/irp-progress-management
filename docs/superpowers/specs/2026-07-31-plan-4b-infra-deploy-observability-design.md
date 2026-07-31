@@ -283,13 +283,33 @@ Unit-tested across all three states.
 
 This is in scope because 4B creates the first environment in which that state is reachable.
 
+**`/signin` must render per request, not be statically prerendered.** Which of the three states is
+correct is a property of the *runtime* environment, so the page must not be a build-time artefact.
+Next prerenders it as static by default — verified doing so during execution, with `/signin` in
+`.next/prerender-manifest.json` and `signin.html` on disk — which bakes one state into HTML. The
+consequence is not cosmetic: the **Entra cutover in the Plan 3 spec §7 is documented as four config
+steps with no code change**, and against a baked page, setting the three `AUTH_MICROSOFT_ENTRA_ID_*`
+variables on the Container App would leave the "not configured" panel on screen until the image was
+rebuilt. `export const dynamic = "force-dynamic"` is therefore a requirement of this section, not an
+implementation detail, and it is asserted by a test — an invariant enforced only by a comment is the
+false-green shape this repo already records four times over.
+
+Note what `force-dynamic` does and does not do: it removes the baked HTML, but the two flags are
+module-scope constants and are still read **once per server process**. The §7 cutover works because
+changing environment variables on a Container App creates a new revision, and therefore a new
+process — not because of any live reload.
+
+The general rule, worth carrying beyond this section: **any page whose output depends on runtime
+environment configuration must not be statically prerendered.**
+
 ## 10. Testing and gates
 
 **Provable in CI without credentials, and therefore gated:**
 
 - `az bicep build` — compiles `main.bicep` to ARM JSON, catching syntax and type errors
 - `bicep lint` against a committed `infra/bicepconfig.json`
-- The three-state sign-in unit tests
+- The three-state sign-in unit tests, plus the route-segment assertion that `/signin` is
+  `force-dynamic`
 - Everything the existing `verify` and `images` jobs already cover
 
 **The Bicep gate must be demonstrated red** before it is trusted — a deliberate type error, a failing

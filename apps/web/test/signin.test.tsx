@@ -59,6 +59,11 @@ describe("SignInPanel", () => {
   // 4B created an environment able to reach it.
   it("offers NO sign-in control when neither the bypass nor Entra is available", () => {
     render(<SignInPanel bypassEnabled={false} entraConfigured={false} signInAction={vi.fn()} />);
+    // Assert NO button of ANY name, not just that these two specific labels are
+    // absent — this is the state the whole task exists for, and a differently
+    // labelled control is exactly the regression that matters. The two named
+    // negatives stay as documentation of the states being ruled out.
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /Sign in with Microsoft/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Mentor \(Admin\)/ })).not.toBeInTheDocument();
   });

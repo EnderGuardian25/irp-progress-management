@@ -1142,6 +1142,43 @@ The panel is extracted so it can be tested without importing `@/auth` — the ex
 **Interfaces:**
 - Produces: `SignInPanel({ bypassEnabled, entraConfigured, signInAction }: SignInPanelProps)`.
 
+> ### CORRECTION 2 (found during execution, 2026-07-31): the three states were baked into static HTML
+>
+> As originally written, this task fixed the wrong-button bug and left a worse one behind. It moved
+> the branch into `SignInPanel` but kept `bypassEnabled` / `entraConfigured` as module-scope
+> constants and added **no route segment config** — so Next prerendered `/signin` as **static**.
+> Verified after Step 6: `/signin` appeared in `.next/prerender-manifest.json` with `signin.html`
+> written to `.next/server/app/`. One of the three states was chosen at **build** time and baked into
+> HTML.
+>
+> That is not cosmetic. The **Plan 3 spec §7 Entra cutover is documented as four config steps with
+> NO code change.** With a baked page, setting the three `AUTH_MICROSOFT_ENTRA_ID_*` variables on the
+> Container App would have left the "not configured" panel on screen until someone rebuilt the image
+> — the documented cutover would have silently not worked. A page whose rendered output depends on
+> runtime environment configuration must not be statically prerendered.
+>
+> **Two things were added to this task and are now in its steps:**
+>
+> 1. `export const dynamic = "force-dynamic"` in Step 4, with the comment explaining why. The route
+>    table then reports `ƒ /signin` instead of `○ /signin`, `/signin` leaves
+>    `prerender-manifest.json`, and `signin.html` is gone. `/not-registered` stays static, correctly
+>    — it reads no environment.
+> 2. A **route-segment test** in Step 1 asserting that export. Without it the invariant was
+>    load-bearing but enforced only by a comment: deleting the export left all 79 other tests green
+>    while `/signin` silently went back to being baked. That is the false-green shape `CLAUDE.md`
+>    records four times over. Proved red before being trusted —
+>    `AssertionError: expected undefined to be 'force-dynamic'`.
+>
+> `force-dynamic` removes the baked HTML; it does **not** make the two constants re-read per request.
+> They are still evaluated once per **server process**. The §7 cutover works because changing env
+> vars on a Container App creates a new revision, and therefore a new process — not because of live
+> reload.
+>
+> One further deviation, from review: Step 1's "offers NO sign-in control" test originally asserted
+> only that two *specific* button names were absent, so a differently labelled control would have
+> passed the test guarding the state this whole task exists for. It now asserts
+> `queryAllByRole("button")` has length 0.
+
 - [ ] **Step 1: Write the failing tests**
 
 Append to `apps/web/test/signin.test.tsx`:
@@ -1164,6 +1201,11 @@ describe("SignInPanel", () => {
   // 4B created an environment able to reach it.
   it("offers NO sign-in control when neither the bypass nor Entra is available", () => {
     render(<SignInPanel bypassEnabled={false} entraConfigured={false} signInAction={vi.fn()} />);
+    // Assert NO button of ANY name, not just that these two specific labels are
+    // absent — this is the state the whole task exists for, and a differently
+    // labelled control is exactly the regression that matters. The two named
+    // negatives stay as documentation of the states being ruled out.
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /Sign in with Microsoft/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Mentor \(Admin\)/ })).not.toBeInTheDocument();
   });
@@ -1182,6 +1224,20 @@ describe("SignInPanel", () => {
     expect(screen.queryByRole("button", { name: /Sign in with Microsoft/ })).not.toBeInTheDocument();
   });
 });
+
+// This invariant is NOT covered by rendering tests: SignInPanel takes its flags
+// as props, so deleting `export const dynamic = "force-dynamic"` from page.tsx
+// leaves every other test passing while /signin silently returns to being
+// statically prerendered — baking one of three states into signin.html at build
+// time and breaking the config-only Entra cutover documented in the Plan 3 spec
+// §7. Assert the export directly, since that is the thing a future edit would
+// remove.
+describe("the /signin route segment config", () => {
+  it("is force-dynamic, so the three states follow runtime configuration", async () => {
+    const page = await import("@/app/(auth)/signin/page");
+    expect(page.dynamic).toBe("force-dynamic");
+  });
+});
 ```
 
 Add the import at the top of the file, beside the existing imports:
@@ -1189,6 +1245,12 @@ Add the import at the top of the file, beside the existing imports:
 ```tsx
 import { SignInPanel } from "@/app/(auth)/signin/sign-in-panel";
 ```
+
+The page module is imported dynamically inside the test, not at the top of the
+file: the existing `vi.mock("@/auth")` must be registered before it loads, since
+`page.tsx` imports `signIn` from there. No new mock is needed, and
+`auth.config.ts`'s module-scope `assertBypassNotInProduction` is inert under
+Vitest because `NODE_ENV` is `test`, not `production`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1280,6 +1342,25 @@ In `apps/web/app/(auth)/signin/page.tsx`, replace the `import { DevIdentityPicke
 ```tsx
 import { isEntraConfigured } from "@/auth.config";
 import { SignInPanel } from "./sign-in-panel";
+```
+
+Add the route segment config immediately after the imports, above `ILLUSTRATION`:
+
+```tsx
+// Rendered per request, NOT statically prerendered.
+//
+// Both bypassEnabled and entraConfigured are read from process.env, so the
+// branch SignInPanel takes depends on the runtime environment. Next would
+// otherwise prerender this page at BUILD time and bake one of the three states
+// into signin.html — which was verified happening: /signin appeared in
+// .next/prerender-manifest.json.
+//
+// The consequence was a trap rather than a cosmetic issue. The Plan 3 spec §7
+// Entra cutover is documented as four config steps with NO code change, but
+// with a baked page, setting the three AUTH_MICROSOFT_ENTRA_ID_* variables on
+// the Container App would leave the "not configured" panel on screen until
+// someone rebuilt the image. Do not remove this.
+export const dynamic = "force-dynamic";
 ```
 
 Replace the `const bypassEnabled = ...` line with:
