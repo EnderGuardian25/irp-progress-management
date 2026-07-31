@@ -1485,6 +1485,7 @@ jobs:
       - name: Resolve the image tag
         id: tag
         run: |
+          set -euo pipefail
           tag="${{ inputs.imageTag }}"
           if [ -z "$tag" ]; then tag="${GITHUB_SHA}"; fi
           echo "value=$tag" >> "$GITHUB_OUTPUT"
@@ -1545,7 +1546,26 @@ jobs:
 
       - name: Apply the Bicep template
         id: apply
+        # Secrets are read from env vars ($POSTGRES_ADMIN_USERNAME etc.) rather
+        # than interpolated as ${{ secrets.* }} directly into the script body.
+        # Direct interpolation substitutes the raw secret value into the
+        # script TEXT before bash ever parses it, so a value containing shell
+        # metacharacters (a quote, a backtick, a $(...)) can break the script
+        # or inject a command. This does NOT remove the secrets from `az`'s
+        # argv — they are still passed as command-line arguments and remain
+        # visible to anything that can list processes on this runner. The
+        # only way to avoid that would be writing them to a file on disk, a
+        # worse trade for values this sensitive (a plaintext-secret file left
+        # on the runner's filesystem needs its own cleanup-on-always step, and
+        # a mistake there leaks further than argv does). Argv exposure is
+        # accepted because the runner is ephemeral, single-tenant for the
+        # duration of the job, and only first-party actions run in it.
+        env:
+          POSTGRES_ADMIN_USERNAME: ${{ secrets.POSTGRES_ADMIN_USERNAME }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: |
+          set -euo pipefail
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \
             --template-file infra/main.bicep \
@@ -1554,15 +1574,25 @@ jobs:
               namePrefix="$NAME_PREFIX" \
               imageTag="${{ steps.tag.outputs.value }}" \
               containerRegistryBase="$REGISTRY_BASE" \
-              postgresAdminUsername="${{ secrets.POSTGRES_ADMIN_USERNAME }}" \
-              postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
-              authSecret="${{ secrets.AUTH_SECRET }}" \
+              postgresAdminUsername="$POSTGRES_ADMIN_USERNAME" \
+              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+              authSecret="$AUTH_SECRET" \
               allowedClientIpAddresses="${{ vars.ALLOWED_CLIENT_IPS || '[]' }}" \
             --query "properties.outputs" \
             --output json > outputs.json
           cat outputs.json
-          echo "apiUrl=$(jq -r '.apiUrl.value' outputs.json)" >> "$GITHUB_OUTPUT"
-          echo "webUrl=$(jq -r '.webUrl.value' outputs.json)" >> "$GITHUB_OUTPUT"
+          # Assigned to a variable FIRST, then echoed — not
+          # `echo "apiUrl=$(jq ...)" >> "$GITHUB_OUTPUT"` directly. A failing
+          # command substitution embedded inside another command's argument
+          # does not trip `errexit`; only a bare `var=$(cmd)` statement does.
+          # With the substitution buried in echo's argument, a `jq` failure
+          # here would silently write an empty output value instead of
+          # failing this step, surfacing later as a confusing curl error in
+          # the smoke-test steps rather than as a clear failure here.
+          api_url=$(jq -r '.apiUrl.value' outputs.json)
+          web_url=$(jq -r '.webUrl.value' outputs.json)
+          echo "apiUrl=$api_url" >> "$GITHUB_OUTPUT"
+          echo "webUrl=$web_url" >> "$GITHUB_OUTPUT"
 
       # Runs AFTER the apply, which leaves a brief window where new code can meet
       # an unmigrated schema. Accepted for now — scale-to-zero means no replicas
@@ -1572,26 +1602,62 @@ jobs:
       - name: Run the migration job and wait for it
         run: |
           set -euo pipefail
-          az containerapp job start \
+          # UNVERIFIABLE-UNTIL-FIRST-APPLY RISK: `az containerapp job start`'s
+          # exact JSON output shape — specifically, whether the started
+          # execution's identifier is at top-level `.name` — cannot be checked
+          # offline; there is no Azure login or live subscription in this
+          # environment. Captured explicitly and polled BY IDENTITY rather
+          # than trusting `[0]` of the execution list, because `[0]` rests on
+          # the unproven assumption that the most recent execution in that
+          # list is always the one this run just started. If `.name` is the
+          # wrong field on the real first deploy, the fallback is to revert to
+          # `[0]`, accepting that unproven assumption.
+          exec_name=$(az containerapp job start \
             --name "${NAME_PREFIX}-migrate" \
             --resource-group "$RESOURCE_GROUP" \
-            --output none
-          echo "Job started; polling for completion."
+            --output json | jq -r '.name')
+          if [ -z "$exec_name" ] || [ "$exec_name" = "null" ]; then
+            echo "::error::Could not read the started execution's name from 'az containerapp job start' output — cannot poll by identity."
+            exit 1
+          fi
+          echo "Job execution '$exec_name' started; polling for completion."
+          # The real JobExecutionRunningState enum, confirmed against the
+          # Azure Container Apps API type: Running, Processing, Stopped,
+          # Degraded, Failed, Unknown, Succeeded. `Cancelled` is DELIBERATELY
+          # ABSENT — it is not a member of that enum, so a branch matching it
+          # was dead code that read as authoritative but never fired.
+          #
+          # Stopped and Degraded are treated as terminal failures alongside
+          # Failed: an execution that has stopped or degraded is not going to
+          # progress to Succeeded on its own, so waiting out the full
+          # 10-minute budget for one of these would needlessly cost most of
+          # NFR-5's 8-minute deploy target for a result already known.
+          #
+          # Unknown is NOT treated as terminal — a single transient Unknown
+          # reading is far more plausible than a permanent failure, so polling
+          # continues through it — but `last_status` is tracked and reported
+          # in the timeout message below, so an Unknown that never resolves is
+          # named explicitly rather than folded into a purely generic
+          # message.
+          last_status="(none observed yet)"
           for i in $(seq 1 60); do
             sleep 10
             status=$(az containerapp job execution list \
               --name "${NAME_PREFIX}-migrate" \
               --resource-group "$RESOURCE_GROUP" \
-              --query "[0].properties.status" --output tsv)
+              --query "[?name=='${exec_name}'].properties.status | [0]" --output tsv)
             echo "attempt $i: $status"
+            if [ -n "$status" ] && [ "$status" != "None" ]; then
+              last_status="$status"
+            fi
             case "$status" in
               Succeeded) echo "Migration succeeded."; exit 0 ;;
-              Failed|Cancelled)
-                echo "::error::The migration job finished with status $status. The deploy is aborted; the app images are already live but the schema was not migrated."
+              Failed|Stopped|Degraded)
+                echo "::error::The migration job execution '$exec_name' finished with status $status. The deploy is aborted; the app images are already live but the schema was not migrated."
                 exit 1 ;;
             esac
           done
-          echo "::error::The migration job did not reach a terminal state within 10 minutes."
+          echo "::error::The migration job execution '$exec_name' did not reach a terminal state within 10 minutes. Last observed status: $last_status."
           exit 1
 
       # Reuses the assertions the `images` job already makes against local
@@ -1602,9 +1668,22 @@ jobs:
           url="${{ steps.apply.outputs.apiUrl }}/health"
           # First request pays a scale-from-zero cold start (ADR-0009 D5), so
           # retry rather than treating a slow first response as a failure.
+          # `reached` distinguishes "never became reachable" from "reachable
+          # but reported the wrong SHA" below — without it, an endpoint that
+          # never comes up at all falls through to the SHA-mismatch error and
+          # blames APP_VERSION for a plain connectivity failure.
+          reached=0
           for i in $(seq 1 10); do
-            body=$(curl -fsS --max-time 30 "$url") && break || sleep 10
+            if body=$(curl -fsS --max-time 30 "$url"); then
+              reached=1
+              break
+            fi
+            sleep 10
           done
+          if [ "$reached" -ne 1 ]; then
+            echo "::error::/health at $url was never reachable after 10 attempts."
+            exit 1
+          fi
           echo "$body"
           echo "$body" | grep -q "${{ steps.tag.outputs.value }}" || {
             echo "::error::/health did not report the deployed SHA. APP_VERSION did not reach the image, or an older revision is still serving."
@@ -1628,9 +1707,29 @@ jobs:
       - name: Smoke test — the web app serves its sign-in page
         run: |
           set -euo pipefail
+          # CRITICAL FIX (caught in review, not by running this): as
+          # originally written, this loop had no explicit fail-closed check
+          # after it, unlike the /health step above. If all 10 attempts
+          # failed, the loop exhausted without ever hitting `break`, the
+          # script ended, and the STEP'S exit status was that of the last
+          # command executed — `sleep 10`, which succeeds. So the step
+          # reported PASSED even though the site was never reachable.
+          # Reproduced with a stubbed always-failing `curl` under
+          # `set -euo pipefail`: exited 0. `reached` makes the pass/fail
+          # explicit instead of relying on whatever the loop's last command
+          # happened to be.
+          reached=0
           for i in $(seq 1 10); do
-            curl -fsS --max-time 30 -o /dev/null "${{ steps.apply.outputs.webUrl }}/signin" && break || sleep 10
+            if curl -fsS --max-time 30 -o /dev/null "${{ steps.apply.outputs.webUrl }}/signin"; then
+              reached=1
+              break
+            fi
+            sleep 10
           done
+          if [ "$reached" -ne 1 ]; then
+            echo "::error::${{ steps.apply.outputs.webUrl }}/signin was never reachable after 10 attempts."
+            exit 1
+          fi
 
       - name: Report the deployed URLs
         run: |
@@ -1640,6 +1739,42 @@ jobs:
             echo "- Web: ${{ steps.apply.outputs.webUrl }}"
           } >> "$GITHUB_STEP_SUMMARY"
 ```
+
+> ### CORRECTION 3 (found during review, 2026-07-31): the /signin smoke test could pass while the site was unreachable
+>
+> This task's YAML, exactly as originally written above, contained a **false-green bug** in the
+> "Smoke test — the web app serves its sign-in page" step:
+>
+> ```bash
+> for i in $(seq 1 10); do
+>   curl -fsS --max-time 30 -o /dev/null "$URL/signin" && break || sleep 10
+> done
+> ```
+>
+> If all 10 attempts failed, the loop exhausted **without ever hitting `break`**, the script ended,
+> and — under `set -euo pipefail` — the step's exit status was that of the **last command run**,
+> which was `sleep 10`. `sleep` succeeds. **The step reported PASSED even though the web app was
+> never reachable.** This was not caught by running the workflow — there is no live Azure
+> environment to run it against yet — it was caught by an independent review that **reproduced it**
+> by stubbing `curl` to always fail and confirming the step exits `0` under `set -euo pipefail`.
+>
+> The `/health` smoke test directly above this one in the same task did **not** have this defect: it
+> already had an explicit `|| { echo "::error::..."; exit 1; }` after its own, structurally identical
+> retry loop. The two loops were written side by side and only one of them failed closed — proof this
+> class of bug is easy to introduce even when a correct sibling example is right there in the same
+> file.
+>
+> **Fixed** (in both this plan and `.github/workflows/deploy.yml`, per `CLAUDE.md`'s rule that a
+> defect found in the plan's own code gets fixed at source, not just in the generated artifact): a
+> `reached` flag, set only inside the loop body on a real success and checked after the loop, so
+> exhausting all 10 attempts now emits `::error::` naming the unreachable URL and fails the step
+> explicitly, matching the `/health` step's shape. The same review pass also found and fixed two
+> further defects in this task's own code while in the file: the migration-wait loop matched a
+> `Cancelled` status that is not a member of the real `JobExecutionRunningState` enum (dead code) and
+> left `Stopped`/`Degraded` unhandled (silently polling out the full 10-minute budget instead of
+> failing fast), and it polled `[0]` of the execution list with nothing tying that result to the
+> execution this run actually started, rather than by the started execution's identity. Both are
+> fixed in the corrected YAML above; see its inline comments for the detail.
 
 - [ ] **Step 2: Verify the workflow parses and its shape is right**
 
