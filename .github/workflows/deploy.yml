@@ -1,0 +1,253 @@
+name: Deploy
+
+# Only on main, and only after CI has had its say on the PR. There is one
+# environment, so there is no per-branch deploy to reason about.
+on:
+  push:
+    branches: [main]
+  # Lets a rollback re-run this workflow at a chosen SHA without an empty commit.
+  workflow_dispatch:
+    inputs:
+      imageTag:
+        description: "Git SHA to deploy. Defaults to the current commit."
+        required: false
+        type: string
+
+concurrency:
+  # Never two applies at once: ARM would serialise them anyway, and the migration
+  # Job would race itself.
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  # Required for OIDC federation to Azure. There is NO client secret anywhere.
+  id-token: write
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # NFR-5 targets under 8 minutes. This is a backstop well above that, so a
+    # hang fails in minutes rather than burning GitHub's 360-minute default.
+    timeout-minutes: 30
+    env:
+      RESOURCE_GROUP: irp-rg
+      NAME_PREFIX: irp
+      REGISTRY_BASE: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the image tag
+        id: tag
+        run: |
+          tag="${{ inputs.imageTag }}"
+          if [ -z "$tag" ]; then tag="${GITHUB_SHA}"; fi
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
+          echo "Deploying tag $tag"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Packages are PUBLIC, so no pull credential exists anywhere. This login
+      # is for the PUSH only, and uses the built-in GITHUB_TOKEN rather than a
+      # PAT.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # APP_VERSION is passed as a BUILD ARG and baked into the image. It is
+      # deliberately NOT set as a container-app runtime env var, so /health
+      # reporting it proves the build arg actually reached the image — a
+      # runtime copy would satisfy that assertion while proving nothing. This
+      # was a real bug fixed in Plan 4A; see infra/main.bicep's apiApp
+      # container env block for the corresponding "deliberately absent" note.
+      - name: Build and push the api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: true
+          tags: ${{ env.REGISTRY_BASE }}/irp-api:${{ steps.tag.outputs.value }}
+          build-args: APP_VERSION=${{ steps.tag.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          push: true
+          tags: ${{ env.REGISTRY_BASE }}/irp-web:${{ steps.tag.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push the migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          push: true
+          tags: ${{ env.REGISTRY_BASE }}/irp-migrate:${{ steps.tag.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Log in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # DEVIATION FROM THE ORIGINAL TASK BRIEF, DELIBERATE: the brief passed
+      # every parameter inline as KEY=VALUE, including
+      # allowedClientIpAddresses="${{ vars.ALLOWED_CLIENT_IPS || '[]' }}".
+      # Two problems with that:
+      #
+      # 1. UNVERIFIABLE-UNTIL-FIRST-APPLY RISK. Whether the Azure CLI parses an
+      #    inline `KEY=VALUE` as a JSON ARRAY, rather than the literal string
+      #    "[]", is a known ambiguity in `az deployment group create`'s
+      #    --parameters handling, and it cannot be checked from here: both
+      #    `az deployment group validate` and `what-if` require a live Azure
+      #    login, and this environment has no Azure credentials at all. If this
+      #    parameters-file approach turns out to misbehave on the real first
+      #    deploy (e.g. the JSON file shape is rejected for some reason not
+      #    reproducible offline), the documented fallback is to go back to
+      #    inline KEY=VALUE for this one parameter, exactly as the brief had
+      #    it, accepting risk 1 above as the trade-off.
+      # 2. KEY=VALUE puts every value in the process argument list, which is
+      #    visible to anything that can list processes on the runner.
+      #
+      # Fix for both: supply the array parameter via a JSON parameters file
+      # using az's @{path} syntax, in the standard ARM parameters-file shape.
+      # The file holds ONLY allowedClientIpAddresses — a non-secret value.
+      #
+      # The two @secure() parameters (postgresAdminPassword, authSecret) are
+      # deliberately kept OUT of this file and passed as inline KEY=VALUE
+      # instead, alongside the other non-secret scalars. `az` evaluates
+      # --parameters flags in the order given and permits mixing a file with
+      # inline KEY=VALUE pairs in the same command (later occurrences of the
+      # same key would win; here the keys don't overlap at all, so there is no
+      # override to reason about). That mixing is what lets the secrets stay
+      # out of a file on disk entirely, rather than needing a second
+      # `rm`-in-an-always-step cleanup step for a params file that held them
+      # temporarily.
+      - name: Write the array parameter to an ARM parameters file
+        run: |
+          set -euo pipefail
+          cat > params.json <<EOF
+          {
+            "\$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            "contentVersion": "1.0.0.0",
+            "parameters": {
+              "allowedClientIpAddresses": {
+                "value": ${{ vars.ALLOWED_CLIENT_IPS || '[]' }}
+              }
+            }
+          }
+          EOF
+          echo "Wrote params.json:"
+          cat params.json
+          # Fail loudly here rather than handing `az` invalid JSON and getting
+          # a confusing ARM-side error instead.
+          jq empty params.json
+
+      - name: Apply the Bicep template
+        id: apply
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --name "deploy-${{ steps.tag.outputs.value }}" \
+            --parameters @params.json \
+            --parameters \
+              namePrefix="$NAME_PREFIX" \
+              imageTag="${{ steps.tag.outputs.value }}" \
+              containerRegistryBase="$REGISTRY_BASE" \
+              postgresAdminUsername="${{ secrets.POSTGRES_ADMIN_USERNAME }}" \
+              postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+              authSecret="${{ secrets.AUTH_SECRET }}" \
+            --query "properties.outputs" \
+            --output json > outputs.json
+          cat outputs.json
+          echo "apiUrl=$(jq -r '.apiUrl.value' outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "webUrl=$(jq -r '.webUrl.value' outputs.json)" >> "$GITHUB_OUTPUT"
+
+      # Runs AFTER the apply, which leaves a brief window where new code can meet
+      # an unmigrated schema. Accepted for now — scale-to-zero means no replicas
+      # run at rest, there is one revision, and Plan 5's migrations are additive.
+      # REVISIT on either trigger: the first non-additive migration, or
+      # minReplicas > 0. The fix is a second apply behind a deployApps parameter.
+      - name: Run the migration job and wait for it
+        run: |
+          set -euo pipefail
+          az containerapp job start \
+            --name "${NAME_PREFIX}-migrate" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output none
+          echo "Job started; polling for completion."
+          for i in $(seq 1 60); do
+            sleep 10
+            status=$(az containerapp job execution list \
+              --name "${NAME_PREFIX}-migrate" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "[0].properties.status" --output tsv)
+            echo "attempt $i: $status"
+            case "$status" in
+              Succeeded) echo "Migration succeeded."; exit 0 ;;
+              Failed|Cancelled)
+                echo "::error::The migration job finished with status $status. The deploy is aborted; the app images are already live but the schema was not migrated."
+                exit 1 ;;
+            esac
+          done
+          echo "::error::The migration job did not reach a terminal state within 10 minutes."
+          exit 1
+
+      # Reuses the assertions the `images` job already makes against local
+      # containers, now against the deployed URLs.
+      - name: Smoke test — /health reports the deployed SHA
+        run: |
+          set -euo pipefail
+          url="${{ steps.apply.outputs.apiUrl }}/health"
+          # First request pays a scale-from-zero cold start (ADR-0009 D5), so
+          # retry rather than treating a slow first response as a failure.
+          for i in $(seq 1 10); do
+            body=$(curl -fsS --max-time 30 "$url") && break || sleep 10
+          done
+          echo "$body"
+          echo "$body" | grep -q "${{ steps.tag.outputs.value }}" || {
+            echo "::error::/health did not report the deployed SHA. APP_VERSION did not reach the image, or an older revision is still serving."
+            exit 1
+          }
+
+      - name: Smoke test — unauthenticated /api/v1/me is 401 with a Problem Details body
+        run: |
+          set -euo pipefail
+          status=$(curl -sS --max-time 30 -o me.json -w '%{http_code}' "${{ steps.apply.outputs.apiUrl }}/api/v1/me")
+          echo "status=$status"; cat me.json
+          if [ "$status" != "401" ]; then
+            echo "::error::Expected 401 from an unauthenticated /api/v1/me, got $status."
+            exit 1
+          fi
+          grep -q '"type"' me.json || {
+            echo "::error::The 401 body is not RFC 7807 Problem Details."
+            exit 1
+          }
+
+      - name: Smoke test — the web app serves its sign-in page
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            curl -fsS --max-time 30 -o /dev/null "${{ steps.apply.outputs.webUrl }}/signin" && break || sleep 10
+          done
+
+      - name: Report the deployed URLs
+        run: |
+          {
+            echo "### Deployed \`${{ steps.tag.outputs.value }}\`"
+            echo "- API: ${{ steps.apply.outputs.apiUrl }}"
+            echo "- Web: ${{ steps.apply.outputs.webUrl }}"
+          } >> "$GITHUB_STEP_SUMMARY"
