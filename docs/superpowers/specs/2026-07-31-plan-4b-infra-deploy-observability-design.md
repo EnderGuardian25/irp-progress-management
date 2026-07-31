@@ -128,6 +128,62 @@ first apply and passing it in.
 correctly — it admits any Azure tenant's resources, so it reads as a restriction while being close
 to no network control at all. Not reopened.
 
+### Finding (Task 1, 2026-07-31) — the two-phase design stands
+
+Probed offline with `az bicep lint` against an `existing` resource declaration, which type-checks
+property reads without deploying and without credentials.
+
+| Property read | Result |
+|---|---|
+| `properties.staticIp` | **Exists** — clean compile, no diagnostic |
+| `properties.defaultDomain` | **Exists** — clean compile, no diagnostic |
+| `properties.outboundIpAddresses` | **Does not exist** — `BCP053` |
+| `properties.outboundSettings.outBoundType` | **Does not exist** — `BCP053` |
+
+The `BCP053` diagnostic enumerates the complete property set of
+`ManagedEnvironmentProperties@2024-03-01`:
+
+> `appLogsConfiguration`, `customDomainConfiguration`, `daprAIConnectionString`,
+> `daprAIInstrumentationKey`, `daprConfiguration`, `defaultDomain`, `deploymentErrors`,
+> `eventStreamEndpoint`, `infrastructureResourceGroup`, `kedaConfiguration`, `peerAuthentication`,
+> `peerTrafficConfiguration`, `provisioningState`, `staticIp`, `vnetConfiguration`,
+> `workloadProfiles`, `zoneRedundant`
+
+**There is no egress or outbound-IP property of any kind.** The only address the type exposes is
+`staticIp`, which is the environment's *inbound* address, not what a database firewall needs to
+allowlist.
+
+**Decision: the two-phase design stands unchanged.** `allowedClientIpAddresses` gets **no default**,
+and the runbook documents reading the egress address after the first apply and passing it in.
+ADR-0009 D2's phrase "the Container Apps environment's static outbound IP" is **not expressible in
+the template** — the ADR's intent is sound but its mechanism was assumed rather than checked, and
+this is the check.
+
+Even so, the runbook must still treat a wrong allowlist as live: a property existing in a schema
+would never have proven its *value* was stable for a Consumption-only environment either. A wrong
+allowlist is silent — the apply succeeds and `/health` succeeds, because `/health` never touches the
+database — so only data reads fail, which reads as an application bug rather than a network one.
+
+### Finding (Task 1, 2026-07-31) — `az bicep lint` exits 0 on warnings, so the §10 gate needed redesigning
+
+Discovered while running the probe above, and it matters more than the egress answer.
+
+**`BCP053` is a *warning*, and `az bicep lint` exits `0`.** A template that reads a property which
+does not exist therefore **passes** a gate that only checks the exit code. The gate as first
+designed in §10 would have been another of this repository's gates that looks correct and enforces
+nothing.
+
+This is the **Redocly lesson repeating verbatim**: `CLAUDE.md` already records that Redocly's plain
+`recommended` preset "exits 0 on warnings and there is no `--fail-on-warnings` flag", which left the
+zero-warning bar unenforced for most of Plan 2A. Bicep has the same shape, and setting linter rules
+to `error` in `bicepconfig.json` does **not** fix it, because `BCP053` is a **core compiler
+diagnostic, not a configurable linter rule** — its severity cannot be raised from config.
+
+**Corrected gate:** fail on **any diagnostic output**, not on the exit code. `az bicep lint` prints
+nothing at all for a clean file, so "stdout+stderr must be empty" is both sufficient and strictly
+stronger than the exit code. The plan's Task 2 is corrected at source, and its demonstrate-red step
+now proves **both** failure classes — a linter-rule error *and* a `BCP053` warning.
+
 ## 6. Deploy identity
 
 An app registration and service principal in `d5e769b0`, with:

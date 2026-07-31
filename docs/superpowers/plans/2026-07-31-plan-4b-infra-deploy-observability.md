@@ -64,7 +64,11 @@
 
 ## Task 1: Settle the egress-address question
 
-The design's §5 flags ADR-0009 D2's "static outbound IP" premise as unverified. This task answers it **without deploying**, by using the Bicep compiler as an oracle: for a known resource type, reading a property that does not exist is a compile error (`BCP053`). So the set of properties a `Microsoft.App/managedEnvironments` actually exposes can be discovered offline.
+The design's §5 flags ADR-0009 D2's "static outbound IP" premise as unverified. This task answers it **without deploying**, by using the Bicep compiler as an oracle: for a known resource type, reading a property that does not exist produces a `BCP053` diagnostic that **enumerates every property the type does have**. So the property set of a `Microsoft.App/managedEnvironments` can be discovered offline.
+
+> **Note, added during execution:** `BCP053` is a **warning**, not an error, and `az bicep lint`
+> exits `0` on it. Judge these probes by their *output*, never by their exit code. The same fact
+> forced a redesign of Task 2's gate.
 
 **Files:**
 - Create (temporary, deleted in this task): `infra/scratch-probe.bicep`
@@ -123,7 +127,11 @@ output probe2 array = probe.properties.outboundIpAddresses
 output probe3 string = probe.properties.outboundSettings.outBoundType
 ```
 
-Expected: at least one fails with **`BCP053`** ("does not contain property"). That failure is the answer, not a problem to fix.
+Expected: at least one reports **`BCP053`** ("does not contain property"), and the diagnostic enumerates the type's complete property set — which is the actual answer.
+
+> **CORRECTED during execution, 2026-07-31.** This step originally said "at least one **fails**". It does not fail: **`BCP053` is a warning and `az bicep lint` exits `0`.** Read the *output*, not the exit code. That discovery is why Task 2's gate had to be redesigned — see the correction there.
+>
+> **Result:** `staticIp` and `defaultDomain` exist; `outboundIpAddresses` and `outboundSettings` do not. `ManagedEnvironmentProperties@2024-03-01` exposes **no egress property at all**, so the two-phase firewall design stands. Recorded in the design spec §5.
 
 - [ ] **Step 5: Append the finding to the design spec's §5**
 
@@ -306,12 +314,86 @@ Write-Output "exit: $LASTEXITCODE"
 
 Expected: **exit 0**. If an API version is rejected, the compiler names it — fix it to the nearest available version and record the change in a comment. That the compiler catches a bad API version offline is precisely why this gate is worth having.
 
-- [ ] **Step 4: Add the root script**
+> ### CORRECTION 1 (found during execution, 2026-07-31): the gate below was redesigned
+>
+> This task originally gated on `az bicep lint`'s **exit code**. That gate would have enforced
+> nothing. **`az bicep lint` exits `0` on warnings**, and `BCP053` — reading a property a resource
+> type does not have — is a *warning*. So a template referencing a nonexistent property would have
+> passed.
+>
+> This is the **Redocly lesson repeating verbatim.** `CLAUDE.md` already records that Redocly's plain
+> `recommended` preset "exits 0 on warnings and there is no `--fail-on-warnings` flag", which left
+> the zero-warning bar unenforced for most of Plan 2A. Same shape, different tool.
+>
+> Setting linter rules to `error` in `bicepconfig.json` does **not** fix it: `BCP053` is a **core
+> compiler diagnostic, not a configurable linter rule**, so its severity cannot be raised from
+> config.
+>
+> **The gate now fails on any diagnostic, not on the exit code**, via a small Node runner. Steps 8–10
+> prove *both* failure classes — a linter-rule error and a `BCP053` warning.
+
+- [ ] **Step 4: Create the gate runner**
+
+Create `infra/lint.mjs`:
+
+```js
+// Fails on ANY Bicep diagnostic, not on the exit code.
+//
+// `az bicep lint` exits 0 on WARNINGS. BCP053 — reading a property a resource
+// type does not have — is a warning, so a template referencing a nonexistent
+// property passes an exit-code-only gate. That is the same shape as Redocly's
+// plain `recommended` preset exiting 0 on warnings, which left this repo's
+// zero-warning bar unenforced for most of Plan 2A (see CLAUDE.md).
+//
+// Raising severity in bicepconfig.json does NOT help: BCP053 is a core compiler
+// diagnostic, not a configurable linter rule.
+//
+// Diagnostics are matched on Bicep's own `file.bicep(line,col)` citation rather
+// than on "any output at all", because the Azure CLI emits unrelated WARNING
+// lines of its own (extension-preview notices, config notices) that must not
+// fail the build. A non-zero exit with no diagnostic is still a failure.
+import { spawnSync } from "node:child_process";
+
+const target = process.argv[2] ?? "infra/main.bicep";
+const onWindows = process.platform === "win32";
+
+const result = spawnSync("az", ["bicep", "lint", "--file", target], {
+  encoding: "utf8",
+  shell: onWindows,
+});
+
+if (result.error) {
+  console.error(`Could not run the Azure CLI: ${result.error.message}`);
+  process.exit(1);
+}
+
+const combined = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+const diagnostics = combined
+  .split(/\r?\n/)
+  .filter((line) => /\.bicep\(\d+,\d+\)/.test(line));
+
+if (diagnostics.length > 0) {
+  for (const line of diagnostics) console.error(line.trim());
+  console.error(
+    `\n::error::Bicep reported ${diagnostics.length} diagnostic(s) for ${target}. ` +
+      `Warnings fail this gate deliberately: az bicep lint exits 0 on them, so the exit code alone proves nothing.`,
+  );
+  process.exit(1);
+}
+
+if (result.status !== 0) {
+  console.error(combined.trim());
+  console.error(`::error::az bicep lint exited ${result.status} for ${target}.`);
+  process.exit(1);
+}
+
+console.log(`${target}: no Bicep diagnostics.`);
+```
 
 In `package.json`, add to `scripts`:
 
 ```json
-"infra:lint": "az bicep lint --file infra/main.bicep"
+"infra:lint": "node infra/lint.mjs"
 ```
 
 `lint` rather than `build` on purpose: it performs full semantic analysis and reports both errors and linter diagnostics **without emitting an ARM JSON artifact**. `az bicep build` would write `infra/main.json`, which is generated output this repo would then have to gitignore and guard — a fourth generated path for no benefit.
@@ -323,7 +405,7 @@ pnpm infra:lint
 Write-Output "exit: $LASTEXITCODE"
 ```
 
-Expected: exit 0.
+Expected: `infra/main.bicep: no Bicep diagnostics.` and exit 0.
 
 - [ ] **Step 6: Add the `infra` CI job**
 
@@ -351,8 +433,10 @@ In `.github/workflows/ci.yml`, add a new job as a sibling of `verify`, `real-tok
       - name: Install the Bicep CLI
         run: az bicep install
 
+      # NOT `az bicep lint` directly: it exits 0 on warnings, and BCP053 (a
+      # nonexistent property) is a warning. The runner fails on any diagnostic.
       - name: Lint and type-check the Bicep template
-        run: az bicep lint --file infra/main.bicep
+        run: node infra/lint.mjs infra/main.bicep
 ```
 
 - [ ] **Step 7: Verify the workflow parses**
@@ -363,7 +447,7 @@ node -e "const y=require('./node_modules/.pnpm/js-yaml@4.2.0/node_modules/js-yam
 
 Expected: `jobs: verify, real-token, images, infra` and `infra timeout: 10`.
 
-- [ ] **Step 8: PROVE THE GATE FAILS — add a deliberate error**
+- [ ] **Step 8: PROVE THE GATE FAILS, class 1 — a linter-rule error**
 
 Temporarily add an unused parameter to `infra/main.bicep`, immediately after the `namePrefix` param:
 
@@ -371,27 +455,51 @@ Temporarily add an unused parameter to `infra/main.bicep`, immediately after the
 param deliberatelyUnusedParameterToProveTheGateFails string = 'remove me'
 ```
 
-- [ ] **Step 9: Run the gate and confirm it goes red**
+Then:
 
 ```powershell
 pnpm infra:lint
 Write-Output "exit: $LASTEXITCODE"
 ```
 
-Expected: **non-zero exit**, with a `no-unused-params` diagnostic naming `deliberatelyUnusedParameterToProveTheGateFails`. If it exits 0, the gate is not enforcing and **must be fixed before continuing** — check that `bicepconfig.json` sits in `infra/` beside `main.bicep` and that the rule level is `error`.
+Expected: **non-zero exit**, with a `no-unused-params` diagnostic naming the parameter. If it exits 0, the gate is not enforcing — check that `bicepconfig.json` sits in `infra/` beside `main.bicep` and that the rule level is `error`. Remove the parameter afterwards.
 
-Record the exact diagnostic text in the commit message.
+- [ ] **Step 9: PROVE THE GATE FAILS, class 2 — a `BCP053` WARNING**
 
-- [ ] **Step 10: Remove the deliberate error and confirm green**
+This is the class the original gate would have missed entirely, so it matters more than class 1. Temporarily append to `infra/main.bicep`:
 
-Delete the parameter, then:
+```bicep
+output deliberatelyNonexistentProperty string = containerAppsEnvironment.properties.thisPropertyDoesNotExist
+```
+
+Then:
 
 ```powershell
 pnpm infra:lint
 Write-Output "exit: $LASTEXITCODE"
 ```
 
-Expected: exit 0.
+Expected: **non-zero exit**, with `BCP053` naming `thisPropertyDoesNotExist`.
+
+Now prove the original gate would have passed it, so the correction is evidenced rather than asserted:
+
+```powershell
+az bicep lint --file infra/main.bicep
+Write-Output "az bicep lint exit: $LASTEXITCODE"
+```
+
+Expected: **exit 0** despite the same `BCP053` warning. Record both exit codes in the commit message — this is the evidence that the exit-code gate was hollow.
+
+- [ ] **Step 10: Remove both deliberate errors and confirm green**
+
+Delete the unused parameter and the bogus output, then:
+
+```powershell
+pnpm infra:lint
+Write-Output "exit: $LASTEXITCODE"
+```
+
+Expected: `no Bicep diagnostics.` and exit 0.
 
 - [ ] **Step 11: Commit**
 
