@@ -77,3 +77,17 @@ describe("SignInPanel", () => {
     expect(screen.queryByRole("button", { name: /Sign in with Microsoft/ })).not.toBeInTheDocument();
   });
 });
+
+// This invariant is NOT covered by rendering tests: SignInPanel takes its flags
+// as props, so deleting `export const dynamic = "force-dynamic"` from page.tsx
+// leaves every other test passing while /signin silently returns to being
+// statically prerendered — baking one of three states into signin.html at build
+// time and breaking the config-only Entra cutover documented in the Plan 3 spec
+// §7. Assert the export directly, since that is the thing a future edit would
+// remove.
+describe("the /signin route segment config", () => {
+  it("is force-dynamic, so the three states follow runtime configuration", async () => {
+    const page = await import("@/app/(auth)/signin/page");
+    expect(page.dynamic).toBe("force-dynamic");
+  });
+});
