@@ -1,6 +1,7 @@
 import { signIn } from "@/auth";
 import { CycleRibbon, type RibbonDay } from "@/components/cycle-ribbon/cycle-ribbon";
-import { DevIdentityPicker } from "./dev-identity-picker";
+import { isEntraConfigured } from "@/auth.config";
+import { SignInPanel } from "./sign-in-panel";
 
 // Illustrative only. The ribbon is the real component (Plan 7 extends it with
 // real data); these marks exist so the register idea lands before sign-in.
@@ -19,6 +20,7 @@ const ILLUSTRATION: RibbonDay[] = [
 ];
 
 const bypassEnabled = process.env.AUTH_DEV_BYPASS === "true";
+const entraConfigured = isEntraConfigured(process.env);
 
 export default function SignInPage() {
   return (
@@ -48,24 +50,14 @@ export default function SignInPage() {
           Industry Readiness Programme
         </p>
 
-        {bypassEnabled ? (
-          <DevIdentityPicker />
-        ) : (
-          <form
-            action={async () => {
-              "use server";
-              await signIn("microsoft-entra-id", { redirectTo: "/" });
-            }}
-          >
-            <button
-              type="submit"
-              className="rounded-[var(--radius-control)] px-4 py-2 font-semibold"
-              style={{ background: "var(--primary)", color: "#ffffff" }}
-            >
-              Sign in with Microsoft
-            </button>
-          </form>
-        )}
+        <SignInPanel
+          bypassEnabled={bypassEnabled}
+          entraConfigured={entraConfigured}
+          signInAction={async () => {
+            "use server";
+            await signIn("microsoft-entra-id", { redirectTo: "/" });
+          }}
+        />
 
         <p className="tabular mt-8 text-xs" style={{ color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>
           Asia/Colombo &middot; UTC+05:30
