@@ -318,6 +318,62 @@ resource webApp 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
+// ADR-0009 D3: migrations run as a Container Apps Job inside the environment,
+// not from a CI runner. A GitHub runner's egress IP is dynamic, so a
+// runner-side migration under D2's allowlist would mean opening a firewall rule
+// per run — a race, a cleanup-on-failure problem, and a window where the
+// database is broadly reachable. This job's egress is the environment's, which
+// is already allowlisted.
+//
+// Also NOT migrate-on-boot: with scale-to-zero, boot happens constantly, so
+// every cold start would attempt a migration and concurrent replicas would race
+// for the migration lock.
+resource migrateJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: '${namePrefix}-migrate'
+  location: location
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    configuration: {
+      triggerType: 'Manual'
+      // Generous: a first migration against a cold B1ms server is slow. The
+      // deploy workflow waits for a terminal status and fails on a bad one.
+      replicaTimeout: 600
+      // No retry, deliberately. A failed migration must be looked at, not
+      // silently repeated — a partially applied migration retried blindly is
+      // worse than a hard stop.
+      replicaRetryLimit: 0
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: databaseUrl
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'migrate'
+          image: '${containerRegistryBase}/irp-migrate:${imageTag}'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 // NOTE: appInsights.properties.ConnectionString is deliberately NOT an output.
 // Deployment outputs are readable from deployment history, and the linter's
 // outputs-should-not-contain-secrets rule is set to error. Task 4 references it
