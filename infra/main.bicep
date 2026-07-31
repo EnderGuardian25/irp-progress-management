@@ -42,6 +42,10 @@ param jwtIssuer string = 'https://issuer.invalid/v2.0'
 @description('Expected token audience.')
 param jwtAudience string = 'api://irp-progress-management'
 
+@description('Auth.js cookie encryption key, 32+ random bytes. Supplied from a GitHub secret. Without it the session cookie cannot be encrypted or decrypted.')
+@secure()
+param authSecret string
+
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${namePrefix}-logs'
   location: location
@@ -232,6 +236,88 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
+resource webApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: '${namePrefix}-web'
+  location: location
+  properties: {
+    managedEnvironmentId: containerAppsEnvironment.id
+    configuration: {
+      ingress: {
+        external: true
+        targetPort: 3000
+        transport: 'auto'
+        allowInsecure: false
+      }
+      secrets: [
+        {
+          name: 'auth-secret'
+          value: authSecret
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'web'
+          image: '${containerRegistryBase}/irp-web:${imageTag}'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'NODE_ENV'
+              value: 'production'
+            }
+            {
+              name: 'PORT'
+              value: '3000'
+            }
+            {
+              name: 'HOSTNAME'
+              value: '0.0.0.0'
+            }
+            {
+              name: 'AUTH_SECRET'
+              secretRef: 'auth-secret'
+            }
+            {
+              // Built from the ENVIRONMENT's default domain, not this app's own
+              // ingress FQDN, which would be a self-reference. Container Apps
+              // FQDNs are '<app-name>.<environment default domain>', so this is
+              // exact rather than a guess. Auth.js needs AUTH_URL to match the
+              // origin the browser actually used, or the post-callback redirect
+              // lands on an origin without the session cookie.
+              name: 'AUTH_URL'
+              value: 'https://${namePrefix}-web.${containerAppsEnvironment.properties.defaultDomain}'
+            }
+            {
+              // Server-side only. The browser never holds a token, so it never
+              // calls the API directly (Plan 3 spec 4.1).
+              name: 'API_BASE_URL'
+              value: 'https://${apiApp.properties.configuration.ingress.fqdn}'
+            }
+            // AUTH_DEV_BYPASS is DELIBERATELY ABSENT, and cannot be set here.
+            // NODE_ENV is production, so assertBypassNotInProduction makes all
+            // four entry points refuse to boot — CI asserts the web container
+            // exits non-zero with the guard's own error string when the flag is
+            // true. See ADR-0012.
+            //
+            // The three AUTH_MICROSOFT_ENTRA_ID_* variables are likewise absent
+            // because Entra is deferred, so isEntraConfigured is false and no
+            // provider is registered. Task 7 makes /signin say so honestly
+            // instead of rendering a button that cannot work.
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 3
+      }
+    }
+  }
+}
+
 // NOTE: appInsights.properties.ConnectionString is deliberately NOT an output.
 // Deployment outputs are readable from deployment history, and the linter's
 // outputs-should-not-contain-secrets rule is set to error. Task 4 references it
@@ -244,3 +330,4 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
 output containerAppsEnvironmentId string = containerAppsEnvironment.id
 output containerAppsDefaultDomain string = containerAppsEnvironment.properties.defaultDomain
 output apiUrl string = 'https://${apiApp.properties.configuration.ingress.fqdn}'
+output webUrl string = 'https://${webApp.properties.configuration.ingress.fqdn}'
