@@ -18,3 +18,6 @@ param postgresAdminPassword = ''
 // outbound-IP property at all (verified in Task 1). See docs/deploy-runbook.md.
 // Empty means NO firewall rule is created — deliberately fail-closed.
 param allowedClientIpAddresses = []
+// Always a git SHA, never 'latest'. /health reports the baked-in APP_VERSION,
+// so the deployed commit stays verifiable from outside.
+param imageTag = 'replace-with-a-git-sha'

@@ -27,6 +27,21 @@ param postgresAdminPassword string
 @description('IPv4 addresses allowed to reach Postgres, each added as a single-address firewall rule. Deliberately defaults to EMPTY: an empty allowlist creates no rule at all, so a forgotten value fails closed as a connection error rather than silently opening the server. Populated per docs/deploy-runbook.md.')
 param allowedClientIpAddresses array = []
 
+@description('Container image tag. Always a git SHA, never "latest" — /health reports the baked-in APP_VERSION so the deployed commit is verifiable from outside.')
+param imageTag string
+
+@description('GHCR base path for both images. Packages are PUBLIC, so Container Apps pulls anonymously and no registries[] block or registry credential exists anywhere in this template.')
+param containerRegistryBase string = 'ghcr.io/enderguardian25'
+
+@description('JWKS endpoint. Deliberately unresolvable until the Entra work lands: createRemoteJWKSet is LAZY and performs no network I/O at construction, so the API boots and serves /health regardless. Do not "fix" this.')
+param jwksUri string = 'https://jwks.invalid/keys'
+
+@description('Expected token issuer, STRING-COMPARED against the iss claim rather than fetched. Deliberately unresolvable, as above.')
+param jwtIssuer string = 'https://issuer.invalid/v2.0'
+
+@description('Expected token audience.')
+param jwtAudience string = 'api://irp-progress-management'
+
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${namePrefix}-logs'
   location: location
@@ -129,6 +144,94 @@ resource firewallRules 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@
 // TLS, and Prisma will happily connect without it if not told otherwise.
 var databaseUrl = 'postgresql://${postgresAdminUsername}:${postgresAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/irp?schema=public&sslmode=require'
 
+resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: '${namePrefix}-api'
+  location: location
+  properties: {
+    managedEnvironmentId: containerAppsEnvironment.id
+    configuration: {
+      ingress: {
+        external: true
+        targetPort: 3001
+        transport: 'auto'
+        allowInsecure: false
+      }
+      // No registries[] block: GHCR packages are public and the pull is
+      // anonymous. This is the single biggest simplification the public-GHCR
+      // decision buys, and it retires ADR-0009 D1's negative consequence.
+      secrets: [
+        {
+          name: 'database-url'
+          value: databaseUrl
+        }
+        {
+          // Carries an instrumentation key, so a secret rather than a plain env
+          // var. selectSpanExporter (ADR-0014) switches to the Azure Monitor
+          // exporter as soon as this is non-empty — supplying it is the ENTIRE
+          // application-side change T-21 requires.
+          name: 'appinsights-connection-string'
+          value: appInsights.properties.ConnectionString
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'api'
+          image: '${containerRegistryBase}/irp-api:${imageTag}'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'NODE_ENV'
+              value: 'production'
+            }
+            {
+              name: 'PORT'
+              value: '3001'
+            }
+            // APP_VERSION is DELIBERATELY ABSENT. The Dockerfile bakes it via
+            // ARG/ENV at build time, and Plan 4A's CORRECTION 4 item 3 removed
+            // the runtime copy from compose.yaml precisely so the /health
+            // assertion proves the build arg reached the image. Setting it here
+            // would satisfy that assertion from the runtime value alone and
+            // re-open the hole. Do not add it.
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              secretRef: 'appinsights-connection-string'
+            }
+            {
+              name: 'JWKS_URI'
+              value: jwksUri
+            }
+            {
+              name: 'JWT_ISSUER'
+              value: jwtIssuer
+            }
+            {
+              name: 'JWT_AUDIENCE'
+              value: jwtAudience
+            }
+          ]
+        }
+      ]
+      scale: {
+        // ADR-0009 D5. Scale to zero at rest is what makes the free grant
+        // sufficient. Plan 11 raises this for the load test ONLY — NFR-1's p95
+        // numbers are valid only with the floor raised.
+        minReplicas: 0
+        maxReplicas: 3
+      }
+    }
+  }
+}
+
 // NOTE: appInsights.properties.ConnectionString is deliberately NOT an output.
 // Deployment outputs are readable from deployment history, and the linter's
 // outputs-should-not-contain-secrets rule is set to error. Task 4 references it
@@ -140,8 +243,4 @@ var databaseUrl = 'postgresql://${postgresAdminUsername}:${postgresAdminPassword
 // firewall allowlist is a parameter rather than a template reference.
 output containerAppsEnvironmentId string = containerAppsEnvironment.id
 output containerAppsDefaultDomain string = containerAppsEnvironment.properties.defaultDomain
-// TEMPORARY, deleted in Task 4. `databaseUrl` has no consumer until the api
-// container app exists, and no-unused-vars is an error, so this keeps the tree
-// green at every commit. Deliberately a BOOL, not the value: emitting the
-// interpolated connection string would put a password in deployment history.
-output databaseUrlIsConsumedInTask4 bool = !empty(databaseUrl)
+output apiUrl string = 'https://${apiApp.properties.configuration.ingress.fqdn}'
