@@ -1,0 +1,20 @@
+// A COMMITTED EXAMPLE. Copy, fill in, and keep your copy out of git.
+// Contains no real values and no secrets.
+//
+// The real deploy does not use a .bicepparam file at all — the workflow passes
+// parameters on the command line so the password can come from a GitHub secret
+// and never touch disk. This file exists so a human can see every parameter the
+// template requires in one place.
+using './main.bicep'
+
+param location = 'southeastasia'
+param namePrefix = 'irp'
+// Azure rejects 'admin', 'postgres', 'azure_superuser' and a few others.
+param postgresAdminUsername = 'irpadmin'
+// Never a real value here. Supply on the command line or from a secret store.
+param postgresAdminPassword = ''
+// Empty until the first apply reveals the environment's egress address, which
+// the template cannot reference: ManagedEnvironmentProperties exposes no
+// outbound-IP property at all (verified in Task 1). See docs/deploy-runbook.md.
+// Empty means NO firewall rule is created — deliberately fail-closed.
+param allowedClientIpAddresses = []
