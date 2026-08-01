@@ -781,8 +781,8 @@ export interface BatchRepo {
   firstEnrolmentStart(studentId: string): Promise<CivilDate | null>;
 }
 
-type DbBatch = { id: string; name: string; startDate: Date; endDate: Date };
-type DbEnrolment = { id: string; studentId: string; batchId: string; startDate: Date; endDate: Date | null };
+interface DbBatch { id: string; name: string; startDate: Date; endDate: Date }
+interface DbEnrolment { id: string; studentId: string; batchId: string; startDate: Date; endDate: Date | null }
 
 function mapBatch(b: DbBatch): BatchRecord {
   return { id: b.id, name: b.name, startDate: fromDbDate(b.startDate), endDate: fromDbDate(b.endDate) };
@@ -1018,10 +1018,10 @@ export interface EntryRepo {
   getReport(studentId: string, date: CivilDate): Promise<DailyReportRecord | null>;
 }
 
-type DbEntry = {
+interface DbEntry {
   id: string; studentId: string; entryDate: Date; body: string;
   submittedAt: Date; isLate: boolean; isExtra: boolean;
-};
+}
 
 function mapEntry(e: DbEntry): EntryRecord {
   return { ...e, entryDate: fromDbDate(e.entryDate) };
@@ -1348,10 +1348,10 @@ export interface MentorRecordRepo {
   get(studentId: string, date: CivilDate): Promise<MentorDayRecordShape | null>;
 }
 
-type DbRecord = {
+interface DbRecord {
   id: string; studentId: string; date: Date; attended: boolean;
   tasksCompleted: boolean; note: string | null; recordedById: string;
-};
+}
 
 function map(r: DbRecord): MentorDayRecordShape {
   return { ...r, date: fromDbDate(r.date) };
