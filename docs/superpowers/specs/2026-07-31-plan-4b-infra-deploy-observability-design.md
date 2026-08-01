@@ -287,8 +287,9 @@ This is in scope because 4B creates the first environment in which that state is
 correct is a property of the *runtime* environment, so the page must not be a build-time artefact.
 Next prerenders it as static by default — verified doing so during execution, with `/signin` in
 `.next/prerender-manifest.json` and `signin.html` on disk — which bakes one state into HTML. The
-consequence is not cosmetic: the **Entra cutover in the Plan 3 spec §7 is documented as four config
-steps with no code change**, and against a baked page, setting the three `AUTH_MICROSOFT_ENTRA_ID_*`
+consequence is not cosmetic: the **Entra cutover in the Plan 3 spec §7 is documented as config-only
+steps with no code change** (five, after a 2026-08-01 correction added the previously-missing step of
+setting the three `AUTH_MICROSOFT_ENTRA_ID_*` variables), and against a baked page, setting those same
 variables on the Container App would leave the "not configured" panel on screen until the image was
 rebuilt. `export const dynamic = "force-dynamic"` is therefore a requirement of this section, not an
 implementation detail, and it is asserted by a test — an invariant enforced only by a comment is the

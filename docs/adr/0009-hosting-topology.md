@@ -83,13 +83,13 @@ it is already inside D2's allowlist.
 
 ### Negative
 
-- **D1 introduces a long-lived credential that ACR would not have.** With ACR, Bicep grants
-  `AcrPull` to the container app's managed identity and no registry secret exists anywhere. GHCR has
-  no managed-identity path, so a private package needs a PAT with `read:packages` stored as a
-  Container Apps registry secret — one more credential to rotate, and one more way the deploy can
-  fail. Making the packages public removes the credential entirely at the cost of world-readable
-  images; that choice is deliberately left open in `docs/manual-setup-steps.md` §1.5, defaulting to
-  private because it is the reversible direction.
+- **D1 introduces a long-lived credential that ACR would not have — in principle.** With ACR, Bicep
+  grants `AcrPull` to the container app's managed identity and no registry secret exists anywhere.
+  GHCR has no managed-identity path, so a private package would have needed a PAT with
+  `read:packages` stored as a Container Apps registry secret. **Decided 2026-07-31: the packages are
+  public instead** (`docs/manual-setup-steps.md` §1.5), so this consequence does not actually
+  materialise — no registry credential exists anywhere, at the cost of world-readable images. See
+  "Revisit when" below; this is that trigger, already fired and resolved.
 - **D2 leaves a database holding personal data on a public endpoint.** The firewall and TLS are real
   controls, but this is weaker than a private endpoint and is accepted on demo-scoped grounds only.
   It belongs in the deploy runbook as a stated limitation, and it is the same concern class as O-5.
@@ -174,8 +174,11 @@ we can override for.
 
 ## Revisit when
 
-- **The GHCR credential causes a deploy failure**, or the packages are made public — either
-  outcome changes D1's negative consequence and may make ACR's managed-identity path worth the $5.
+- ~~**The GHCR credential causes a deploy failure**, or the packages are made public~~ — **fired
+  2026-07-31: the packages were made public.** Conclusion: **no change to this ADR.** D1's negative
+  consequence (a long-lived `read:packages` PAT) is retired rather than mitigated, and the
+  ACR-managed-identity alternative is moot, because with anonymous pulls no registry credential
+  exists anywhere. Recorded in `docs/manual-setup-steps.md` §1.5 and the Plan 4B design spec §4.
 - **The system holds real student data**, at which point D2's public endpoint should become a
   private endpoint and the VNet cost is justified.
 - **Free-tier B1ms availability in Southeast Asia is verified** (needs `az`, see

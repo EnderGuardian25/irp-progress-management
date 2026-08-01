@@ -1389,7 +1389,7 @@ Replace the whole `{bypassEnabled ? (...) : (...)}` block — from `{bypassEnabl
 pnpm --filter @irp/web test 2>&1 | Select-String -Pattern "Test Files|Tests  |FAIL"
 ```
 
-Expected: PASS, with 5 more tests than before (79 total if the count was 74).
+Expected: PASS, with six more tests than before (80 total if the count was 74) — five for `SignInPanel`'s states plus the route-segment-config test added by CORRECTION 2.
 
 - [ ] **Step 6: Run the full verification set**
 
@@ -1422,9 +1422,10 @@ would enable each path.
 Extracted into SignInPanel taking the server action as a PROP rather than
 importing @/auth, which is what makes it unit-testable: real next-auth needs
 next/server, which Vitest cannot resolve, and the existing suite has to mock
-@/auth for exactly that reason. Five tests cover all three states plus the
+@/auth for exactly that reason. Six tests: five cover all three states plus the
 both-set precedence case — the bypass wins there, because this component should
-not be the thing relying on the guard to make that impossible."
+not be the thing relying on the guard to make that impossible — and the sixth
+asserts the /signin route segment config directly, per CORRECTION 2."
 ```
 
 ---
@@ -1436,6 +1437,23 @@ not be the thing relying on the guard to make that impossible."
 
 **Interfaces:**
 - Consumes: `infra/main.bicep`'s parameters (`imageTag`, `postgresAdminUsername`, `postgresAdminPassword`, `authSecret`, `allowedClientIpAddresses`) and its `apiUrl` / `webUrl` outputs; the `migrate`/`api`/`web` Dockerfile targets.
+
+> ### CORRECTION 5 (found during Task 10's documentation reconciliation, 2026-08-01): this step's YAML never received the `params.json` deviation
+>
+> Step 1's YAML block below passed `allowedClientIpAddresses` inline as
+> `allowedClientIpAddresses="${{ vars.ALLOWED_CLIENT_IPS || '[]' }}"` alongside the other
+> `KEY=VALUE` parameters. That is the exact form the actual `.github/workflows/deploy.yml` deviates
+> away from, for two reasons recorded there: whether `az deployment group create --parameters`
+> parses an inline `KEY=VALUE` as a JSON array rather than the literal string `"[]"` is an
+> unverifiable-until-first-apply ambiguity, and inline `KEY=VALUE` puts every value — including this
+> one — in the runner's process argument list. The committed workflow instead writes
+> `allowedClientIpAddresses` to a small ARM parameters file (`params.json`) via a `Write the array
+> parameter to an ARM parameters file` step, and passes it with `--parameters @params.json` alongside
+> a second `--parameters` flag carrying the remaining scalars inline. This plan's own Step 1 YAML was
+> never updated to match, so **anyone re-running Task 8 from the plan as written reproduces the
+> ambiguous inline-array form the deviation existed to avoid.** Back-ported below, matching the
+> committed workflow exactly. This adds one step, so Step 2's expected step count changes from 14 to
+> **15**.
 
 - [ ] **Step 1: Create the workflow**
 
@@ -1544,6 +1562,42 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # `allowedClientIpAddresses` is an ARRAY parameter. Passing it inline as
+      # KEY=VALUE — allowedClientIpAddresses="${{ vars.ALLOWED_CLIENT_IPS || '[]' }}"
+      # — has two problems: whether `az deployment group create --parameters`
+      # parses an inline KEY=VALUE as JSON (rather than the literal string
+      # "[]") is a known, unverifiable-until-first-apply ambiguity; and
+      # KEY=VALUE puts every value in the runner's process argument list,
+      # visible to anything that can list processes on it. Fix for both:
+      # supply the array via a JSON parameters file using az's @{path}
+      # syntax, in the standard ARM parameters-file shape. The file holds
+      # ONLY this one non-secret value. The two @secure() parameters
+      # (postgresAdminPassword, authSecret) stay OUT of this file and are
+      # passed as inline KEY=VALUE below instead — `az` permits mixing a
+      # file with inline KEY=VALUE pairs in the same command, since the
+      # keys don't overlap — which is what lets the secrets stay off disk
+      # entirely rather than needing a params file with its own
+      # cleanup-on-always step.
+      - name: Write the array parameter to an ARM parameters file
+        run: |
+          set -euo pipefail
+          cat > params.json <<EOF
+          {
+            "\$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            "contentVersion": "1.0.0.0",
+            "parameters": {
+              "allowedClientIpAddresses": {
+                "value": ${{ vars.ALLOWED_CLIENT_IPS || '[]' }}
+              }
+            }
+          }
+          EOF
+          echo "Wrote params.json:"
+          cat params.json
+          # Fail loudly here rather than handing `az` invalid JSON and getting
+          # a confusing ARM-side error instead.
+          jq empty params.json
+
       - name: Apply the Bicep template
         id: apply
         # Secrets are read from env vars ($POSTGRES_ADMIN_USERNAME etc.) rather
@@ -1570,6 +1624,7 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --template-file infra/main.bicep \
             --name "deploy-${{ steps.tag.outputs.value }}" \
+            --parameters @params.json \
             --parameters \
               namePrefix="$NAME_PREFIX" \
               imageTag="${{ steps.tag.outputs.value }}" \
@@ -1577,7 +1632,6 @@ jobs:
               postgresAdminUsername="$POSTGRES_ADMIN_USERNAME" \
               postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
               authSecret="$AUTH_SECRET" \
-              allowedClientIpAddresses="${{ vars.ALLOWED_CLIENT_IPS || '[]' }}" \
             --query "properties.outputs" \
             --output json > outputs.json
           cat outputs.json
@@ -1782,7 +1836,7 @@ jobs:
 node -e "const y=require('./node_modules/.pnpm/js-yaml@4.2.0/node_modules/js-yaml/index.js');const f=require('fs');const d=y.load(f.readFileSync('.github/workflows/deploy.yml','utf8'));console.log('name:',d.name);console.log('permissions:',JSON.stringify(d.permissions));console.log('timeout:',d.jobs.deploy['timeout-minutes']);console.log('steps:',d.jobs.deploy.steps.length)"
 ```
 
-Expected: `permissions` includes `id-token: write` (without it, `azure/login` cannot use OIDC and fails with an unhelpful token error), `timeout: 30`, and 14 steps.
+Expected: `permissions` includes `id-token: write` (without it, `azure/login` cannot use OIDC and fails with an unhelpful token error), `timeout: 30`, and 15 steps (14 plus the `params.json`-writing step backported in CORRECTION 5).
 
 - [ ] **Step 3: Confirm no secret is echoed**
 
@@ -2162,8 +2216,54 @@ are forward-only."
 
 Three claims in `docs/manual-setup-steps.md` are **factually wrong**, not merely stale, and two of them were load-bearing for a design decision. Correcting them is the point of this task.
 
+> ### CORRECTION 6 (found by review across execution, closed 2026-08-01): six more reconciliation items, deferred here deliberately
+>
+> Steps 1–9 below are this task exactly as originally scoped. Six further items surfaced during
+> Plan 4B's execution and review and were deliberately deferred to this task rather than fixed
+> piecemeal, since Task 10 is the one place doc consistency is checked as a whole:
+>
+> 1. **`manual-setup-steps.md` §1.1a and §1.2 were verified wrong a second time**, on 2026-07-30
+>    with live `az` calls: `bistecglobal.com` and `bisteccare.lk` are one tenant, Graph reads work,
+>    the CLI is installed and authenticated, and `allowedToCreateApps` is `true`. Folded into Steps
+>    1–2's replacement text below, which already carries this.
+> 2. **§1.5 closes** because the packages were decided public on 2026-07-31, firing ADR-0009's own
+>    revisit trigger with the conclusion **no change**. Folded into Steps 3–4 below.
+> 3. **`handoff.md` §2a and §3** needed the 4B row marked complete and a plain statement that
+>    Deliverable 3 is not complete until the runbook's bootstrap runs — nothing here claims a live
+>    deployment. Folded into Step 6 below, plus the slice-roadmap table and the "Azure and Entra: the
+>    real state" section, corrected in place with a dated callout rather than rewritten, per the
+>    project convention of marking history superseded instead of deleting it.
+> 4. **`handoff.md`'s `scripts/sdd-workspace` correction was itself wrong.** The 2026-07-29 note said
+>    the script ignores its argument and always returns the flat path; on this machine it resolved
+>    `.superpowers/sdd/2026-07-31-plan-4b-infra-deploy-observability/` for this plan. Corrected with a
+>    second, dated callout rather than overwriting the first — and the git-ignored, does-not-travel
+>    fact about the ledger is restated regardless of which behaviour is current.
+> 5. **The Plan 3 spec §7 Entra cutover was missing a step.** It listed `UPDATE "User"`, unsetting
+>    `AUTH_DEV_BYPASS`, pointing `JWKS_URI`/`JWT_ISSUER` at the tenant, and setting
+>    `ENTRA_REAL_TOKEN_TESTS=true` — but never setting the three web-side
+>    `AUTH_MICROSOFT_ENTRA_ID_*` variables, despite `isEntraConfigured` requiring all three before
+>    any provider is registered. Three documents (`docs/deploy-runbook.md`, the Plan 4B design spec,
+>    and this plan's Task 7) already reasoned about "setting the three variables" as though §7 said
+>    so. Added as its own numbered step, with a note that it is still config-only: `/signin` is
+>    `force-dynamic`, so a new Container App revision — created the moment those variables change —
+>    is a new process that re-reads them, and no image rebuild is needed.
+> 6. **Two accuracy fixes inside this plan file, self-referential:** Task 8's Step 1 YAML never
+>    received the `params.json` back-port (CORRECTION 5, added above, in Task 8's own section) — so
+>    re-running Task 8 from the plan as written would have reproduced the ambiguous inline-array form
+>    the deviation exists to avoid — and Task 7's Step 5/Step 7 test-count claims ("5 more tests…79
+>    total", "Five tests") underprovision the count by one: CORRECTION 2 added a sixth,
+>    route-segment-config test, making it six more tests (80 total). Both fixed at their own
+>    locations in Task 7 and Task 8 above, not just here.
+>
+> None of these six change what Steps 1–9 below do; they are additional ground truth folded into the
+> same files (plus the Plan 3 spec, and this plan's own Tasks 7 and 8) during the same task, per
+> `CLAUDE.md`'s rule that a defect found in the plan's own code — or its own documentation — gets
+> fixed at source, alongside whatever else the task was already touching.
+
 **Files:**
-- Modify: `docs/manual-setup-steps.md`, `handoff.md`, `CLAUDE.md`, `docs/adr/0009-hosting-topology.md`
+- Modify: `docs/manual-setup-steps.md`, `handoff.md`, `CLAUDE.md`, `docs/adr/0009-hosting-topology.md`,
+  `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md`, and this plan file's own
+  Tasks 7, 8 and 10 (CORRECTION 6 above)
 
 - [ ] **Step 1: Correct `manual-setup-steps.md` §1.1a's false premise**
 
