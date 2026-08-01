@@ -130,12 +130,28 @@ path used for a rollback — see §6).
 5. Starts the migration job and polls its execution **by the identity `az containerapp job start`
    returns**, not by assuming the most recent entry in the execution list is the one just started.
 6. Runs three smoke tests against the deployed URLs — `/health` reports the deployed SHA,
-   unauthenticated `/api/v1/me` is `401` with a Problem Details body, and `/signin` serves — each
-   retrying through the scale-from-zero cold start (ADR-0009 D5) and using an explicit `reached`
-   flag, so an endpoint that is never reachable fails the step outright instead of passing because
-   the loop's last command (`sleep 10`) happened to exit `0`.
+   unauthenticated `/api/v1/me` is `401` with a Problem Details body, and `/signin` serves.
+   `/health` and `/signin` retry through the scale-from-zero cold start (ADR-0009 D5) using an
+   explicit `reached` flag, so an endpoint that is never reachable fails the step outright instead
+   of passing because the loop's last command (`sleep 10`) happened to exit `0`. `/api/v1/me`
+   deliberately has **no** retry: it runs after `/health` has already warmed the API, and its
+   `status=$(curl ...)` is a bare assignment, so `set -e` trips if curl fails outright.
 
 Expected: about 5–7 minutes, dominated by the three image builds.
+
+> **Expect the first one or two runs to fail, and do not treat that as a broken pipeline.** Two
+> steps in this document are ordered so that the failure teaches you something you cannot look up:
+>
+> - **The GHCR packages start private** (§1.5). Until you make them public, the container app cannot
+>   pull and the deploy fails with `UNAUTHORIZED`. The packages do not exist to be made public until
+>   the first push has happened, so this ordering is unavoidable.
+> - **`ALLOWED_CLIENT_IPS` starts empty** (§4). The template deliberately creates no firewall rule at
+>   all when it is empty, so the migration job is rejected by Postgres — and the rejection message is
+>   how you discover the egress address to allowlist. That is the documented discovery method, not a
+>   mistake.
+>
+> Work through §1.5 and §4 when you hit them, then re-run. A green first attempt would mean someone
+> had already done both.
 
 **`[ ] MEASURE` — NFR-5, pipeline under 8 minutes.** Record the total workflow duration on the first
 deploy and the first cached deploy: _first: ____ · cached: ____ · target: < 8:00_
@@ -271,8 +287,14 @@ az monitor log-analytics query --workspace (az monitor log-analytics workspace s
 The `log-analytics` extension is not installed by default; the CLI prompts to install it on first
 use. Either accept the prompt interactively, or set
 `az config set extension.use_dynamic_install=yes_without_prompt` first to auto-install without a
-prompt (verified in this environment: CLI 2.88.0 installs `log-analytics` as a preview extension and
-the command above runs correctly once installed).
+prompt. Because it is a **preview** extension in CLI 2.88.0, auto-install additionally needs
+`az config set extension.dynamic_install_allow_preview=true` — without it the install is refused and
+the command fails on a machine that has never run it.
+
+**Scope of what was verified:** that these are real commands in CLI 2.88.0 and that `az monitor
+app-insights query` comes from the `application-insights` extension — checked via `--help`, which
+needs no Azure login. **The queries themselves have never been run against a live workspace**, since
+no deployment exists yet. Treat the KQL below as unexecuted.
 
 ### Traces
 
@@ -307,8 +329,20 @@ honest status until someone runs §6.1 once is "procedure written, execution out
 
 ### 6.1 Roll the application back
 
-Both container apps run in **single-revision mode**, and Container Apps retains prior revisions.
-Rolling back is re-deploying the previous SHA.
+Both container apps set `activeRevisionsMode: 'Single'` explicitly in `infra/main.bicep`, so one
+revision serves all traffic and there are no traffic weights to reason about. Rolling back means
+**redeploying an image that already exists in GHCR** — the workflow builds nothing.
+
+> **Why the workflow skips its build steps on a rollback, and why that matters.**
+> `actions/checkout` in `deploy.yml` takes no `ref:`, so a `workflow_dispatch` run checks out the tip
+> of the selected branch — **not** the commit named by `imageTag`, which only ever names an image
+> tag. Before this was fixed, the three build steps ran unconditionally, so a "rollback" rebuilt the
+> *current* code, tagged it with the *old* SHA, and pushed it — **overwriting the known-good image in
+> GHCR and destroying the artifact being rolled back to.** `/health` then reported the old SHA,
+> because `APP_VERSION` is baked from the same input, while the container ran current code. Every
+> success signal below would have been satisfied while nothing had actually been rolled back.
+> The build steps are now gated on `steps.tag.outputs.mode == 'build'`, which is only set when
+> `imageTag` is empty. Caught in review; never ran against a real deployment.
 
 1. Find the SHA currently deployed:
 
@@ -316,10 +350,16 @@ Rolling back is re-deploying the previous SHA.
    curl.exe -s https://<api-fqdn>/health
    ```
 
-2. Find the previous good SHA — the commit before it on `main`.
+2. Find the previous good SHA — the commit before it on `main`. It must be a SHA that was
+   **actually deployed**, because the rollback redeploys its image rather than building one.
 
-3. Run the **Deploy** workflow via `workflow_dispatch` with `imageTag` set to that SHA. The images
-   are already in GHCR, so this skips straight past the cached builds.
+3. Run the **Deploy** workflow via `workflow_dispatch` with `imageTag` set to that SHA. The build
+   steps are skipped entirely, so this is fast: it applies the template and runs the migration job.
+   The run log says `Rollback: redeploying the EXISTING image <sha> without rebuilding`.
+
+   **If that tag is not in GHCR**, the container app cannot pull it and the deploy fails loudly.
+   That is the correct outcome — far better than silently deploying the wrong code. Pick a tag you
+   can see in the repository's Packages list.
 
 4. Confirm:
 
@@ -327,16 +367,18 @@ Rolling back is re-deploying the previous SHA.
    curl.exe -s https://<api-fqdn>/health
    ```
 
-   Expected: the previous SHA.
+   Expected: the previous SHA. Because nothing was rebuilt, this is now genuine evidence that the
+   older image is running, not merely that a build arg was set.
 
 Record the result:
 
 | Step | Expected | Observed | Time |
 |---|---|---|---|
 | Note the current SHA | matches `main` | | |
-| Dispatch with the previous SHA | workflow succeeds | | |
+| Dispatch with the previous SHA | workflow succeeds, build steps show as skipped | | |
 | `/health` reports the previous SHA | previous SHA | | |
 | `/signin` still serves | 200 | | |
+| The old image is still in GHCR afterwards | present, not overwritten | | |
 | Total rollback duration | < 5 min | | |
 
 ### 6.2 What rollback does NOT cover

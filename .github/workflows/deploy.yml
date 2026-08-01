@@ -38,27 +38,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Also decides whether this run BUILDS or merely REDEPLOYS. An explicit
+      # imageTag input means "roll back to an image that already exists", and a
+      # rollback must not rebuild — see the note on the build steps below.
       - name: Resolve the image tag
         id: tag
         run: |
           set -euo pipefail
           tag="${{ inputs.imageTag }}"
-          if [ -z "$tag" ]; then tag="${GITHUB_SHA}"; fi
+          if [ -z "$tag" ]; then
+            tag="${GITHUB_SHA}"
+            echo "mode=build" >> "$GITHUB_OUTPUT"
+            echo "Normal deploy: building and pushing $tag"
+          else
+            echo "mode=redeploy" >> "$GITHUB_OUTPUT"
+            echo "Rollback: redeploying the EXISTING image $tag without rebuilding"
+          fi
           echo "value=$tag" >> "$GITHUB_OUTPUT"
-          echo "Deploying tag $tag"
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.tag.outputs.mode == 'build'
 
       # Packages are PUBLIC, so no pull credential exists anywhere. This login
       # is for the PUSH only, and uses the built-in GITHUB_TOKEN rather than a
-      # PAT.
+      # PAT. Skipped on a rollback, which pushes nothing.
       - name: Log in to GHCR
+        if: steps.tag.outputs.mode == 'build'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # THE THREE BUILD STEPS ARE SKIPPED ON A ROLLBACK, and that is load-bearing
+      # rather than an optimisation.
+      #
+      # `actions/checkout` above takes no `ref:`, so a workflow_dispatch run
+      # checks out the tip of the selected branch — NOT the commit named by
+      # imageTag, which only ever names an image tag. Building unconditionally
+      # therefore meant a "rollback" rebuilt the CURRENT (broken) code, tagged it
+      # with the OLD SHA, and pushed it — overwriting the known-good image in
+      # GHCR and destroying the very artifact being rolled back to. /health then
+      # reported the old SHA, because APP_VERSION is baked from the same input,
+      # while running current code. Every success signal the runbook tells the
+      # operator to check was satisfied while nothing had been rolled back.
+      # Caught in review, before any real deploy.
+      #
+      # Images are immutable artifacts already in GHCR, so a rollback redeploys
+      # one and builds nothing. If the requested tag does not exist, the
+      # container app fails to pull and the deploy fails loudly — the correct
+      # outcome, and far better than silently deploying the wrong code.
+      #
+      # Do NOT "fix" this by adding `ref:` to checkout so rollbacks rebuild from
+      # the old commit. That would still overwrite an existing artifact with a
+      # freshly built one, making the deployed image depend on the builder rather
+      # than on what was actually tested.
+      #
       # APP_VERSION is passed as a BUILD ARG and baked into the image. It is
       # deliberately NOT set as a container-app runtime env var, so /health
       # reporting it proves the build arg actually reached the image — a
@@ -66,6 +101,7 @@ jobs:
       # was a real bug fixed in Plan 4A; see infra/main.bicep's apiApp
       # container env block for the corresponding "deliberately absent" note.
       - name: Build and push the api image
+        if: steps.tag.outputs.mode == 'build'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -77,6 +113,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push the web image
+        if: steps.tag.outputs.mode == 'build'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -87,6 +124,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push the migration image
+        if: steps.tag.outputs.mode == 'build'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -311,6 +349,13 @@ jobs:
             exit 1
           }
 
+      # Deliberately NO retry loop here, unlike the /health and /signin tests.
+      # This step runs after /health, which has already retried the API through
+      # its scale-from-zero cold start, so the container is warm by now. And
+      # `status=$(curl ...)` is a BARE ASSIGNMENT, so `set -e` does trip if curl
+      # fails outright — the fail-closed hole that affected the /signin loop
+      # (a command substitution inside an `echo` argument) does not exist here.
+      # Adding a retry would be cargo-culting rather than covering a real gap.
       - name: Smoke test — unauthenticated /api/v1/me is 401 with a Problem Details body
         run: |
           set -euo pipefail

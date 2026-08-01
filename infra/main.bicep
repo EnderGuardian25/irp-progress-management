@@ -154,6 +154,14 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerAppsEnvironment.id
     configuration: {
+      // Explicit, not left to the ARM default. The design spec calls this "an
+      // explicit choice, not a default to discover later", and the rollback
+      // procedure in docs/deploy-runbook.md depends on it: rolling back is
+      // re-applying a previous image tag, which only behaves as documented if
+      // one revision serves all traffic. Multiple-revision mode would add
+      // traffic weights — a second thing to misconfigure while the app looks
+      // healthy — for a canary capability this system has no use for.
+      activeRevisionsMode: 'Single'
       ingress: {
         external: true
         targetPort: 3001
@@ -242,6 +250,8 @@ resource webApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerAppsEnvironment.id
     configuration: {
+      // Explicit for the same reason as the api app above — see that comment.
+      activeRevisionsMode: 'Single'
       ingress: {
         external: true
         targetPort: 3000

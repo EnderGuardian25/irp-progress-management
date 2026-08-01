@@ -1824,6 +1824,38 @@ ADR-0009 D5's scale-to-zero means the first request pays a cold start."
 
 ## Task 9: Rollback procedure and the deploy runbook
 
+> ### CORRECTION 4 (found by review during execution, 2026-08-01): the documented rollback was destructive
+>
+> Both this task's runbook text and Task 8's workflow described a rollback as "dispatch Deploy with
+> `imageTag` set to the previous SHA". **That did not roll anything back, and it destroyed the
+> artifact needed to do so.**
+>
+> `actions/checkout` in `deploy.yml` takes no `ref:`, so a `workflow_dispatch` run checks out the tip
+> of the selected branch — not the commit named by `imageTag`, which only ever names an image tag.
+> The three build steps had no `if:`, so they always ran. A rollback therefore **built the current
+> broken code, tagged it with the old SHA, and pushed it over the known-good image in GHCR.**
+> `/health` then reported the old SHA, because `APP_VERSION` is baked from the same input, while the
+> container ran current code — so every success signal the runbook told the operator to check was
+> satisfied while nothing had been rolled back.
+>
+> **Fixed** by gating the buildx setup, the GHCR login and all three build/push steps on
+> `steps.tag.outputs.mode == 'build'`, which the tag-resolution step sets only when `imageTag` is
+> empty. A rollback now redeploys the existing immutable artifact and builds nothing; a tag missing
+> from GHCR fails loudly at pull instead of silently deploying the wrong code.
+>
+> **Rejected:** adding `ref: ${{ inputs.imageTag }}` to `checkout` so rollbacks rebuild from the old
+> commit. It still overwrites an existing artifact with a freshly built one, making the deployed
+> image depend on the builder rather than on what was actually tested.
+>
+> Two smaller corrections landed with it: `infra/main.bicep` now sets `activeRevisionsMode: 'Single'`
+> explicitly on both container apps rather than relying on the ARM default, because the rollback
+> procedure depends on it and the design spec called it "an explicit choice, not a default to
+> discover later"; and the runbook no longer claims all three smoke tests retry — `/api/v1/me`
+> deliberately does not, because `/health` has already warmed the API and its bare
+> `status=$(curl ...)` assignment trips `set -e` on failure.
+>
+> **This was caught by review, never by running it.** No deploy has ever been executed.
+
 **Files:**
 - Create: `docs/deploy-runbook.md`
 
