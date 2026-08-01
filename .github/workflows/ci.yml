@@ -183,18 +183,10 @@ jobs:
       # TRUNCATE the User table, so a seed placed earlier is wiped by the time
       # this step runs. The unit suite itself must never depend on this seed
       # (Task 10) — that is why it is not seeded any earlier in the job.
-      - name: Seed the dev users the e2e test expects
+      - name: Seed the demo data the e2e suite expects
         if: matrix.timezone == 'UTC'
         run: |
-          # DATABASE_URL ends in `?schema=public`. That is a PRISMA extension,
-          # not a libpq connection parameter, so passing it straight to psql
-          # fails with `invalid URI query parameter: "schema"` — which is
-          # exactly how this step failed on its first real CI run, before the
-          # e2e suite got to execute at all. Strip the query string for psql.
-          # The expansion is a safe no-op if the query string is ever removed.
-          PSQL_URL="${DATABASE_URL%%\?*}"
-          psql "$PSQL_URL" -c "INSERT INTO \"User\" (\"id\", \"externalId\", \"email\", \"displayName\", \"role\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'dev-admin-1', 'mentor@dev.local', 'Dev Mentor', 'ADMIN', now(), now()), (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now()) ON CONFLICT (\"externalId\") DO NOTHING;"
-          psql "$PSQL_URL" -c "SELECT \"externalId\", \"role\" FROM \"User\" ORDER BY \"externalId\";"
+          pnpm --filter @irp/api db:seed
 
       # These overrides never actually reach either spawned webServer:
       # apps/web/playwright.config.ts sets JWKS_URI/JWT_ISSUER/JWT_AUDIENCE
