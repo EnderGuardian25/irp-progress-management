@@ -1762,7 +1762,7 @@ git commit -m "feat(fixtures): @irp/fixtures -- one persona list for seed and pi
 ### Task 9: The seed script
 
 **Files:**
-- Create: `apps/api/src/seed/run-seed.ts` (the logic — inside `src` so `tsc` typechecks and builds it)
+- Create: `apps/api/src/seed/run-seed.ts` (the logic — inside `src` so `tsc` typechecks it; excluded from the build, see Note below)
 - Create: `apps/api/prisma/seed.ts` (thin CLI wrapper — run by tsx, outside the compile scope)
 - Modify: `apps/api/package.json` (add `db:seed` script)
 - Modify: `.github/workflows/ci.yml` (replace the manual psql INSERT with the seed)
@@ -1770,7 +1770,7 @@ git commit -m "feat(fixtures): @irp/fixtures -- one persona list for seed and pi
 - Note: `apps/api/tsconfig.json` includes `prisma/` (via the explicit `prisma/seed.ts` entry), so the CLI wrapper is typechecked; `apps/api/tsconfig.build.json` excludes both `prisma/**/*` and `src/seed/**/*` — the seed logic is typechecked and built to nothing, and the CLI wrapper is typechecked and never built at all. `tsx` runs both straight from source, so `pnpm db:seed` is unaffected either way.
 
 **Interfaces:**
-- Consumes: every repo (Tasks 4–7), `decideEntryFlags` indirectly via `entry-repo`, `colomboInstant` (Task 2), `@irp/fixtures` (Task 8), core engine (`cycleContaining`, `shiftCycle`, `workingDaysBetween`, `isWeekday`, `toProgrammeDate`, `addDays`, `compareDates`).
+- Consumes: every repo (Tasks 4–7), `decideEntryFlags` indirectly via `entry-repo`, `colomboInstant` (Task 2), `@irp/fixtures` (Task 8), core engine (`cycleContaining`, `shiftCycle`, `workingDaysBetween`, `isWeekday`, `nextWeekday`, `dayOfWeek`, `toProgrammeDate`, `addDays`, `compareDates`).
 - Produces: `runSeed(prisma: PrismaClient, now: Date): Promise<void>` from `src/seed/run-seed.ts` (the test imports this) and the `prisma/seed.ts` CLI guarded by `NODE_ENV`.
 
 Behavioural rules (spec §6):
