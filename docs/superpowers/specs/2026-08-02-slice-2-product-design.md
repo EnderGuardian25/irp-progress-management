@@ -182,9 +182,13 @@ the database cannot drift.
   re-creates. Never touches non-seed rows (the dev identities `dev-admin-1`/`dev-student-1`
   are replaced by seeded equivalents — see below).
 - **Relative dates:** everything is computed backwards from the run date via
-  `packages/core`, so the demo is always current. Batch A admitted ~10 weeks back
-  (month 3 of 6, on its 3rd cycle); Batch B ~4 weeks back (cycle 1). Different admission
-  days ⇒ different cycle boundaries ⇒ batch-independent calendars are visible (FR-6/9).
+  `packages/core`, so the demo is always current. Batch A admitted two cycles before the
+  current one (month 3 of 6, on its 3rd cycle); Batch B at the current cycle's start
+  (cycle 1). Cycle *boundaries* are fixed calendar months (10th → 9th) for everyone —
+  what admission anchors is which cycle is a batch's first and how they are numbered
+  (`firstEvaluatedCycleStart`), and the two batches differ visibly in exactly that way
+  (FR-6/9). *(Corrected 2026-08-02: an earlier draft wrongly claimed different admission
+  dates give different cycle boundaries.)*
 - **Integrity rule:** the seed never hand-sets a flag. `isLate`, `isExtra`, and every
   achievable state go through the same `packages/core` functions production code uses
   (`submissionWindow`, `graceDeadlineFor`, `isWeekday`, `cycleFor`). A state the engine
