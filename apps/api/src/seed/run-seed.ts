@@ -10,7 +10,9 @@ import {
   addDays,
   compareDates,
   cycleContaining,
+  dayOfWeek,
   isWeekday,
+  nextWeekday,
   shiftCycle,
   toProgrammeDate,
   workingDaysBetween,
@@ -70,9 +72,9 @@ function planFor(student: SeedStudent, dayIndex: number): DayPlan {
         ? { kind: "absent", reason: ABSENCE_REASONS[dayIndex % ABSENCE_REASONS.length]! }
         : onTime;
     case "mixed":
-      if (dayIndex === 5) return { kind: "late" };
-      if (dayIndex === 11) return { kind: "skip" };
-      if (dayIndex === 17) return { kind: "absent", reason: ABSENCE_REASONS[0]! };
+      if (dayIndex % 9 === 8) return { kind: "absent", reason: ABSENCE_REASONS[0]! };
+      if (dayIndex % 6 === 3) return { kind: "skip" };
+      if (dayIndex % 5 === 1) return { kind: "late" };
       return onTime;
     default:
       return onTime; // compliant, weekend (weekday part), joiner, transfer, archived
@@ -114,13 +116,14 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     });
     studentRows.set(s.externalId, row);
   }
+  const studentIds = [...studentRows.values()].map((r) => r.id);
 
   // ── batches: A two cycles back, B at the current cycle start ────────────
   const batches = createBatchRepo(prisma);
   const aStart = shiftCycle(currentCycle.start, -2);
   const bStart = currentCycle.start;
-  const batchA = await batches.create({ name: SEED_BATCH_NAMES.A, startDate: aStart, endDate: shiftCycle(aStart, 6) });
-  const batchB = await batches.create({ name: SEED_BATCH_NAMES.B, startDate: bStart, endDate: shiftCycle(bStart, 6) });
+  const batchA = await batches.create({ name: SEED_BATCH_NAMES.A, startDate: aStart, endDate: addDays(shiftCycle(aStart, 6), -1) });
+  const batchB = await batches.create({ name: SEED_BATCH_NAMES.B, startDate: bStart, endDate: addDays(shiftCycle(bStart, 6), -1) });
   const batchIds = { A: batchA.id, B: batchB.id };
 
   // ── enrolments ───────────────────────────────────────────────────────────
@@ -155,7 +158,7 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     if (compareDates(from, to) > 0) continue;
 
     const days = workingDaysBetween(from, to);
-    const salt = s.externalId.length;
+    const salt = [...s.externalId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
 
     // Never write an instant later than `now` — skip, don't clamp. A morning
     // seed run leaves today honestly pending; an evening run shows it
@@ -171,8 +174,7 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
       }
       if (plan.kind === "late") {
         // Next weekday, 09:40 Colombo — inside grace, flagged late by the engine.
-        let next = addDays(day, 1);
-        while (!isWeekday(next)) next = addDays(next, 1);
+        const next = nextWeekday(day);
         const at = colomboInstant(next, "09:40");
         if (hasHappened(at)) {
           await entries.addEntry({ studentId: id, entryDate: day, body: prose(i, salt), submittedAt: at });
@@ -193,10 +195,9 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     if (s.kind === "weekend") {
       let cursor = from;
       while (compareDates(cursor, to) <= 0) {
-        if (!isWeekday(cursor)) {
-          const dow = new Date(`${cursor}T00:00:00Z`).getUTCDay();
+        if (dayOfWeek(cursor) === 6) {
           const at = colomboInstant(cursor, "11:00");
-          if (dow === 6 && hasHappened(at)) {
+          if (hasHappened(at)) {
             await entries.addEntry({
               studentId: id, entryDate: cursor,
               body: "Spent the morning polishing the demo and reading the review-queue docs.",
@@ -215,16 +216,22 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
   const evaluatedBefore = toDbDate(addDays(today, -14));
   const inReviewBefore = toDbDate(addDays(today, -7));
 
+  // Scoped to studentId: { in: studentIds } -- without it, this rewrites and
+  // locks any non-seed student's reports too, and the next seed run's wipe
+  // (which only deletes seed-owned rows) hits a mentor-record FK still
+  // pointing at a report this update just moved to EVALUATED.
   await prisma.dailyReport.updateMany({
-    where: { reportDate: { lt: evaluatedBefore } },
+    where: { reportDate: { lt: evaluatedBefore }, studentId: { in: studentIds } },
     data: { status: "EVALUATED", reviewedById: mentor1.id, evaluatedAt: now, inReviewAt: now },
   });
   await prisma.dailyReport.updateMany({
-    where: { reportDate: { lt: inReviewBefore, gte: evaluatedBefore } },
+    where: { reportDate: { lt: inReviewBefore, gte: evaluatedBefore }, studentId: { in: studentIds } },
     data: { status: "IN_REVIEW", reviewedById: mentor1.id, inReviewAt: now },
   });
 
-  const evaluated = await prisma.dailyReport.findMany({ where: { status: "EVALUATED" } });
+  const evaluated = await prisma.dailyReport.findMany({
+    where: { status: "EVALUATED", studentId: { in: studentIds } },
+  });
   for (const report of evaluated) {
     await mentorRecords.upsert({
       studentId: report.studentId,

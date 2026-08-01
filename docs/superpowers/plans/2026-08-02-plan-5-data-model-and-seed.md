@@ -1767,6 +1767,7 @@ git commit -m "feat(fixtures): @irp/fixtures -- one persona list for seed and pi
 - Modify: `apps/api/package.json` (add `db:seed` script)
 - Modify: `.github/workflows/ci.yml` (replace the manual psql INSERT with the seed)
 - Test: `apps/api/test/seed.test.ts`
+- Note: `apps/api/tsconfig.json` includes `prisma/` (via the explicit `prisma/seed.ts` entry), so the CLI wrapper is typechecked; `apps/api/tsconfig.build.json` excludes both `prisma/**/*` and `src/seed/**/*` — the seed logic is typechecked and built to nothing, and the CLI wrapper is typechecked and never built at all. `tsx` runs both straight from source, so `pnpm db:seed` is unaffected either way.
 
 **Interfaces:**
 - Consumes: every repo (Tasks 4–7), `decideEntryFlags` indirectly via `entry-repo`, `colomboInstant` (Task 2), `@irp/fixtures` (Task 8), core engine (`cycleContaining`, `shiftCycle`, `workingDaysBetween`, `isWeekday`, `toProgrammeDate`, `addDays`, `compareDates`).
@@ -1778,7 +1779,7 @@ Behavioural rules (spec §6):
 - All timing goes through `colomboInstant`; all flags through `entry-repo.addEntry` with the historical instant.
 - **No instant later than `now` is ever written**: an entry whose computed `submittedAt` hasn't happened yet (today's 17:xx entry during a morning run; a late entry whose grace submission lands tomorrow) is skipped, not clamped. Run the seed in the evening and today looks submitted; run it in the morning and today is honestly pending.
 - Statuses: entry days older than 14 days → `EVALUATED` (locked, reviewed by mentor 1), older than 7 → `IN_REVIEW`, else left `SUBMITTED`. Mentor day records written for evaluated days.
-- Idempotent and **owning only its rows**: deletes exactly the users in `SEED_EXTERNAL_IDS`, their dependent rows, and the two fixture batch names — `Award`/`Override` are deleted through their `evaluation.studentId` relation, never with an unfiltered `deleteMany`.
+- Idempotent and **owning only its rows**: deletes exactly the users in `SEED_EXTERNAL_IDS`, their dependent rows, and the two fixture batch names — `Award`/`Override` are deleted through their `evaluation.studentId` relation, never with an unfiltered `deleteMany`. The same scoping applies to the status-promotion `updateMany` calls and the mentor-record `findMany`/upsert below: both carry `studentId: { in: studentIds }` — the ids of the students this run just created — not a bare date filter. Without it, a non-seed student's `DailyReport` rows get rewritten and locked, and the *next* seed run's wipe (which only ever deletes seed-owned rows) leaves a dangling `mentorId` FK pointing at a report it can no longer touch.
 
 - [ ] **Step 1: Write the failing seed test**
 
@@ -1896,11 +1897,12 @@ import {
   addDays,
   compareDates,
   cycleContaining,
+  dayOfWeek,
   isWeekday,
+  nextWeekday,
   shiftCycle,
   toProgrammeDate,
   workingDaysBetween,
-  type CivilDate,
 } from "@irp/core";
 import {
   SEED_BATCH_NAMES,
@@ -1957,9 +1959,9 @@ function planFor(student: SeedStudent, dayIndex: number): DayPlan {
         ? { kind: "absent", reason: ABSENCE_REASONS[dayIndex % ABSENCE_REASONS.length]! }
         : onTime;
     case "mixed":
-      if (dayIndex === 5) return { kind: "late" };
-      if (dayIndex === 11) return { kind: "skip" };
-      if (dayIndex === 17) return { kind: "absent", reason: ABSENCE_REASONS[0]! };
+      if (dayIndex % 9 === 8) return { kind: "absent", reason: ABSENCE_REASONS[0]! };
+      if (dayIndex % 6 === 3) return { kind: "skip" };
+      if (dayIndex % 5 === 1) return { kind: "late" };
       return onTime;
     default:
       return onTime; // compliant, weekend (weekday part), joiner, transfer, archived
@@ -2001,13 +2003,14 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     });
     studentRows.set(s.externalId, row);
   }
+  const studentIds = [...studentRows.values()].map((r) => r.id);
 
   // ── batches: A two cycles back, B at the current cycle start ────────────
   const batches = createBatchRepo(prisma);
   const aStart = shiftCycle(currentCycle.start, -2);
   const bStart = currentCycle.start;
-  const batchA = await batches.create({ name: SEED_BATCH_NAMES.A, startDate: aStart, endDate: shiftCycle(aStart, 6) });
-  const batchB = await batches.create({ name: SEED_BATCH_NAMES.B, startDate: bStart, endDate: shiftCycle(bStart, 6) });
+  const batchA = await batches.create({ name: SEED_BATCH_NAMES.A, startDate: aStart, endDate: addDays(shiftCycle(aStart, 6), -1) });
+  const batchB = await batches.create({ name: SEED_BATCH_NAMES.B, startDate: bStart, endDate: addDays(shiftCycle(bStart, 6), -1) });
   const batchIds = { A: batchA.id, B: batchB.id };
 
   // ── enrolments ───────────────────────────────────────────────────────────
@@ -2036,13 +2039,13 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     const enrolment = await prisma.enrolment.findFirstOrThrow({
       where: { studentId: id }, orderBy: { startDate: "asc" },
     });
-    const from = civilDate(enrolment.startDate.toISOString().slice(0, 10));
+    const from = fromDbDate(enrolment.startDate);
     // The archived student stops three weeks after their batch starts.
     const to = s.kind === "archived" ? addDays(from, 21) : today;
     if (compareDates(from, to) > 0) continue;
 
     const days = workingDaysBetween(from, to);
-    const salt = s.externalId.length;
+    const salt = [...s.externalId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
 
     // Never write an instant later than `now` — skip, don't clamp. A morning
     // seed run leaves today honestly pending; an evening run shows it
@@ -2058,8 +2061,7 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
       }
       if (plan.kind === "late") {
         // Next weekday, 09:40 Colombo — inside grace, flagged late by the engine.
-        let next = addDays(day, 1);
-        while (!isWeekday(next)) next = addDays(next, 1);
+        const next = nextWeekday(day);
         const at = colomboInstant(next, "09:40");
         if (hasHappened(at)) {
           await entries.addEntry({ studentId: id, entryDate: day, body: prose(i, salt), submittedAt: at });
@@ -2080,10 +2082,9 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     if (s.kind === "weekend") {
       let cursor = from;
       while (compareDates(cursor, to) <= 0) {
-        if (!isWeekday(cursor)) {
-          const dow = new Date(`${cursor}T00:00:00Z`).getUTCDay();
+        if (dayOfWeek(cursor) === 6) {
           const at = colomboInstant(cursor, "11:00");
-          if (dow === 6 && hasHappened(at)) {
+          if (hasHappened(at)) {
             await entries.addEntry({
               studentId: id, entryDate: cursor,
               body: "Spent the morning polishing the demo and reading the review-queue docs.",
@@ -2102,16 +2103,22 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
   const evaluatedBefore = toDbDate(addDays(today, -14));
   const inReviewBefore = toDbDate(addDays(today, -7));
 
+  // Scoped to studentId: { in: studentIds } -- without it, this rewrites and
+  // locks any non-seed student's reports too, and the next seed run's wipe
+  // (which only deletes seed-owned rows) hits a mentor-record FK still
+  // pointing at a report this update just moved to EVALUATED.
   await prisma.dailyReport.updateMany({
-    where: { reportDate: { lt: evaluatedBefore } },
+    where: { reportDate: { lt: evaluatedBefore }, studentId: { in: studentIds } },
     data: { status: "EVALUATED", reviewedById: mentor1.id, evaluatedAt: now, inReviewAt: now },
   });
   await prisma.dailyReport.updateMany({
-    where: { reportDate: { lt: inReviewBefore, gte: evaluatedBefore } },
+    where: { reportDate: { lt: inReviewBefore, gte: evaluatedBefore }, studentId: { in: studentIds } },
     data: { status: "IN_REVIEW", reviewedById: mentor1.id, inReviewAt: now },
   });
 
-  const evaluated = await prisma.dailyReport.findMany({ where: { status: "EVALUATED" } });
+  const evaluated = await prisma.dailyReport.findMany({
+    where: { status: "EVALUATED", studentId: { in: studentIds } },
+  });
   for (const report of evaluated) {
     await mentorRecords.upsert({
       studentId: report.studentId,
@@ -2143,17 +2150,22 @@ typechecked and built):
 import { createPrismaClient } from "../src/db/client.js";
 import { runSeed } from "../src/seed/run-seed.js";
 
-// Same posture as the dev-bypass guard: demo data never enters production,
-// and the comparison is case-insensitive so NODE_ENV=Production still trips.
-if ((process.env.NODE_ENV ?? "").toLowerCase() === "production") {
-  console.error("[seed] refusing to run with NODE_ENV=production — demo data never enters production.");
-  process.exit(1);
-}
-
 try {
   process.loadEnvFile(); // picks up apps/api/.env locally
 } catch {
   /* CI provides DATABASE_URL via the environment; no .env file exists there */
+}
+
+// Same posture as the dev-bypass guard: demo data never enters production,
+// and the comparison is case-insensitive so NODE_ENV=Production still trips.
+// Loading .env FIRST and guarding ONCE, after, covers both cases: Node's
+// loadEnvFile never overrides an already-set variable, so a shell-exported
+// NODE_ENV=production is untouched by the load, and a .env-file-set
+// NODE_ENV=production is visible by the time this check runs. Guarding
+// before the load would miss the .env case entirely.
+if ((process.env.NODE_ENV ?? "").toLowerCase() === "production") {
+  console.error("[seed] refusing to run with NODE_ENV=production — demo data never enters production.");
+  process.exit(1);
 }
 
 const url = process.env.DATABASE_URL;

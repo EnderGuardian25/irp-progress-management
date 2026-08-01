@@ -345,9 +345,10 @@ jobs:
             echo "::error::Could not read the oid claim from the acquired token."
             exit 1
           fi
-          # Same Prisma-vs-libpq trap as the seed step above: DATABASE_URL ends
-          # in `?schema=public`, which psql rejects. This job is dormant, so the
-          # bug would have surfaced only on the day someone set
+          # DATABASE_URL ends in `?schema=public`, a Prisma connection-string
+          # param psql doesn't understand and rejects outright -- strip it
+          # before handing the URL to psql. This job is dormant, so the bug
+          # would have surfaced only on the day someone set
           # ENTRA_REAL_TOKEN_TESTS=true — fixed here at the same time as the one
           # that actually fired.
           PSQL_URL="${DATABASE_URL%%\?*}"
