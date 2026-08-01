@@ -40,8 +40,7 @@ export function SignInPanel({
       <form action={signInAction}>
         <button
           type="submit"
-          className="rounded-[var(--radius-control)] px-4 py-2 font-semibold"
-          style={{ background: "var(--primary)", color: "#ffffff" }}
+          className="cursor-pointer rounded-[var(--radius-control)] bg-primary px-4 py-2 font-semibold text-white transition duration-150 ease-out-quart hover:brightness-110 active:brightness-95 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0"
         >
           Sign in with Microsoft
         </button>

@@ -63,6 +63,9 @@
   --color-st-missed: var(--st-missed);
   --font-sans: var(--font-jakarta);
   --font-mono: var(--font-plex-mono);
+  /* docs/design-system.md §10 — the only sanctioned easing. 150ms state-only
+     for everything that is not one of the named moments. */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 body {

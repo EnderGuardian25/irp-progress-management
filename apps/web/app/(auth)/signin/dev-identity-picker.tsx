@@ -20,8 +20,9 @@ export function DevIdentityPicker() {
           key={identity.id}
           type="button"
           onClick={() => void signIn("dev-identity", { identityId: identity.id, redirectTo: "/" })}
-          className="rounded-[var(--radius-control)] border px-4 py-2 text-left"
-          style={{ borderColor: "var(--line-strong)", color: "var(--ink)" }}
+          // Colours as utilities, not inline style — an inline borderColor
+          // outranks hover:border-* and silently kills the hover state.
+          className="cursor-pointer rounded-[var(--radius-control)] border border-line-strong px-4 py-2 text-left text-ink transition duration-150 ease-out-quart hover:border-primary hover:bg-primary-weak active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0"
         >
           {identity.label}
         </button>
