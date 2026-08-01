@@ -46,15 +46,17 @@ from `GET /api/v1/me`. Proven end to end by a Playwright suite, not asserted.
 Damian has no Entra admin access, so `AUTH_DEV_BYPASS=true` makes `apps/web` mint tokens with a
 local key and publish the matching JWKS. **It swaps the token issuer; it does not skip
 authentication** — `apps/api` has no bypass branch. **It must be deleted, not left dormant.** The
-cutover is four config steps with no code change (Plan 3 spec §7). ADR-0012, and a house rule in
-`CLAUDE.md`.
+cutover is five config steps with no code change beyond them (Plan 3 spec §7, corrected 2026-08-01 to
+include setting the three web-side `AUTH_MICROSOFT_ENTRA_ID_*` variables, previously missing from the
+list). ADR-0012, and a house rule in `CLAUDE.md`.
 
 **Machine change, 2026-07-29.** Development moved to a second machine. It is fully provisioned and
 verified: install → generate → prisma generate → core build → `pnpm typecheck` clean, and
 **160 tests / 16 files green against real Postgres** (112 core + 48 api). Docker server 29.6.1,
 Postgres on host port **5433** as on machine 1. **The Azure CLI is NOT installed here** — it needs
 an elevated MSI install, see `docs/manual-setup-steps.md` §1.2. The hosting topology was settled
-this session and is ADR-0009.
+this session and is ADR-0009. *(Superseded 2026-07-31: the CLI is now installed and authenticated
+on this machine, version 2.88.0 — see `docs/manual-setup-steps.md` §1.2's current text.)*
 
 ### Done
 
@@ -143,10 +145,20 @@ Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwr
 `infra/`, `tests/load/`. Plan 4 needs the Entra directory below before its Graph Bicep can deploy
 from CI — but note the dev bypass means **nothing is blocked on it for building or demoing**.
 
+> **Superseded 2026-07-31/2026-08-01 (Plan 4B Task 10 / whole-branch review).** "The Entra directory
+> below" and the table row calling it the project's top blocker are both disproven by this branch:
+> `bistecglobal.com` and `bisteccare.lk` are the **same tenant**
+> (`d5e769b0-fd19-45e4-a4a8-b73545450234`), `allowedToCreateApps` is `true`, and Entra was deferred a
+> fourth time as a **governance** decision about BISTEC's live corporate directory, not a technical
+> one — a dedicated directory is not technically necessary. See §3 "Azure and Entra: the real state"
+> and the Plan 4B design spec §2 for the evidence. Do not act on the historical text below by
+> registering app objects in `d5e769b0` — that is BISTEC's live corporate directory, and doing so
+> without the outstanding governance sign-off would not be a cheap mistake.
+
 ### Blocked / needs the stakeholder
 | # | Item | Blocks |
 |---|---|---|
-| **—** | **A dedicated Entra directory.** The Azure *subscription* exists and hosting works; **Entra is the remaining gap** — see §3 "Azure and Entra: the real state". **Damian's work account has no Entra admin access**, so tenant creation may be restricted; the fallback is a free tenant created from a personal Microsoft account, with a native `admin@<name>.onmicrosoft.com` for all CLI and Bicep work | **No longer blocks building or demoing** — Plan 3's dev bypass removed that dependency. Still blocks: real Microsoft sign-in, `infra/entra.bicep` (now Plan 4's), and waking the dormant real-token CI job. `docs/manual-setup-steps.md` §1.1a |
+| **—** | ~~**A dedicated Entra directory.**~~ **Superseded — see the callout above.** The Azure *subscription* exists and hosting works; Entra itself is not blocked on a *dedicated* directory — `bistecglobal.com`/`bisteccare.lk` are one tenant and app-registration permissions are sufficient. Kept for record: Damian's work account has no Entra admin access in the (moot) dedicated-directory design; the fallback there was a free tenant from a personal Microsoft account, with a native `admin@<name>.onmicrosoft.com` | **No longer blocks building or demoing** — Plan 3's dev bypass removed that dependency. Still blocks: real Microsoft sign-in, `infra/entra.bicep`, and waking the dormant real-token CI job — now pending the mentor's governance sign-off on registering in BISTEC's live tenant, not a dedicated-directory technicality. `docs/manual-setup-steps.md` §1.1a |
 | O-5 | **AI provider + data-processing approval.** Student submissions are personal data leaving the tenant | The whole AI slice (Plan 9, FR-22 to FR-26). Needs an ADR and escalation to leadership |
 | O-6 | Exact wording of the five rubric criteria | The evaluation schema and screen |
 | O-10 | FR-13 and FR-15 conflict on the Monday grace window | Implemented on the FR-15 reading, marked `// ASSUMPTION: O-10`. Blocks nothing |
@@ -188,20 +200,23 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 2A · Contract + generation | T-08 (thin), T-09 | D2 | ✅ **Merged, PR #3** |
 | | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | ✅ **Merged, PR #5** |
 | | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
-| | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **This plan** |
-| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23, plus `infra/entra.bicep` | D3 | **Next.** Needs the Entra directory (§3) and the Azure setup in `manual-setup-steps.md` §1.1a/§1.2/§1.2a |
+| | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **Merged, PR #8** |
+| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **This plan.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
 | **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
 | | 10 · Winner + PDF | T-18 | — | Not started |
-| **4 — Proving it** | 11 · Load test + retro | T-24 – T-26 | D4 | Not started |
+| **4 — Proving it** | 11 · Load test + retro | T-24 – T-26 | D4 | Not started — and cannot start meaningfully until the deploy runbook's §1 bootstrap is run: NFR-1/NFR-2's k6 targets need a deployed URL, and NFR-3 needs the Entra directory this plan deferred a fourth time |
 
 **Plan 4 was split on 2026-07-30.** Everything that needs no Azure account is 4A; everything that
 does is 4B. The split does **not** relax the ordering rule below: **slice 1 is not "deployed and
 traced" until 4B ships**, and Deliverable 3 stays at zero and Deliverable 4 stays unstartable until
 then. What 4A buys is that 4B is Bicep plus a workflow against images already proven to run.
+**"4B ships" means the branch merges, not that anything is applied** — see §3 for the distinction
+between apply-ready and applied, which matters for anyone tempted to mark Deliverable 3 done from
+this table alone.
 
 **The one ordering rule that matters:** slice 1 must be deployed and traced before slice 2
 begins. Features land on a pipeline already known to work — never the other way round.
@@ -270,14 +285,34 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Branch:** `feat/plan-4a-containerisation`, open as **PR #8** against `main` · **Status:** Plan 4A
-complete — all ten tasks done, whole-branch review run, **all CI checks green on `9b64d28`**
-(`verify` x3 and `images` pass, `real-token` correctly skipped). **Ready to merge; not merged.** ·
-**Next:** Plan 4B (infra, deploy, observability), which still owns `infra/entra.bicep`
+**Branch:** `feat/plan-4b-infra-deploy-observability` · **Last merged:** Plan 4A as **PR #8**
+(merge commit `720b387`, 2026-07-30) · **Plan 4B: all ten tasks complete, apply-ready, not yet
+applied** — see below.
 
-**The whole-branch review found four things, all fixed on the branch.** Two were gates that did not
-gate (the coin-flip Playwright budget, and the unbounded CI jobs) and two were false statements
-sitting in comments: `instrumentation.ts` claiming Next builds no Edge instrumentation bundle, and
+**Plan 4B shipped apply-ready, and that distinction matters.** `infra/main.bicep`, `deploy.yml` and
+`docs/deploy-runbook.md` all exist and the Bicep gate is green in CI, but **nothing has been
+applied**: the four resource providers are still `NotRegistered` and no Azure credential exists in
+GitHub. So **Deliverable 3 is not complete until Damian works through the runbook's §1**, and NFR-5,
+NFR-6 and the T-22 rollback are written procedures with unfilled `[ ] MEASURE` markers rather than
+results. Nothing in this plan claims otherwise — do not report D3 as done on the strength of the
+files existing.
+
+**Three premises that earlier handoffs stated as fact are false**, and two were load-bearing:
+the Azure CLI is installed and authenticated; Graph reads work; and `bistecglobal.com` and
+`bisteccare.lk` are **one tenant**, not two. The last one falsifies ADR-0011's premise — a
+single-tenant app registration would let real mentors and students sign in, satisfying FR-1 properly.
+Entra was deferred a fourth time as a **governance** call about BISTEC's live corporate directory,
+not a technical one. Plan 4B design spec §2 carries the evidence.
+
+> **Plan 4B is the first plan that the dev bypass does NOT route around — for deployment, not for
+> Entra.** Plans 3 and 4A both shipped without any Azure or Entra setup. This one needed the Azure
+> subscription and the four Azure resource providers (`docs/manual-setup-steps.md` §1.2a) to deploy
+> at all, but **not** a dedicated Entra directory — that premise was false (above). Register the four
+> providers before running the runbook's apply, or Bicep fails confusingly rather than cleanly.
+
+**Plan 4A's whole-branch review found four things, all fixed before the merge.** Two were gates that
+did not gate (the coin-flip Playwright budget, and the unbounded CI jobs) and two were false
+statements sitting in comments: `instrumentation.ts` claiming Next builds no Edge instrumentation bundle, and
 `app/api/dev-jwks/route.ts` describing the bypass guard's trigger **inverted** ("with the bypass
 flag off" — it fires when the flag is *on* in production). Everything else reviewed clean:
 `shutdown.ts`, `bootstrap.ts`, `exporter.ts`, `proxy.ts`, the `Dockerfile` build graph,
@@ -360,6 +395,16 @@ build for four tasks unnoticed.
 > **per-plan** workspace via `scripts/sdd-workspace <plan-file>` — `.superpowers/sdd/<plan-basename>/`
 > — so plans no longer overwrite each other's records and the old manual archiving step is
 > obsolete. The flat `.superpowers/sdd/progress.md` path referenced by older notes is dead.
+>
+> **Second correction, 2026-08-01 (Plan 4B Task 10): the first correction above is now itself wrong.**
+> The installed `scripts/sdd-workspace` **does** resolve a per-plan path on this machine — it returned
+> `.superpowers/sdd/2026-07-31-plan-4b-infra-deploy-observability/` for this plan, not the flat
+> `.superpowers/sdd/` path the 2026-07-29 note describes. Whether that was a script version
+> difference between machines or a mistaken read at the time is not established; what matters is
+> that the manual-archiving convention is **not** needed on this installation. Related, and still
+> true regardless of which behaviour is current: the ledger directory is git-ignored and travels with
+> **no** clone or push, so it must never be relied on as a resume map — see the "Plan 3 is merged"
+> paragraph below, which recorded exactly that for both Plan 3 and Plan 4A.
 
 **Plan 3 is merged (PR #6).** An earlier note here said its SDD ledger was "kept" at
 `.superpowers/sdd/progress.md` as the only record of what the review loop caught, and told the next
@@ -392,6 +437,27 @@ the trigger that would change that answer.
 
 ### Azure and Entra: the real state
 
+> **CORRECTED 2026-07-31/2026-08-01 (Plan 4B Task 10). Fact 1 below and two table rows are false —
+> read this before the historical record that follows.**
+>
+> `bistecglobal.com` and `bisteccare.lk` are **the same tenant**, `d5e769b0-fd19-45e4-a4a8-b73545450234`
+> (*BISTEC Global*) — both are verified domains on it, alongside about twenty others, verified with
+> `az rest` against `/v1.0/domains`. So "the users are not in `bisteccare.lk`" (fact 1 below) is
+> false: the subscription and the users are in **one** directory, and a single-tenant app
+> registration there would let real mentors and students sign in, properly satisfying FR-1. Graph
+> reads also work now — four consecutive calls succeeded on 2026-07-31, against the "blocked by
+> conditional access" row below — and `allowedToCreateApps` is `true`, so no admin role is needed to
+> create the registration. The Azure CLI row is also outdated: it is installed and authenticated,
+> not merely "installed on machine 1" as machine-specific notes elsewhere once implied.
+>
+> **The dedicated Entra directory this section's "Decision" recommends is therefore not technically
+> necessary.** What remains is a *governance* question — `d5e769b0` is BISTEC's live corporate
+> directory — and that is why Entra was deferred a fourth time in Plan 4B rather than done. See the
+> Plan 4B design spec §2 for the evidence and `docs/manual-setup-steps.md` §1.1a for the same
+> correction in context. Everything below is kept as the historical reasoning that led to the
+> now-superseded decision; do not act on fact 1 or the "Decision" paragraph without reading this note
+> first.
+
 Verified on 2026-07-28. **The old "no Azure account, `az` not installed" note was wrong in both
 directions** — correcting it is why this section exists.
 
@@ -402,20 +468,24 @@ directions** — correcting it is why this section exists.
 | Tenant | `d5e769b0-fd19-45e4-a4a8-b73545450234` — **`bisteccare.lk`**, signed in as `Damian@bisteccare.lk` |
 | Hosting (ARM) | ✅ Works — `az group list` exits 0 |
 | Resource providers | ❌ **All `NotRegistered`** — `Microsoft.App`, `Microsoft.DBforPostgreSQL`, `Microsoft.Insights`, `Microsoft.OperationalInsights`, `Microsoft.ContainerRegistry`. Register before Plan 4 or Bicep fails confusingly |
-| Entra / Graph | ❌ **Blocked by conditional access.** Every Graph call returns `InteractionRequired` / `LocationConditionEvaluationSatisfied`, inconsistently within a single session |
-| Permissions in `bisteccare.lk` | **Unknown.** The queries that would answer it are the ones Graph refuses. Do not record this as "no permissions" — it was never established |
+| Entra / Graph | ❌ **Blocked by conditional access**, as of 2026-07-28. *(Superseded 2026-07-31 — see the callout above: four consecutive Graph calls succeeded. Treat Graph as working but not proven reliable.)* |
+| Permissions in `bisteccare.lk` | **Unknown**, as of 2026-07-28. *(Superseded 2026-07-31 — `allowedToCreateApps` is `true`, so a standard user can create app registrations; no elevated role is needed.)* |
 
-**Two facts that together decide the auth design:**
+**Two facts that together decide the auth design — fact 1 is now known false, see the callout above:**
 
-1. **The users are not in `bisteccare.lk`.** Students and mentors hold `bistecglobal.com` accounts,
-   and Damian has no account there. An app registration is scoped to one directory, so a
-   single-tenant app in `bisteccare.lk` would let nobody but Damian sign in.
+1. ~~**The users are not in `bisteccare.lk`.**~~ Students and mentors hold `bistecglobal.com`
+   accounts, and Damian has no account there. An app registration is scoped to one directory, so a
+   single-tenant app in `bisteccare.lk` would let nobody but Damian sign in. **False as of
+   2026-07-31: `bistecglobal.com` and `bisteccare.lk` are the same tenant, so the users ARE in
+   `bisteccare.lk`.**
 2. **CI cannot re-authenticate interactively.** Even if the registrations can be created by hand in
    `bisteccare.lk`, Plan 4 deploys Graph Bicep from GitHub Actions. Whether a conditional-access
    policy targeting users also catches a workload identity depends on separately-licensed
-   configuration — unverified, and Plan 4 is the expensive place to find out.
+   configuration — unverified, and Plan 4 is the expensive place to find out. Moot for Plan 4B: the
+   deploy service principal in the runbook authenticates to ARM, not Graph, and needs no Graph access
+   at all, since `infra/entra.bicep` stayed out of scope.
 
-**Decision: a dedicated Entra directory**, created by Damian, where he is Global Administrator.
+**Decision (historical — see the correction above): a dedicated Entra directory**, created by Damian, where he is Global Administrator.
 The Azure subscription stays in `bisteccare.lk` — hosting is demonstrably unaffected. Use a
 **native cloud-only** `admin@<name>.onmicrosoft.com` account for all CLI and Bicep work, not the
 external `Damian@bisteccare.lk` identity the new tenant grants Global Admin to on creation.
@@ -526,10 +596,14 @@ because this is the plan that makes it real.
    registering the four Azure resource providers; whether the GHCR packages are public or private
    (`docs/manual-setup-steps.md` §1.5); and the batched mentor message in §3 of that file — O-10,
    O-11 and O-12 still need sign-off, and O-12 (Next.js 16) is now well past free reversal.
-6. **Correction:** the installed `scripts/sdd-workspace` ignores its argument and always returns
-   the flat `.superpowers/sdd/` path — it does **not** create a per-plan workspace. Before the
-   first task of a new plan, manually archive per `CLAUDE.md`: move everything except
-   `progress.md` and `.gitignore` into `.superpowers/sdd/plan-<N>/`, then reset `progress.md`.
+6. **Correction, updated 2026-08-01:** the 2026-07-29 note here said `scripts/sdd-workspace` ignores
+   its argument and always returns the flat `.superpowers/sdd/` path. That is now known to be wrong
+   on this installation — it resolved `.superpowers/sdd/2026-07-31-plan-4b-infra-deploy-observability/`
+   for Plan 4B. Do not assume either behaviour without checking; whichever it is, the ledger itself
+   is **git-ignored and does not travel with a clone or a push** — it must never be treated as an
+   authoritative resume map. If the per-plan path is not resolving, fall back to `CLAUDE.md`'s manual
+   archiving convention: move everything except `progress.md` and `.gitignore` into
+   `.superpowers/sdd/plan-<N>/` before the first task of a new plan, then reset `progress.md`.
 
 ### Local environment facts that cost real debugging time
 

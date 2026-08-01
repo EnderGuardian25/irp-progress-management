@@ -58,6 +58,24 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
+    // infra/lint.mjs is a Node script — it shells out to `az bicep lint` and
+    // decides the exit code. The "**/*.mjs" block above already turns off
+    // type-aware rules for it, but js.configs.recommended's `no-undef` still
+    // has no idea `process` or `console` exist outside a declared environment,
+    // so every use is an error.
+    //
+    // Declared explicitly rather than adding the `globals` package as a
+    // dependency for two names. Scoped to infra/ so it cannot quietly grant
+    // Node globals to browser or bundler code elsewhere.
+    files: ["infra/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
+  {
     // apps/web is React + JSX. The type-aware config above already applies;
     // this only relaxes the rules that misfire on JSX and Server Components.
     files: ["apps/web/**/*.tsx"],

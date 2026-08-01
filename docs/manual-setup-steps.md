@@ -20,11 +20,13 @@ Plan 3 shipped a **dev auth bypass** (ADR-0012), so the whole application runs,
 tests and demos with no Entra directory at all. **Plan 3 merged as PR #6 without
 any of §1 being done**, and Plan 4A was built and CI-verified the same way.
 
-What §1 is still needed for: **Plan 4B** — deploying on Azure with real Microsoft
-sign-in, `infra/entra.bicep`, and waking the dormant real-token CI job.
+What §1 is still needed for: **Plan 4B** — deploying on Azure. `infra/entra.bicep` stayed **out of
+scope** for Plan 4B (its fourth deferral, a governance call — see the corrected §1.1a below), so real
+Microsoft sign-in and waking the dormant real-token CI job remain outstanding, not shipped by 4B.
 
 **What the bypass does not excuse:** it must be deleted, not left dormant. The
-cutover is four config steps — see the Plan 3 spec §7 and §1.3b below.
+cutover is five config steps — see the Plan 3 spec §7 (updated 2026-08-01 to include the three
+`AUTH_MICROSOFT_ENTRA_ID_*` variables) and §1.3b below.
 
 ### 1.1 Create an Azure free account — ✅ DONE, 2026-07-28
 
@@ -54,6 +56,21 @@ Plus $200 credit for 30 days as headroom if load testing needs a bigger tier bri
 > today. Ask the mentor for Bistec tenant access anyway — see §3 — but nothing waits on it.
 
 ### 1.1a Create a dedicated Entra directory — ⬅ **Plan 4's blocker. Do this next.**
+
+> **CORRECTED 2026-07-31, verified with `az`. The premise below is false.**
+> `bistecglobal.com` and `bisteccare.lk` are **the same tenant**,
+> `d5e769b0-fd19-45e4-a4a8-b73545450234` (*BISTEC Global*) — both are verified domains on it,
+> alongside about twenty others. So the subscription and the users are in **one** directory, and a
+> single-tenant app registration there would let real mentors and students sign in. Graph reads also
+> work (four consecutive calls succeeded), and `allowedToCreateApps` is `true`, so no admin role is
+> needed to create the registration.
+>
+> **A dedicated directory is therefore not technically necessary.** What remains is a *governance*
+> question — `d5e769b0` is BISTEC's live corporate directory — and that is why Entra was deferred
+> again rather than done. Ask the mentor before registering a user-facing SSO app there. See the
+> Plan 4B design spec §2 for the evidence.
+>
+> Everything below is kept as the historical reasoning. Do not act on it without reading this note.
 
 **Why, in one line:** the users are in `bistecglobal.com` (where you have no account), the
 subscription is in `bisteccare.lk` (where Graph is blocked by conditional access), so neither
@@ -96,25 +113,17 @@ Then: `az login --tenant <new-tenant-id> --allow-no-subscriptions`
 **If tenant creation is blocked** (some directories restrict non-admins from creating tenants),
 say so — the fallback is the mentor ask in §3, with the design unchanged either way.
 
-### 1.2 Install the Azure CLI — ✅ on machine 1, ⬅ **TODO on machine 2**
+### 1.2 Install the Azure CLI — ✅ DONE
 
-Installed and working on the original dev machine, version **2.88.0**.
+Installed and working, version **2.88.0**, authenticated as `Damian@bisteccare.lk`. The **Bicep
+CLI** is also installed, version 0.45.15, via `az bicep install` — which needs no elevation and no
+authentication.
 
-**On the second machine (2026-07-29) it is absent and I cannot install it for you.** The Azure CLI
-ships as a machine-scope MSI, so `winget` needs elevation, and a UAC prompt cannot be answered from
-a non-interactive session — the attempt hung and was killed with nothing installed. Run this
-yourself **from an elevated terminal**:
-
-```powershell
-winget install -e --id Microsoft.AzureCLI
-```
-
-Then, in a fresh terminal: `az login`. Every `az` step in this document depends on it.
-
-Note for later: `az` reaches **Azure Resource Manager fine** but is repeatedly challenged on
-**Microsoft Graph** in the `bisteccare.lk` tenant (`InteractionRequired` /
-`LocationConditionEvaluationSatisfied`, inconsistently within one session). That is a
-conditional-access policy, not a broken install — and it is the reason for §1.1a.
+**Correction, 2026-07-31.** This section previously said the CLI was absent on the second machine
+and could not be installed non-interactively. It is present and authenticated, and `az` reaches both
+ARM and Microsoft Graph. The conditional-access note below described real failures at the time; they
+did not recur across four consecutive Graph calls on 2026-07-31. Treat Graph as working but not
+proven reliable — nothing in Plan 4B depends on it.
 
 ### 1.2a Register the Azure resource providers
 
@@ -168,43 +177,48 @@ docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -c "
 1. `UPDATE "User" SET "externalId" = '<entra-oid>'` for each real person.
 2. Unset `AUTH_DEV_BYPASS` in `apps/web/.env.local` and the deployed config.
 3. Point `JWKS_URI` and `JWT_ISSUER` at the tenant.
-4. Set the repository **variable** `ENTRA_REAL_TOKEN_TESTS=true` to wake the CI job.
-5. Delete `apps/web/lib/dev-identity.ts`, its route, and its tests.
+4. Set the three web-side variables `AUTH_MICROSOFT_ENTRA_ID_ID`, `AUTH_MICROSOFT_ENTRA_ID_SECRET`,
+   `AUTH_MICROSOFT_ENTRA_ID_ISSUER`. **Added 2026-08-01 — missing from earlier versions of this
+   list.** `apps/web/auth.config.ts`'s `isEntraConfigured` requires all three before it registers the
+   Microsoft Entra provider at all; without them `/signin` still renders the "not configured" panel
+   regardless of steps 1–3. Config-only: `/signin` is `force-dynamic`, so a new Container App revision
+   (created the moment these variables change) re-reads them — no image rebuild.
+5. Set the repository **variable** `ENTRA_REAL_TOKEN_TESTS=true` to wake the CI job.
+6. Delete `apps/web/lib/dev-identity.ts`, its route, and its tests.
 
 No application code changes in steps 1–4. That is the design working.
 
-### 1.4 Add GitHub Actions secrets
+### 1.4 Add GitHub Actions secrets — ➡ **see `docs/deploy-runbook.md` §1.4 for the real list**
 
-Repository → Settings → Secrets and variables → Actions. I will give you the exact values
-when Plan 4 generates them; the names will be:
+**Superseded, 2026-07-31.** This list was written before Plan 4B settled the deploy identity and the
+registry decision, and it is wrong on three counts: `AZURE_CREDENTIALS` (a service-principal JSON
+secret) was rejected in favour of GitHub OIDC federation — there is no client secret for Azure login
+at all, only `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID`; `APPLICATIONINSIGHTS_CONNECTION_STRING`
+is never a GitHub secret — `infra/main.bicep`'s App Insights resource emits it and injects it as a
+container env var itself; and `GHCR_PAT` is wrong outright now that §1.5 has decided the packages are
+public — no registry credential exists anywhere. `ENTRA_CLIENT_SECRET` remains correct in shape but
+not yet actionable, since Entra is still deferred (§1.1a).
 
-- `AZURE_CREDENTIALS` — service principal JSON for the deploy workflow
-- `AZURE_SUBSCRIPTION_ID`
-- `POSTGRES_ADMIN_PASSWORD`
-- `APPLICATIONINSIGHTS_CONNECTION_STRING`
-- `AUTH_SECRET` — Auth.js cookie encryption key (`openssl rand -base64 32`)
-- `ENTRA_CLIENT_SECRET` — the one from §1.3, since Bicep cannot emit it
-- `GHCR_PAT` — **only if the images stay private**; see §1.5
+The authoritative, current secret and variable list — matching what `.github/workflows/deploy.yml`
+actually consumes — is `docs/deploy-runbook.md` §1.4. Use that, not this section.
 
 **Never paste any of these into the chat.** Put them straight into GitHub. If one is ever
 exposed, rotate it rather than hoping.
 
-### 1.5 Decide whether the container images are public — **Plan 4B's question, not 4A's**
+### 1.5 Container image visibility — ✅ DECIDED: **public**
 
-Plan 4A builds images locally and in CI but **pushes them nowhere**, so nothing is blocked on this
-today. Answer it before 4B's deploy workflow lands.
+**Decided 2026-07-31: the GHCR packages are public.** Container Apps pulls anonymously, so there is
+no `GHCR_PAT`, no registry secret in Bicep, and nothing to rotate. The accepted cost is
+world-readable images; they contain no secrets, because all configuration is injected at runtime, so
+the exposure is the source code.
 
-Images go to **GitHub Container Registry**, not ACR (decided 2026-07-29; ~$5/mo saved, and it
-keeps everything in one place). That leaves exactly one choice for you:
+This fires ADR-0009's own "revisit when the packages are made public" trigger. The conclusion is **no
+change**: D1's negative consequence — a long-lived `read:packages` credential — is simply retired,
+and the ACR-for-managed-identity question is moot because no registry credential exists at all.
 
-| Option | What it costs you |
-|---|---|
-| **Packages public** | Nothing. No credential at all — Container Apps pulls anonymously, no `GHCR_PAT`, nothing to rotate. The images become world-readable. They contain no secrets (all config is env-injected at runtime), so the exposure is the source code itself |
-| **Packages private** | A PAT with `read:packages`, stored as `GHCR_PAT` and referenced as a Container Apps registry secret. One more long-lived credential to rotate |
-
-Tell me which and the Bicep follows. **Default if you say nothing: private with a PAT**, because it
-is the reversible direction — making a package public later is a click, un-publishing something the
-internet has already pulled is not.
+**One manual step remains:** after the first push creates them, set `irp-api`, `irp-web` and
+`irp-migrate` to Public in the repository's Packages settings. Until then the pull fails
+`UNAUTHORIZED`.
 
 ### 1.6 Hosting shape, for reference — nothing to do here
 

@@ -8,6 +8,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "lint": "eslint .",
+    "infra:lint": "node infra/lint.mjs",
     "spec:lint": "redocly lint spec/openapi.yaml",
     "generate:types": "openapi-typescript spec/openapi.yaml -o packages/types/src/schema.ts",
     "generate:client": "openapi-ts -i ./spec/openapi.yaml -o packages/client/src -c @hey-api/client-fetch",

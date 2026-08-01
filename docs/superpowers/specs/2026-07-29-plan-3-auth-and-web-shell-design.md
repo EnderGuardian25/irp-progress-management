@@ -304,9 +304,21 @@ correct behaviour and self-documenting.
 1. `UPDATE "User" SET "externalId" = '<entra-oid>'` for each real person (or insert new rows).
 2. Unset `AUTH_DEV_BYPASS`.
 3. Point `JWKS_URI` and `JWT_ISSUER` at the tenant.
-4. Set `vars.ENTRA_REAL_TOKEN_TESTS=true` to wake the dormant CI job (§11).
+4. Set the three web-side variables `AUTH_MICROSOFT_ENTRA_ID_ID`, `AUTH_MICROSOFT_ENTRA_ID_SECRET`,
+   and `AUTH_MICROSOFT_ENTRA_ID_ISSUER`. `auth.config.ts`'s `isEntraConfigured` requires all three
+   non-empty before it registers the Microsoft Entra provider at all — with them unset, no provider
+   is registered regardless of steps 1–3, and `/signin` renders the "not configured" panel (Plan 4B
+   Task 7's third sign-in state) rather than a working sign-in button. **This step was missing from
+   earlier versions of this list**, found during Plan 4B's documentation reconciliation: three
+   documents had started reasoning about "setting the three variables" as though this section already
+   said so.
+5. Set `vars.ENTRA_REAL_TOKEN_TESTS=true` to wake the dormant CI job (§11).
 
-**No code change.** That is the design working.
+**No code change beyond step 4's configuration.** That is the design working. Step 4 is still
+config-only, not a rebuild: `/signin` is `export const dynamic = "force-dynamic"` (Plan 4B Task 7,
+CORRECTION 2), so it reads `process.env` per request rather than baking one state into static HTML
+at build time. Setting the three variables on the Container App creates a new revision — a new
+process — which is what makes the flags be re-read; no image rebuild is required.
 
 ## 8. Error handling — four states, not two
 

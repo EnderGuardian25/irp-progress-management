@@ -1,6 +1,22 @@
 import { signIn } from "@/auth";
 import { CycleRibbon, type RibbonDay } from "@/components/cycle-ribbon/cycle-ribbon";
-import { DevIdentityPicker } from "./dev-identity-picker";
+import { isEntraConfigured } from "@/auth.config";
+import { SignInPanel } from "./sign-in-panel";
+
+// Rendered per request, NOT statically prerendered.
+//
+// Both bypassEnabled and entraConfigured are read from process.env, so the
+// branch SignInPanel takes depends on the runtime environment. Next would
+// otherwise prerender this page at BUILD time and bake one of the three states
+// into signin.html — which was verified happening: /signin appeared in
+// .next/prerender-manifest.json.
+//
+// The consequence was a trap rather than a cosmetic issue. The Plan 3 spec §7
+// Entra cutover is documented as five config steps with NO code change, but
+// with a baked page, setting the three AUTH_MICROSOFT_ENTRA_ID_* variables on
+// the Container App would leave the "not configured" panel on screen until
+// someone rebuilt the image. Do not remove this.
+export const dynamic = "force-dynamic";
 
 // Illustrative only. The ribbon is the real component (Plan 7 extends it with
 // real data); these marks exist so the register idea lands before sign-in.
@@ -19,6 +35,7 @@ const ILLUSTRATION: RibbonDay[] = [
 ];
 
 const bypassEnabled = process.env.AUTH_DEV_BYPASS === "true";
+const entraConfigured = isEntraConfigured(process.env);
 
 export default function SignInPage() {
   return (
@@ -48,24 +65,14 @@ export default function SignInPage() {
           Industry Readiness Programme
         </p>
 
-        {bypassEnabled ? (
-          <DevIdentityPicker />
-        ) : (
-          <form
-            action={async () => {
-              "use server";
-              await signIn("microsoft-entra-id", { redirectTo: "/" });
-            }}
-          >
-            <button
-              type="submit"
-              className="rounded-[var(--radius-control)] px-4 py-2 font-semibold"
-              style={{ background: "var(--primary)", color: "#ffffff" }}
-            >
-              Sign in with Microsoft
-            </button>
-          </form>
-        )}
+        <SignInPanel
+          bypassEnabled={bypassEnabled}
+          entraConfigured={entraConfigured}
+          signInAction={async () => {
+            "use server";
+            await signIn("microsoft-entra-id", { redirectTo: "/" });
+          }}
+        />
 
         <p className="tabular mt-8 text-xs" style={{ color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>
           Asia/Colombo &middot; UTC+05:30

@@ -268,6 +268,45 @@ spec §7 and remove the bypass. ADR-0012.
   (`expect: { timeout: 20_000 }`); the default 5000ms made that gate a coin flip. **Do not "tidy"
   those timeouts back down.**
 
+**Infrastructure facts from Plan 4B:**
+
+- **`az bicep lint` needs no Azure credentials** and does full semantic analysis, so the template is
+  gated in CI before any subscription is ready. **`az deployment ... what-if` and `validate` DO call
+  ARM** and cannot be gates — they are runbook procedures, not CI checks. Do not "upgrade" the gate
+  to `what-if`.
+- **`az bicep lint` exits 0 on WARNINGS**, and `BCP053` (reading a property a resource type does not
+  have) is a warning — so an exit-code-only gate is hollow. This is the Redocly
+  `recommended`-exits-0-on-warnings trap in a different tool. `bicepconfig.json` cannot fix it,
+  because `BCP053` is a core compiler diagnostic, not a configurable rule. `infra/lint.mjs` fails on
+  any Error **or** Warning diagnostic, and it also asserts the config file was actually loaded —
+  Bicep resolves `bicepconfig.json` by walking up the directory tree and silently falls back to
+  defaults if it never finds one.
+- **`ManagedEnvironmentProperties@2024-03-01` exposes no outbound/egress property** — only
+  `staticIp`, which is INBOUND. ADR-0009 D2's "static outbound IP" for the Postgres firewall
+  allowlist is not expressible in the template, so the runbook (§4.2) discovers it empirically:
+  with `ALLOWED_CLIENT_IPS` still `[]`, deliberately attempt a connection (the migration job, or
+  `psql`) and read the address Postgres's own rejection message names — that is the Container
+  Apps environment's egress address, not the developer's IP. The developer's own IP is only an
+  optional addition in §4.3, for direct `psql` access alongside the discovered address.
+- **A wrong Postgres firewall allowlist is silent.** The apply succeeds and `/health` succeeds
+  because it never touches the database, so only data reads fail — which reads as an application bug
+  rather than a network one.
+- **Never set `APP_VERSION` as a container-app runtime env var.** The Dockerfile bakes it as a build
+  arg, and the `/health` assertion only proves the arg reached the image *because* no runtime copy
+  exists.
+- **A rollback must not rebuild.** `workflow_dispatch` checks out the branch tip, not the commit named
+  by `imageTag` — the input only ever names an image tag. Building unconditionally made a "rollback"
+  overwrite the known-good image in GHCR with a freshly built copy of current (broken) code while
+  `/health` still reported the old SHA, because `APP_VERSION` is baked from the same input. Build
+  steps are gated on `steps.tag.outputs.mode == 'build'`, which is set only when `imageTag` is empty.
+- **`az monitor app-insights query` and `az monitor log-analytics query` are preview extensions** in
+  CLI 2.88.0; auto-install needs `az config set extension.dynamic_install_allow_preview=true` or the
+  command fails asking for confirmation it cannot get non-interactively.
+- **PowerShell 5.1 quirks that bit this plan:** `--query "length(@)"` fails outright — use
+  `(expr | Measure-Object).Count` or a different JMESPath shape instead. And `Select-String` is
+  **case-insensitive by default**, which miscounts case-sensitive markers (e.g. `MEASURE` vs
+  `measure`) unless `-CaseSensitive` is passed.
+
 **Time handling.** Store every timestamp in UTC. Evaluate every deadline, late flag, and cycle boundary in **Asia/Colombo (UTC+05:30)**. Never rely on the server's local timezone — the deploy region is not Sri Lanka. Cycles run the 10th → the 9th of the following month.
 
 **Weekdays are required; weekends are optional extra work.** A weekday with no entry and no absence, past the grace window, is **Missed**. A weekend day can hold entries and they count as **Extra** — but a weekend is *never* missed, *never* late, and never appears in a compliance denominator. Any date arithmetic over *required* days must skip weekends; arithmetic over *recorded activity* must not.
