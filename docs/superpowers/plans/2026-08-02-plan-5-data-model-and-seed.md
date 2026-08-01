@@ -2120,9 +2120,11 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     where: { status: "EVALUATED", studentId: { in: studentIds } },
   });
   for (const report of evaluated) {
+    const reportDate = fromDbDate(report.reportDate);
+    if (!isWeekday(reportDate)) continue;
     await mentorRecords.upsert({
       studentId: report.studentId,
-      date: fromDbDate(report.reportDate),
+      date: reportDate,
       attended: true,
       tasksCompleted: true,
       recordedById: mentor1.id,

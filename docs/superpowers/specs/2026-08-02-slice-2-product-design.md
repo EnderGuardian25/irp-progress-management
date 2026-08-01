@@ -178,9 +178,11 @@ the database cannot drift.
 `pnpm --filter @irp/api db:seed` — a `tsx` script.
 
 - **Refuses `NODE_ENV=production`** with a startup throw, same posture as the bypass guard.
-- **Idempotent:** deletes rows whose `externalId`/`name` carry the `seed-` prefix, then
-  re-creates. Never touches non-seed rows (the dev identities `dev-admin-1`/`dev-student-1`
-  are replaced by seeded equivalents — see below).
+- **Idempotent:** deletes exactly the users named in `@irp/fixtures`'
+  `SEED_EXTERNAL_IDS` and the two fixture batches (`Batch Aurora`/`Batch Basalt` —
+  `SEED_BATCH_NAMES`), then re-creates. An explicit allowlist, not a prefix match —
+  safer, since a prefix match would also catch anything an operator happened to name
+  the same way. Never touches non-seed rows.
 - **Relative dates:** everything is computed backwards from the run date via
   `packages/core`, so the demo is always current. Batch A admitted two cycles before the
   current one (month 3 of 6, on its 3rd cycle); Batch B at the current cycle's start
@@ -201,8 +203,10 @@ the database cannot drift.
   so every review state is on screen from day one; `MentorDayRecord`s partially filled so
   the Review page shows both recorded and unrecorded days.
 - **No `Evaluation`/`Override`/`Award` rows** — the empty states are part of the demo (D2, D6).
-- The dev picker's student identities map 1:1 to seeded students (`seed-student-a1` …);
-  the mentor identities to the two seeded mentors. `apps/web/e2e/README.md`'s manual
+- The dev picker's student identities map 1:1 to seeded students: the first compliant
+  student keeps the historical `dev-student-1` id, and the other eight use the
+  `seed-student-*` prefix (`seed-student-a2` …); likewise the first mentor keeps
+  `dev-admin-1` and the second is `seed-mentor-2`. `apps/web/e2e/README.md`'s manual
   INSERT block is superseded by the seed script and gets updated to say so.
 
 ## 7. Testing and verification
