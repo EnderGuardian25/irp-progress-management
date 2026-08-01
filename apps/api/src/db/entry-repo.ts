@@ -38,7 +38,15 @@ interface DbEntry {
 }
 
 function mapEntry(e: DbEntry): EntryRecord {
-  return { ...e, entryDate: fromDbDate(e.entryDate) };
+  return {
+    id: e.id,
+    studentId: e.studentId,
+    entryDate: fromDbDate(e.entryDate),
+    body: e.body,
+    submittedAt: e.submittedAt,
+    isLate: e.isLate,
+    isExtra: e.isExtra,
+  };
 }
 
 export function createEntryRepo(prisma: PrismaClient): EntryRepo {
@@ -64,11 +72,14 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
         if (absence) {
           throw new AbsentDayConflictError(input.entryDate);
         }
-        if (!report) {
-          await tx.dailyReport.create({
-            data: { studentId: input.studentId, reportDate: dbDate },
-          });
-        }
+        // Upsert, not find-then-create: two concurrent first entries for the
+        // same day would both see no report and the loser would throw P2002.
+        // Prisma compiles this shape to a native INSERT ... ON CONFLICT.
+        await tx.dailyReport.upsert({
+          where: { studentId_reportDate: { studentId: input.studentId, reportDate: dbDate } },
+          update: {},
+          create: { studentId: input.studentId, reportDate: dbDate },
+        });
         const entry = await tx.entry.create({
           data: {
             studentId: input.studentId,
