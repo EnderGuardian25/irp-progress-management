@@ -29,6 +29,7 @@
     "jose": "6.2.4"
   },
   "devDependencies": {
+    "@irp/fixtures": "workspace:*",
     "@irp/types": "workspace:*",
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "prisma": "7.9.1",

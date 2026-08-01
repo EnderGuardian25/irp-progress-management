@@ -7,6 +7,8 @@
  * module instead, guarded so importing it from client code fails the build.
  */
 
+import { SEED_MENTORS, SEED_STUDENTS } from "@irp/fixtures";
+
 export interface DevIdentity {
   id: string;
   label: string;
@@ -25,9 +27,27 @@ export interface DevIdentity {
  * /not-registered, turning the spec's most load-bearing authorization rule into
  * something clickable rather than something only a test knows about.
  */
+
+/**
+ * Derived from @irp/fixtures — the same constants the database seed writes —
+ * so the picker and the seeded rows cannot drift (spec §6). Plan 5 keeps the
+ * picker at three entries; the full persona picker is Plan 6.
+ */
 export const DEV_IDENTITIES: readonly DevIdentity[] = [
-  { id: "mentor", label: "Mentor (Admin)", oid: "dev-admin-1", email: "mentor@dev.local", name: "Dev Mentor" },
-  { id: "student", label: "Student", oid: "dev-student-1", email: "student@dev.local", name: "Dev Student" },
+  {
+    id: "mentor",
+    label: "Mentor (Admin)",
+    oid: SEED_MENTORS[0]!.externalId,
+    email: SEED_MENTORS[0]!.email,
+    name: SEED_MENTORS[0]!.name,
+  },
+  {
+    id: "student",
+    label: "Student",
+    oid: SEED_STUDENTS[0]!.externalId,
+    email: SEED_STUDENTS[0]!.email,
+    name: SEED_STUDENTS[0]!.name,
+  },
   { id: "unknown", label: "Unregistered user (expect 403)", oid: "dev-unknown-1", email: "nobody@dev.local", name: "Unregistered" },
 ];
 
