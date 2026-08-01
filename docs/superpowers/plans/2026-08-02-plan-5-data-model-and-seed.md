@@ -49,9 +49,9 @@ model User {
   email       String    @unique
   displayName String
   role        Role
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
 
   enrolments       Enrolment[]
   entries          Entry[]
@@ -70,8 +70,8 @@ model Batch {
   name      String   @unique
   startDate DateTime @db.Date
   endDate   DateTime @db.Date
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   enrolments Enrolment[]
   cycles     Cycle[]
@@ -84,7 +84,7 @@ model Enrolment {
   batchId   String
   startDate DateTime  @db.Date
   endDate   DateTime? @db.Date
-  createdAt DateTime  @default(now())
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
 
   student User  @relation(fields: [studentId], references: [id])
   batch   Batch @relation(fields: [batchId], references: [id])
@@ -99,10 +99,10 @@ model Entry {
   studentId   String
   entryDate   DateTime @db.Date
   body        String
-  submittedAt DateTime
+  submittedAt DateTime @db.Timestamptz(3)
   isLate      Boolean
   isExtra     Boolean
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
   student User @relation(fields: [studentId], references: [id])
 
@@ -122,10 +122,10 @@ model DailyReport {
   reportDate   DateTime          @db.Date
   status       DailyReportStatus @default(SUBMITTED)
   reviewedById String?
-  inReviewAt   DateTime?
-  evaluatedAt  DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  inReviewAt   DateTime?         @db.Timestamptz(3)
+  evaluatedAt  DateTime?         @db.Timestamptz(3)
+  createdAt    DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime          @updatedAt @db.Timestamptz(3)
 
   student    User  @relation("StudentReports", fields: [studentId], references: [id])
   reviewedBy User? @relation("ReviewedReports", fields: [reviewedById], references: [id])
@@ -143,8 +143,8 @@ model MentorDayRecord {
   tasksCompleted Boolean
   note           String?
   recordedById   String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
 
   student    User @relation("StudentDayRecords", fields: [studentId], references: [id])
   recordedBy User @relation("RecordedDayRecords", fields: [recordedById], references: [id])
@@ -158,7 +158,7 @@ model AbsenceRecord {
   studentId String
   date      DateTime @db.Date
   reason    String
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   student User @relation(fields: [studentId], references: [id])
 
@@ -172,7 +172,7 @@ model Cycle {
   seq       Int
   startDate DateTime @db.Date
   endDate   DateTime @db.Date
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   batch       Batch        @relation(fields: [batchId], references: [id])
   evaluations Evaluation[]
@@ -196,7 +196,7 @@ model Evaluation {
   performanceIndex       Decimal  @db.Decimal(5, 2)
   summary                String
   modelVersion           String
-  createdAt              DateTime @default(now())
+  createdAt              DateTime @default(now()) @db.Timestamptz(3)
 
   cycle    Cycle     @relation(fields: [cycleId], references: [id])
   student  User      @relation(fields: [studentId], references: [id])
@@ -214,7 +214,7 @@ model Override {
   newScore      Decimal  @db.Decimal(5, 2)
   originalScore Decimal  @db.Decimal(5, 2)
   reason        String
-  createdAt     DateTime @default(now())
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
   evaluation Evaluation @relation(fields: [evaluationId], references: [id])
   mentor     User       @relation(fields: [mentorId], references: [id])
@@ -226,7 +226,7 @@ model Award {
   cycleId       String   @unique
   evaluationId  String
   justification String
-  createdAt     DateTime @default(now())
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
   cycle      Cycle      @relation(fields: [cycleId], references: [id])
   evaluation Evaluation @relation(fields: [evaluationId], references: [id])
