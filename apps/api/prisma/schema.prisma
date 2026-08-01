@@ -35,9 +35,187 @@ model User {
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  enrolments       Enrolment[]
+  entries          Entry[]
+  reports          DailyReport[]     @relation("StudentReports")
+  reviewedReports  DailyReport[]     @relation("ReviewedReports")
+  dayRecords       MentorDayRecord[] @relation("StudentDayRecords")
+  recordedRecords  MentorDayRecord[] @relation("RecordedDayRecords")
+  absences         AbsenceRecord[]
+  evaluations      Evaluation[]
+  overrides        Override[]
 }
 
 enum Role {
   ADMIN
   STUDENT
+}
+
+/// FR-6. startDate is the admission date anchoring cycle numbering (FR-9).
+model Batch {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  enrolments Enrolment[]
+  cycles     Cycle[]
+}
+
+/// FR-8. Transfer = close one row, open the next. History follows the student.
+model Enrolment {
+  id        String    @id @default(uuid())
+  studentId String
+  batchId   String
+  startDate DateTime  @db.Date
+  endDate   DateTime? @db.Date
+  createdAt DateTime  @default(now())
+
+  student User  @relation(fields: [studentId], references: [id])
+  batch   Batch @relation(fields: [batchId], references: [id])
+
+  @@index([studentId])
+  @@index([batchId])
+}
+
+/// FR-10/11/13/33. Flags are computed AT SUBMISSION TIME and stored.
+model Entry {
+  id          String   @id @default(uuid())
+  studentId   String
+  entryDate   DateTime @db.Date
+  body        String
+  submittedAt DateTime
+  isLate      Boolean
+  isExtra     Boolean
+  createdAt   DateTime @default(now())
+
+  student User @relation(fields: [studentId], references: [id])
+
+  @@index([studentId, entryDate])
+}
+
+/// FR-18/20. No Rejected state — confirmed non-goal.
+enum DailyReportStatus {
+  SUBMITTED
+  IN_REVIEW
+  EVALUATED
+}
+
+model DailyReport {
+  id           String            @id @default(uuid())
+  studentId    String
+  reportDate   DateTime          @db.Date
+  status       DailyReportStatus @default(SUBMITTED)
+  reviewedById String?
+  inReviewAt   DateTime?
+  evaluatedAt  DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  student    User  @relation("StudentReports", fields: [studentId], references: [id])
+  reviewedBy User? @relation("ReviewedReports", fields: [reviewedById], references: [id])
+
+  @@unique([studentId, reportDate])
+}
+
+/// FR-19. Deliberately independent of DailyReport: the mentor's record must
+/// exist for a day with no entries at all (attended but never submitted).
+model MentorDayRecord {
+  id             String   @id @default(uuid())
+  studentId      String
+  date           DateTime @db.Date
+  attended       Boolean
+  tasksCompleted Boolean
+  note           String?
+  recordedById   String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student    User @relation("StudentDayRecords", fields: [studentId], references: [id])
+  recordedBy User @relation("RecordedDayRecords", fields: [recordedById], references: [id])
+
+  @@unique([studentId, date])
+}
+
+/// FR-16. Weekday-only is a service-layer rule; the row itself is timeless.
+model AbsenceRecord {
+  id        String   @id @default(uuid())
+  studentId String
+  date      DateTime @db.Date
+  reason    String
+  createdAt DateTime @default(now())
+
+  student User @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, date])
+}
+
+/// FR-9. A cache of the engine's arithmetic so Evaluation has a stable FK.
+model Cycle {
+  id        String   @id @default(uuid())
+  batchId   String
+  seq       Int
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  batch       Batch        @relation(fields: [batchId], references: [id])
+  evaluations Evaluation[]
+  award       Award?
+
+  @@unique([batchId, seq])
+  @@unique([batchId, startDate])
+}
+
+/// FR-22/23, NFR-15. Schema only in Slice 2 — no UI, no scoring code (O-5).
+/// Criterion columns named from the brief's rubric table (spec §2).
+model Evaluation {
+  id                     String   @id @default(uuid())
+  cycleId                String
+  studentId              String
+  attendance             Int
+  taskCompletion         Int
+  contributionInitiative Int
+  effortTime             Int
+  mentorEvaluation       Int
+  performanceIndex       Decimal  @db.Decimal(5, 2)
+  summary                String
+  modelVersion           String
+  createdAt              DateTime @default(now())
+
+  cycle    Cycle     @relation(fields: [cycleId], references: [id])
+  student  User      @relation(fields: [studentId], references: [id])
+  override Override?
+  awards   Award[]
+
+  @@unique([cycleId, studentId])
+}
+
+/// FR-24. Stores the new score, the original, and the reason.
+model Override {
+  id            String   @id @default(uuid())
+  evaluationId  String   @unique
+  mentorId      String
+  newScore      Decimal  @db.Decimal(5, 2)
+  originalScore Decimal  @db.Decimal(5, 2)
+  reason        String
+  createdAt     DateTime @default(now())
+
+  evaluation Evaluation @relation(fields: [evaluationId], references: [id])
+  mentor     User       @relation(fields: [mentorId], references: [id])
+}
+
+/// FR-31/32. One winner per cycle (cycles are per batch).
+model Award {
+  id            String   @id @default(uuid())
+  cycleId       String   @unique
+  evaluationId  String
+  justification String
+  createdAt     DateTime @default(now())
+
+  cycle      Cycle      @relation(fields: [cycleId], references: [id])
+  evaluation Evaluation @relation(fields: [evaluationId], references: [id])
 }
