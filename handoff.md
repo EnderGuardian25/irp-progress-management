@@ -145,10 +145,20 @@ Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwr
 `infra/`, `tests/load/`. Plan 4 needs the Entra directory below before its Graph Bicep can deploy
 from CI — but note the dev bypass means **nothing is blocked on it for building or demoing**.
 
+> **Superseded 2026-07-31/2026-08-01 (Plan 4B Task 10 / whole-branch review).** "The Entra directory
+> below" and the table row calling it the project's top blocker are both disproven by this branch:
+> `bistecglobal.com` and `bisteccare.lk` are the **same tenant**
+> (`d5e769b0-fd19-45e4-a4a8-b73545450234`), `allowedToCreateApps` is `true`, and Entra was deferred a
+> fourth time as a **governance** decision about BISTEC's live corporate directory, not a technical
+> one — a dedicated directory is not technically necessary. See §3 "Azure and Entra: the real state"
+> and the Plan 4B design spec §2 for the evidence. Do not act on the historical text below by
+> registering app objects in `d5e769b0` — that is BISTEC's live corporate directory, and doing so
+> without the outstanding governance sign-off would not be a cheap mistake.
+
 ### Blocked / needs the stakeholder
 | # | Item | Blocks |
 |---|---|---|
-| **—** | **A dedicated Entra directory.** The Azure *subscription* exists and hosting works; **Entra is the remaining gap** — see §3 "Azure and Entra: the real state". **Damian's work account has no Entra admin access**, so tenant creation may be restricted; the fallback is a free tenant created from a personal Microsoft account, with a native `admin@<name>.onmicrosoft.com` for all CLI and Bicep work | **No longer blocks building or demoing** — Plan 3's dev bypass removed that dependency. Still blocks: real Microsoft sign-in, `infra/entra.bicep` (now Plan 4's), and waking the dormant real-token CI job. `docs/manual-setup-steps.md` §1.1a |
+| **—** | ~~**A dedicated Entra directory.**~~ **Superseded — see the callout above.** The Azure *subscription* exists and hosting works; Entra itself is not blocked on a *dedicated* directory — `bistecglobal.com`/`bisteccare.lk` are one tenant and app-registration permissions are sufficient. Kept for record: Damian's work account has no Entra admin access in the (moot) dedicated-directory design; the fallback there was a free tenant from a personal Microsoft account, with a native `admin@<name>.onmicrosoft.com` | **No longer blocks building or demoing** — Plan 3's dev bypass removed that dependency. Still blocks: real Microsoft sign-in, `infra/entra.bicep`, and waking the dormant real-token CI job — now pending the mentor's governance sign-off on registering in BISTEC's live tenant, not a dedicated-directory technicality. `docs/manual-setup-steps.md` §1.1a |
 | O-5 | **AI provider + data-processing approval.** Student submissions are personal data leaving the tenant | The whole AI slice (Plan 9, FR-22 to FR-26). Needs an ADR and escalation to leadership |
 | O-6 | Exact wording of the five rubric criteria | The evaluation schema and screen |
 | O-10 | FR-13 and FR-15 conflict on the Monday grace window | Implemented on the FR-15 reading, marked `// ASSUMPTION: O-10`. Blocks nothing |

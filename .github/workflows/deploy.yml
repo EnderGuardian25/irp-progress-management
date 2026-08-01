@@ -34,7 +34,6 @@ jobs:
     env:
       RESOURCE_GROUP: irp-rg
       NAME_PREFIX: irp
-      REGISTRY_BASE: ghcr.io/${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +54,24 @@ jobs:
             echo "Rollback: redeploying the EXISTING image $tag without rebuilding"
           fi
           echo "value=$tag" >> "$GITHUB_OUTPUT"
+
+      # GHCR path components MUST be lowercase — Docker reference grammar
+      # requires it and buildx rejects a mixed-case reference client-side,
+      # before any network call. `github.repository_owner` is NOT
+      # guaranteed lowercase (this repo's owner is `EnderGuardian25`), so
+      # `ghcr.io/${{ github.repository_owner }}` used directly would fail
+      # every build/push step on every run. Computed here, once, as a step
+      # output so every consumer (all three build steps' `tags:`, and the
+      # apply step's `containerRegistryBase=`) uses the same lowercased
+      # value rather than the raw, possibly mixed-case `env`/context value.
+      # Do not revert to interpolating `github.repository_owner` directly.
+      - name: Resolve the registry base (must be lowercase)
+        id: registry
+        run: |
+          set -euo pipefail
+          base="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "value=$base" >> "$GITHUB_OUTPUT"
+          echo "Resolved registry base: $base"
 
       - uses: docker/setup-buildx-action@v3
         if: steps.tag.outputs.mode == 'build'
@@ -107,7 +124,7 @@ jobs:
           context: .
           target: api
           push: true
-          tags: ${{ env.REGISTRY_BASE }}/irp-api:${{ steps.tag.outputs.value }}
+          tags: ${{ steps.registry.outputs.value }}/irp-api:${{ steps.tag.outputs.value }}
           build-args: APP_VERSION=${{ steps.tag.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -119,7 +136,7 @@ jobs:
           context: .
           target: web
           push: true
-          tags: ${{ env.REGISTRY_BASE }}/irp-web:${{ steps.tag.outputs.value }}
+          tags: ${{ steps.registry.outputs.value }}/irp-web:${{ steps.tag.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -130,7 +147,7 @@ jobs:
           context: .
           target: migrate
           push: true
-          tags: ${{ env.REGISTRY_BASE }}/irp-migrate:${{ steps.tag.outputs.value }}
+          tags: ${{ steps.registry.outputs.value }}/irp-migrate:${{ steps.tag.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -229,7 +246,7 @@ jobs:
             --parameters \
               namePrefix="$NAME_PREFIX" \
               imageTag="${{ steps.tag.outputs.value }}" \
-              containerRegistryBase="$REGISTRY_BASE" \
+              containerRegistryBase="${{ steps.registry.outputs.value }}" \
               postgresAdminUsername="$POSTGRES_ADMIN_USERNAME" \
               postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
               authSecret="$AUTH_SECRET" \

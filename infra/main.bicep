@@ -146,7 +146,18 @@ resource firewallRules 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@
 
 // sslmode=require is not optional — ADR-0009 D2 pairs the public endpoint with
 // TLS, and Prisma will happily connect without it if not told otherwise.
-var databaseUrl = 'postgresql://${postgresAdminUsername}:${postgresAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/irp?schema=public&sslmode=require'
+//
+// postgresAdminPassword is passed through uriComponent() rather than
+// interpolated raw. Any of `@ / : ? # % [ ]` in the password breaks URL
+// parsing — and a password generated with `openssl rand -base64`, which the
+// deploy runbook recommends for authSecret one row below, emits `/` and `+`.
+// An unescaped password containing one of those would make the API and the
+// migration job unable to reach the database at all, and that failure mode
+// is easy to misdiagnose as the firewall allowlist (runbook §4.3) rather
+// than a URL-encoding bug, since both present as "cannot connect". Wrapping
+// the password unconditionally is robust to whatever the operator chooses
+// and costs nothing when the password happens to be URL-safe already.
+var databaseUrl = 'postgresql://${postgresAdminUsername}:${uriComponent(postgresAdminPassword)}@${postgres.properties.fullyQualifiedDomainName}:5432/irp?schema=public&sslmode=require'
 
 resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: '${namePrefix}-api'

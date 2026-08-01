@@ -12,7 +12,7 @@ import { SignInPanel } from "./sign-in-panel";
 // .next/prerender-manifest.json.
 //
 // The consequence was a trap rather than a cosmetic issue. The Plan 3 spec §7
-// Entra cutover is documented as four config steps with NO code change, but
+// Entra cutover is documented as five config steps with NO code change, but
 // with a baked page, setting the three AUTH_MICROSOFT_ENTRA_ID_* variables on
 // the Container App would leave the "not configured" panel on screen until
 // someone rebuilt the image. Do not remove this.

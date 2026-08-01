@@ -88,7 +88,7 @@ Repository **secrets**:
 | `AZURE_TENANT_ID` | `d5e769b0-fd19-45e4-a4a8-b73545450234` |
 | `AZURE_SUBSCRIPTION_ID` | `7bb869f8-053c-4c2d-b444-1bf079bfcef7` |
 | `POSTGRES_ADMIN_USERNAME` | e.g. `irpadmin` — not `admin` or `postgres`, both of which Azure rejects |
-| `POSTGRES_ADMIN_PASSWORD` | 16+ random characters |
+| `POSTGRES_ADMIN_PASSWORD` | 16+ random characters. URL-unsafe characters (`@ / : ? # % [ ]`) are fine — `main.bicep` wraps the password with `uriComponent()` before building `databaseUrl`, so there is no need to avoid or hand-pick characters here |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 
 Repository **variable** (not a secret — it is an IP list, and `deploy.yml` writes it into a

@@ -283,8 +283,11 @@ spec §7 and remove the bypass. ADR-0012.
   defaults if it never finds one.
 - **`ManagedEnvironmentProperties@2024-03-01` exposes no outbound/egress property** — only
   `staticIp`, which is INBOUND. ADR-0009 D2's "static outbound IP" for the Postgres firewall
-  allowlist is not expressible in the template; the runbook allowlists the developer's IP and widens
-  it by hand as needed.
+  allowlist is not expressible in the template, so the runbook (§4.2) discovers it empirically:
+  with `ALLOWED_CLIENT_IPS` still `[]`, deliberately attempt a connection (the migration job, or
+  `psql`) and read the address Postgres's own rejection message names — that is the Container
+  Apps environment's egress address, not the developer's IP. The developer's own IP is only an
+  optional addition in §4.3, for direct `psql` access alongside the discovered address.
 - **A wrong Postgres firewall allowlist is silent.** The apply succeeds and `/health` succeeds
   because it never touches the database, so only data reads fail — which reads as an application bug
   rather than a network one.
