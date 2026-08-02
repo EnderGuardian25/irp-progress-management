@@ -37,6 +37,8 @@ tags:
     description: Student daily entries and their rolled-up day view.
   - name: Absences
     description: Explicitly recorded weekday absences. Recorded, not requested — there is no approval workflow.
+  - name: Batches
+    description: Cohorts and their enrolment rosters. Mentor (Admin) access only.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -330,6 +332,147 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches:
+    get:
+      operationId: listBatches
+      summary: List batches
+      description: All cohorts, oldest first. Mentor only.
+      tags: [Batches]
+      responses:
+        '200':
+          description: Every batch.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Batch'
+              examples:
+                two:
+                  summary: Two concurrent cohorts
+                  value:
+                    - id: 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      name: Batch Aurora
+                      startDate: '2026-05-10'
+                      endDate: '2026-11-09'
+                    - id: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                      name: Batch Basalt
+                      startDate: '2026-07-10'
+                      endDate: '2027-01-09'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createBatch
+      summary: Create a batch
+      description: Creates a cohort (FR-6). startDate must precede endDate.
+      tags: [Batches]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchCreate'
+      responses:
+        '200':
+          description: The created batch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+              examples:
+                created:
+                  summary: A new cohort
+                  value:
+                    id: 7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d
+                    name: Batch Cinder
+                    startDate: '2026-09-10'
+                    endDate: '2027-03-09'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches/{id}/roster:
+    get:
+      operationId: getBatchRoster
+      summary: The batch roster for a date
+      description: |
+        Every student enrolled on the given date (archived students leave
+        active rosters), each with their day view, mentor-record presence,
+        and the cycle's Extra count. Defaults to today (Asia/Colombo).
+      tags: [Batches]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The batch id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+        - name: date
+          in: query
+          required: false
+          description: The roster date. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-03'
+      responses:
+        '200':
+          description: One row per enrolled student, ordered by display name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RosterRow'
+              examples:
+                oneRow:
+                  summary: A single enrolled student
+                  value:
+                    - student:
+                        id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                        displayName: Amaya Perera
+                        email: a.perera@bistecglobal.com
+                      day:
+                        date: '2026-08-03'
+                        status: onTime
+                        reportStatus: Submitted
+                        reportId: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                        absenceReason: null
+                        entries:
+                          - id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                            entryDate: '2026-08-03'
+                            body: Implemented the roster endpoint and its tests.
+                            submittedAt: '2026-08-03T11:30:00.000Z'
+                            isLate: false
+                            isExtra: false
+                      hasMentorRecord: false
+                      extraCountThisCycle: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -633,6 +776,108 @@ components:
           description: Why the student was absent.
           examples:
             - medical appointment
+
+    Batch:
+      type: object
+      title: Batch
+      description: A cohort with its own start and end dates. Two run concurrently; calendars are independent.
+      required: [id, name, startDate, endDate]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Batch identifier.
+          examples:
+            - 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+        name:
+          type: string
+          description: Display name.
+          examples:
+            - Batch Aurora
+        startDate:
+          type: string
+          format: date
+          description: Admission date — anchors cycle numbering (FR-6, FR-9).
+          examples:
+            - '2026-05-10'
+        endDate:
+          type: string
+          format: date
+          description: Programme end for this cohort.
+          examples:
+            - '2026-11-09'
+
+    BatchCreate:
+      type: object
+      title: BatchCreate
+      description: A new cohort. startDate must precede endDate.
+      required: [name, startDate, endDate]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Display name, unique in practice but not enforced.
+          examples:
+            - Batch Cinder
+        startDate:
+          type: string
+          format: date
+          description: Admission date.
+          examples:
+            - '2026-09-10'
+        endDate:
+          type: string
+          format: date
+          description: Programme end. Must be after startDate (400 otherwise).
+          examples:
+            - '2027-03-09'
+
+    RosterRow:
+      type: object
+      title: RosterRow
+      description: One enrolled student's state for the roster date — the mentor's working view (FR-28 groundwork).
+      required: [student, day, hasMentorRecord, extraCountThisCycle]
+      additionalProperties: false
+      properties:
+        student:
+          type: object
+          description: The enrolled student.
+          required: [id, displayName, email]
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: User id.
+              examples:
+                - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+            displayName:
+              type: string
+              description: Name as shown in the interface.
+              examples:
+                - Amaya Perera
+            email:
+              type: string
+              format: email
+              description: Bistec account email.
+              examples:
+                - a.perera@bistecglobal.com
+        day:
+          $ref: '#/components/schemas/DaySummary'
+        hasMentorRecord:
+          type: boolean
+          description: Whether the mentor has recorded attendance/tasks for this date (FR-19).
+          examples:
+            - true
+        extraCountThisCycle:
+          type: integer
+          minimum: 0
+          description: Weekend Extra entries inside the cycle containing the roster date. A count, not a status — Extra is not a compliance state.
+          examples:
+            - 2
 
   responses:
     BadRequest:

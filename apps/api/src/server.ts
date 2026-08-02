@@ -5,6 +5,7 @@ import type { AppConfig } from "./config.js";
 import type { UserRepo } from "./db/user-repo.js";
 import type { EntryRepo } from "./db/entry-repo.js";
 import type { AbsenceRepo } from "./db/absence-repo.js";
+import type { BatchRepo } from "./db/batch-repo.js";
 import { createValidatorCompiler } from "./validation.js";
 import { tracingPlugin } from "./telemetry.js";
 import { problemDetailsPlugin } from "./plugins/problem-details.js";
@@ -15,14 +16,18 @@ import { meRoutes } from "./routes/me.js";
 import { entryRoutes } from "./routes/entries.js";
 import { meDaysRoutes } from "./routes/me-days.js";
 import { absenceRoutes } from "./routes/absences.js";
+import { batchRoutes } from "./routes/batches.js";
 import type { DayService } from "./services/day-service.js";
+import type { RosterService } from "./services/roster-service.js";
 
 export interface ServerDeps {
   config: AppConfig;
   userRepo: UserRepo;
   entryRepo: EntryRepo;
   absenceRepo: AbsenceRepo;
+  batchRepo: BatchRepo;
   dayService: DayService;
+  rosterService: RosterService;
   getKey: JWTVerifyGetKey;
   tracerProvider: NodeTracerProvider;
 }
@@ -58,6 +63,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(entryRoutes, { entryRepo: deps.entryRepo });
   await app.register(absenceRoutes, { absenceRepo: deps.absenceRepo });
   await app.register(meDaysRoutes, { dayService: deps.dayService });
+  await app.register(batchRoutes, { batchRepo: deps.batchRepo, rosterService: deps.rosterService });
 
   await app.ready();
   return app;

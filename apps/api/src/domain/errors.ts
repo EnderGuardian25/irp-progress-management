@@ -112,3 +112,21 @@ export class AbsenceWindowClosedError extends DomainError {
     super(`${date} is already final — absence can only be edited while the day's window is open.`);
   }
 }
+
+export class BatchNotFoundError extends DomainError {
+  readonly code = "batch-not-found";
+  readonly status = 404;
+  readonly title = "Batch not found";
+  constructor(id: string) {
+    super(`No batch exists with id ${id}.`);
+  }
+}
+
+export class InvalidBatchDatesError extends DomainError {
+  readonly code = "invalid-batch-dates";
+  readonly status = 400;
+  readonly title = "Invalid batch dates";
+  constructor() {
+    super("startDate must be before endDate.");
+  }
+}

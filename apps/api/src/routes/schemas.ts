@@ -31,3 +31,27 @@ export const DATE_PARAM = {
   additionalProperties: false,
   properties: { date: { type: "string", format: "date" } },
 } as const;
+
+export const BATCH_CREATE_BODY = {
+  type: "object",
+  required: ["name", "startDate", "endDate"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, maxLength: 120 },
+    startDate: { type: "string", format: "date" },
+    endDate: { type: "string", format: "date" },
+  },
+} as const;
+
+export const UUID_PARAM = {
+  type: "object",
+  required: ["id"],
+  additionalProperties: false,
+  properties: { id: { type: "string", format: "uuid" } },
+} as const;
+
+export const ROSTER_QUERY = {
+  type: "object",
+  additionalProperties: false,
+  properties: { date: { type: "string", format: "date" } },
+} as const;

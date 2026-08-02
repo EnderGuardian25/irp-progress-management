@@ -22,14 +22,29 @@ export interface EnrolmentRecord {
   endDate: CivilDate | null;
 }
 
+export interface RosterMember {
+  studentId: string;
+  displayName: string;
+  email: string;
+}
+
 export interface BatchRepo {
   create(input: { name: string; startDate: CivilDate; endDate: CivilDate }): Promise<BatchRecord>;
   list(): Promise<BatchRecord[]>;
+  getBatch(id: string): Promise<BatchRecord | null>;
   enrol(studentId: string, batchId: string, startDate: CivilDate): Promise<EnrolmentRecord>;
   transfer(studentId: string, toBatchId: string, effectiveDate: CivilDate): Promise<EnrolmentRecord>;
   openEnrolment(studentId: string): Promise<EnrolmentRecord | null>;
   firstEnrolmentStart(studentId: string): Promise<CivilDate | null>;
   listEnrolments(studentId: string): Promise<EnrolmentRecord[]>;
+  /**
+   * Students enrolled in `batchId` on `date`: startDate <= date AND
+   * (endDate IS NULL OR endDate >= date), excluding soft-deleted users,
+   * ordered by displayName. ADR-0017's disjoint intervals guarantee at
+   * most one batch per student-day, so this never double-counts a
+   * transfer's boundary.
+   */
+  rosterMembers(batchId: string, date: CivilDate): Promise<RosterMember[]>;
 }
 
 interface DbBatch { id: string; name: string; startDate: Date; endDate: Date }
@@ -61,6 +76,11 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
     async list() {
       const rows = await prisma.batch.findMany({ orderBy: { startDate: "asc" } });
       return rows.map(mapBatch);
+    },
+
+    async getBatch(id) {
+      const b = await prisma.batch.findUnique({ where: { id } });
+      return b ? mapBatch(b) : null;
     },
 
     async enrol(studentId, batchId, startDate) {
@@ -116,6 +136,24 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
         orderBy: { startDate: "asc" },
       });
       return rows.map(mapEnrolment);
+    },
+
+    async rosterMembers(batchId, date) {
+      const rows = await prisma.enrolment.findMany({
+        where: {
+          batchId,
+          startDate: { lte: toDbDate(date) },
+          OR: [{ endDate: null }, { endDate: { gte: toDbDate(date) } }],
+          student: { deletedAt: null },
+        },
+        include: { student: { select: { id: true, displayName: true, email: true } } },
+        orderBy: { student: { displayName: "asc" } },
+      });
+      return rows.map((r) => ({
+        studentId: r.student.id,
+        displayName: r.student.displayName,
+        email: r.student.email,
+      }));
     },
   };
 }

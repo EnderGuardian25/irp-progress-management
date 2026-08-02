@@ -6,11 +6,13 @@ import { createUserRepo } from "./db/user-repo.js";
 import { createEntryRepo } from "./db/entry-repo.js";
 import { createAbsenceRepo } from "./db/absence-repo.js";
 import { createBatchRepo } from "./db/batch-repo.js";
+import { createMentorRecordRepo } from "./db/mentor-record-repo.js";
 import { selectSpanExporter } from "./exporter.js";
 import { buildServer } from "./server.js";
 import { registerShutdown } from "./shutdown.js";
 import { createTracerProvider } from "./telemetry.js";
 import { createDayService } from "./services/day-service.js";
+import { createRosterService } from "./services/roster-service.js";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -27,11 +29,13 @@ await bootstrap({
     const entryRepo = createEntryRepo(prisma);
     const absenceRepo = createAbsenceRepo(prisma);
     const batchRepo = createBatchRepo(prisma);
+    const mentorRecordRepo = createMentorRecordRepo(prisma);
     const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
+    const rosterService = createRosterService({ batchRepo, dayService, mentorRecordRepo });
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
     const app = await buildServer({
-      config, userRepo, entryRepo, absenceRepo, dayService, getKey, tracerProvider,
+      config, userRepo, entryRepo, absenceRepo, batchRepo, dayService, rosterService, getKey, tracerProvider,
     });
 
     registerShutdown({

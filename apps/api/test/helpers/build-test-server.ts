@@ -5,7 +5,9 @@ import { createUserRepo } from "../../src/db/user-repo.js";
 import { createEntryRepo } from "../../src/db/entry-repo.js";
 import { createAbsenceRepo } from "../../src/db/absence-repo.js";
 import { createBatchRepo } from "../../src/db/batch-repo.js";
+import { createMentorRecordRepo } from "../../src/db/mentor-record-repo.js";
 import { createDayService } from "../../src/services/day-service.js";
+import { createRosterService } from "../../src/services/roster-service.js";
 import { createTracerProvider } from "../../src/telemetry.js";
 import { buildServer } from "../../src/server.js";
 import { getLocalKeySet, testIssuer, testAudience } from "./keys.js";
@@ -20,6 +22,8 @@ export async function buildTestServer(databaseUrl: string): Promise<{
   const entryRepo = createEntryRepo(prisma);
   const absenceRepo = createAbsenceRepo(prisma);
   const batchRepo = createBatchRepo(prisma);
+  const mentorRecordRepo = createMentorRecordRepo(prisma);
+  const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
   const app = await buildServer({
     config: {
       port: 3001, databaseUrl, jwksUri: "unused",
@@ -28,7 +32,9 @@ export async function buildTestServer(databaseUrl: string): Promise<{
     userRepo: createUserRepo(prisma),
     entryRepo,
     absenceRepo,
-    dayService: createDayService({ entryRepo, absenceRepo, batchRepo }),
+    batchRepo,
+    dayService,
+    rosterService: createRosterService({ batchRepo, dayService, mentorRecordRepo }),
     getKey: await getLocalKeySet(),
     tracerProvider: createTracerProvider(exporter),
   });
