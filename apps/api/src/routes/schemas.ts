@@ -14,3 +14,20 @@ export const ENTRY_CREATE_BODY = {
     body: { type: "string", minLength: 1, maxLength: 4000 },
   },
 } as const;
+
+export const ABSENCE_CREATE_BODY = {
+  type: "object",
+  required: ["date", "reason"],
+  additionalProperties: false,
+  properties: {
+    date: { type: "string", format: "date" },
+    reason: { type: "string", minLength: 1, maxLength: 500 },
+  },
+} as const;
+
+export const DATE_PARAM = {
+  type: "object",
+  required: ["date"],
+  additionalProperties: false,
+  properties: { date: { type: "string", format: "date" } },
+} as const;

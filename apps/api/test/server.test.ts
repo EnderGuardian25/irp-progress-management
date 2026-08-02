@@ -8,6 +8,7 @@ import { buildServer } from "../src/server.js";
 import { buildAjv, createValidatorCompiler } from "../src/validation.js";
 import { fakeUserRepo } from "./helpers/fake-user-repo.js";
 import { unusedEntryRepo } from "./helpers/fake-entry-repo.js";
+import { unusedAbsenceRepo } from "./helpers/fake-absence-repo.js";
 import { unusedDayService } from "./helpers/fake-day-service.js";
 import { problemSchema } from "./helpers/problem-schema.js";
 import { getLocalKeySet, signToken, testIssuer, testAudience } from "./helpers/keys.js";
@@ -27,6 +28,7 @@ beforeAll(async () => {
     },
     userRepo: fakeUserRepo([{ id: "u1", externalId: "oid-1", email: "a@bistecglobal.com", displayName: "Amaya", role: "STUDENT" }]),
     entryRepo: unusedEntryRepo(),
+    absenceRepo: unusedAbsenceRepo(),
     dayService: unusedDayService(),
     getKey,
     tracerProvider: createTracerProvider(new InMemorySpanExporter()),

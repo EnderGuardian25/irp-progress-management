@@ -7,6 +7,7 @@ import { buildServer } from "../src/server.js";
 import { signToken, getLocalKeySet, testIssuer, testAudience } from "./helpers/keys.js";
 import { fakeUserRepo } from "./helpers/fake-user-repo.js";
 import { unusedEntryRepo } from "./helpers/fake-entry-repo.js";
+import { unusedAbsenceRepo } from "./helpers/fake-absence-repo.js";
 import { unusedDayService } from "./helpers/fake-day-service.js";
 
 // This suite exercises only the auth plugin's key-getter branching — it never
@@ -28,6 +29,7 @@ describe("when the JWKS endpoint is unreachable", () => {
       },
       userRepo,
       entryRepo: unusedEntryRepo(),
+      absenceRepo: unusedAbsenceRepo(),
       dayService: unusedDayService(),
       // Stands in for createRemoteJWKSet against a dead endpoint.
       getKey: () => {
@@ -84,6 +86,7 @@ describe("when a token's kid matches no published key", () => {
       },
       userRepo,
       entryRepo: unusedEntryRepo(),
+      absenceRepo: unusedAbsenceRepo(),
       dayService: unusedDayService(),
       // A REAL key-getter over a healthy, reachable key set — this is not a
       // simulated outage. It simply does not contain the kid the forged

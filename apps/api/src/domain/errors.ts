@@ -103,3 +103,12 @@ export class AbsenceNotFoundError extends DomainError {
     super(`No absence is recorded for ${date}.`);
   }
 }
+
+export class AbsenceWindowClosedError extends DomainError {
+  readonly code = "absence-window-closed";
+  readonly status = 400;
+  readonly title = "Day is final";
+  constructor(date: string) {
+    super(`${date} is already final — absence can only be edited while the day's window is open.`);
+  }
+}

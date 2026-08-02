@@ -24,7 +24,7 @@ export interface AbsenceRecordShape {
 
 export interface AbsenceRepo {
   create(input: { studentId: string; date: CivilDate; reason: string }): Promise<AbsenceRecordShape>;
-  remove(studentId: string, date: CivilDate): Promise<void>;
+  remove(studentId: string, date: CivilDate): Promise<AbsenceRecordShape>;
   listForStudent(studentId: string, from: CivilDate, to: CivilDate): Promise<AbsenceRecordShape[]>;
 }
 
@@ -63,11 +63,15 @@ export function createAbsenceRepo(prisma: PrismaClient): AbsenceRepo {
     },
 
     async remove(studentId, date) {
-      await prisma.$transaction(async (tx) => {
+      return prisma.$transaction(async (tx) => {
         await lockStudentDay(tx, studentId, date);
         await assertNotLocked(tx, studentId, date);
-        const { count } = await tx.absenceRecord.deleteMany({ where: { studentId, date: toDbDate(date) } });
-        if (count === 0) throw new AbsenceNotFoundError(date);
+        const row = await tx.absenceRecord.findUnique({
+          where: { studentId_date: { studentId, date: toDbDate(date) } },
+        });
+        if (row === null) throw new AbsenceNotFoundError(date);
+        await tx.absenceRecord.delete({ where: { id: row.id } });
+        return { id: row.id, studentId: row.studentId, date: fromDbDate(row.date), reason: row.reason };
       });
     },
 

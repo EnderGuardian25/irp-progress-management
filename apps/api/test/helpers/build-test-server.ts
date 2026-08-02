@@ -27,6 +27,7 @@ export async function buildTestServer(databaseUrl: string): Promise<{
     },
     userRepo: createUserRepo(prisma),
     entryRepo,
+    absenceRepo,
     dayService: createDayService({ entryRepo, absenceRepo, batchRepo }),
     getKey: await getLocalKeySet(),
     tracerProvider: createTracerProvider(exporter),

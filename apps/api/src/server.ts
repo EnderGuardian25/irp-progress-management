@@ -4,6 +4,7 @@ import type { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import type { AppConfig } from "./config.js";
 import type { UserRepo } from "./db/user-repo.js";
 import type { EntryRepo } from "./db/entry-repo.js";
+import type { AbsenceRepo } from "./db/absence-repo.js";
 import { createValidatorCompiler } from "./validation.js";
 import { tracingPlugin } from "./telemetry.js";
 import { problemDetailsPlugin } from "./plugins/problem-details.js";
@@ -13,12 +14,14 @@ import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { entryRoutes } from "./routes/entries.js";
 import { meDaysRoutes } from "./routes/me-days.js";
+import { absenceRoutes } from "./routes/absences.js";
 import type { DayService } from "./services/day-service.js";
 
 export interface ServerDeps {
   config: AppConfig;
   userRepo: UserRepo;
   entryRepo: EntryRepo;
+  absenceRepo: AbsenceRepo;
   dayService: DayService;
   getKey: JWTVerifyGetKey;
   tracerProvider: NodeTracerProvider;
@@ -53,6 +56,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(meRoutes);
   await app.register(entryRoutes, { entryRepo: deps.entryRepo });
+  await app.register(absenceRoutes, { absenceRepo: deps.absenceRepo });
   await app.register(meDaysRoutes, { dayService: deps.dayService });
 
   await app.ready();

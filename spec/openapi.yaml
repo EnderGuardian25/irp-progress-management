@@ -35,6 +35,8 @@ tags:
     description: The authenticated caller.
   - name: Submissions
     description: Student daily entries and their rolled-up day view.
+  - name: Absences
+    description: Explicitly recorded weekday absences. Recorded, not requested — there is no approval workflow.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -240,6 +242,94 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/absences:
+    post:
+      operationId: createAbsence
+      summary: Mark a weekday absent
+      description: |
+        Records an absence with a reason (FR-16). Weekdays only — a weekend
+        carries no obligation to be absent from (400). The day must still be
+        inside its submission window (400 otherwise), must not be locked
+        (409), and must not already hold entries (409) — absent and
+        submitted are contradictory.
+      tags: [Absences]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AbsenceCreate'
+      responses:
+        '200':
+          description: The recorded absence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Absence'
+              examples:
+                medical:
+                  summary: A recorded absence
+                  value:
+                    id: 1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9
+                    date: '2026-08-03'
+                    reason: medical appointment
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/absences/{date}:
+    delete:
+      operationId: deleteAbsence
+      summary: Remove an absence mark
+      description: |
+        Removes the caller's absence record for the date. Allowed only while
+        the day is still inside its submission window and not locked — a
+        finalised day is history, not editable state.
+      tags: [Absences]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          description: The civil date whose absence mark to remove.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-03'
+      responses:
+        '200':
+          description: The absence was removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Absence'
+              examples:
+                removed:
+                  summary: The removed record
+                  value:
+                    id: 1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9
+                    date: '2026-08-03'
+                    reason: medical appointment
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -498,6 +588,52 @@ components:
           items:
             $ref: '#/components/schemas/Entry'
 
+    AbsenceCreate:
+      type: object
+      title: AbsenceCreate
+      description: A new absence mark for a weekday still inside its submission window (FR-16).
+      required: [date, reason]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The weekday to mark absent. Must be inside the caller's current submission window.
+          examples:
+            - '2026-08-03'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the student was absent.
+          examples:
+            - medical appointment
+
+    Absence:
+      type: object
+      title: Absence
+      description: One recorded absence.
+      required: [id, date, reason]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Absence record identifier.
+          examples:
+            - 1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9
+        date:
+          type: string
+          format: date
+          description: The civil date marked absent.
+          examples:
+            - '2026-08-03'
+        reason:
+          type: string
+          description: Why the student was absent.
+          examples:
+            - medical appointment
+
   responses:
     BadRequest:
       description: The request was malformed or failed schema validation.
@@ -550,6 +686,23 @@ components:
                 status: 403
                 detail: This account has not been registered by an Admin.
                 instance: /api/v1/me
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    NotFound:
+      description: The referenced resource does not exist for this caller.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missingAbsence:
+              summary: No absence recorded on that date
+              value:
+                type: https://irp.bistec.example/problems/absence-not-found
+                title: No absence recorded
+                status: 404
+                detail: No absence is recorded for 2026-08-03.
+                instance: /api/v1/absences/2026-08-03
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
 
     Conflict:

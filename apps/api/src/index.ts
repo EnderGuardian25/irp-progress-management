@@ -30,7 +30,9 @@ await bootstrap({
     const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
-    const app = await buildServer({ config, userRepo, entryRepo, dayService, getKey, tracerProvider });
+    const app = await buildServer({
+      config, userRepo, entryRepo, absenceRepo, dayService, getKey, tracerProvider,
+    });
 
     registerShutdown({
       close: () => app.close(),
