@@ -110,6 +110,21 @@ describe.skipIf(!dbUrl)("POST /api/v1/entries", () => {
     expect(body.type).toBe("https://irp.bistec.example/problems/submission-window-closed");
   });
 
+  it("rejects a calendar-invalid entryDate (2026-02-30, not a leap-valid day) with 400 before it ever reaches civilDate()", async () => {
+    await student("stu-invalid-date");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/entries",
+      headers: bearer(await signToken({ oid: "stu-invalid-date" })),
+      payload: { entryDate: "2026-02-30", body: "This date does not exist." },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    const body = res.json<ProblemLike>();
+    expect(body.type).toBe("https://irp.bistec.example/problems/validation-failed");
+  });
+
   it("rejects an entry on an absent day with 409 absent-day-conflict", async () => {
     const s = await student("stu-4");
     const today = toProgrammeDate(new Date());

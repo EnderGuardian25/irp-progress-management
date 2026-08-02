@@ -96,4 +96,25 @@ describe.skipIf(!dbUrl)("createBatchRepo", () => {
     await expect(repo.transfer(s2.id, b.id, civilDate("2026-05-10")))
       .rejects.toBeInstanceOf(InvalidTransferDateError);
   });
+
+  it("listEnrolments returns every row for the student, startDate ascending, including a transfer's closed history", async () => {
+    const s = await student("t-8");
+    const a = await repo.create({ name: "A8", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09") });
+    const b = await repo.create({ name: "B8", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09") });
+    await repo.enrol(s.id, a.id, civilDate("2026-05-10"));
+    await repo.transfer(s.id, b.id, civilDate("2026-07-10"));
+
+    const rows = await repo.listEnrolments(s.id);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.batchId).toBe(a.id);
+    expect(rows[0]!.startDate).toBe("2026-05-10");
+    expect(rows[0]!.endDate).toBe("2026-07-09"); // closed the day before the transfer
+    expect(rows[1]!.batchId).toBe(b.id);
+    expect(rows[1]!.endDate).toBeNull(); // still open
+  });
+
+  it("listEnrolments returns an empty array for a student with no enrolment history", async () => {
+    const s = await student("t-9");
+    expect(await repo.listEnrolments(s.id)).toEqual([]);
+  });
 });

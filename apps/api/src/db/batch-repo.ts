@@ -29,6 +29,7 @@ export interface BatchRepo {
   transfer(studentId: string, toBatchId: string, effectiveDate: CivilDate): Promise<EnrolmentRecord>;
   openEnrolment(studentId: string): Promise<EnrolmentRecord | null>;
   firstEnrolmentStart(studentId: string): Promise<CivilDate | null>;
+  listEnrolments(studentId: string): Promise<EnrolmentRecord[]>;
 }
 
 interface DbBatch { id: string; name: string; startDate: Date; endDate: Date }
@@ -107,6 +108,14 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
         orderBy: { startDate: "asc" },
       });
       return e ? fromDbDate(e.startDate) : null;
+    },
+
+    async listEnrolments(studentId) {
+      const rows = await prisma.enrolment.findMany({
+        where: { studentId },
+        orderBy: { startDate: "asc" },
+      });
+      return rows.map(mapEnrolment);
     },
   };
 }

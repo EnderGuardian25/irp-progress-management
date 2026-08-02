@@ -431,11 +431,19 @@ components:
       title: DayStatus
       enum: [onTime, late, absent, missed, pending, extra, none, future]
       description: |
-        Server-computed classification of one day. Required days (weekdays)
-        resolve to onTime/late/absent/missed/pending; optional days
-        (weekends) resolve to extra/none and are never late or missed.
-        `pending` means the grace window is still open; `future` days have
-        not arrived. There is no rejected state.
+        Server-computed classification of one day.
+
+        A day with no entry that falls outside every one of the student's
+        enrolment intervals — before joining, after leaving, or for a caller
+        with no enrolment at all — carries no obligation and is always
+        `none`, even when that day is in the future.
+
+        Otherwise (an entry was recorded, or the day falls inside an
+        enrolment interval): `future` means the day has not arrived yet. Of
+        the days that have arrived, required days (weekdays) resolve to
+        onTime/late/absent/missed/pending, and optional days (weekends)
+        resolve to extra/none — never late or missed. `pending` means the
+        grace window is still open. There is no rejected state.
       examples:
         - onTime
 

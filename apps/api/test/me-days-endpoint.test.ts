@@ -116,15 +116,31 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
     expect(body.at(-1)!.date).toBe(to);
   });
 
-  it("rejects a range wider than 92 days with 400 range-too-wide", async () => {
-    await student("md-4");
+  it("accepts a 92-day span — the boundary itself, not just comfortably inside it", async () => {
+    await student("md-4a");
     const { from } = resolveRange();
-    const to = addDays(from, 93);
+    const to = addDays(from, 91); // from..to inclusive is exactly 92 days
 
     const res = await app.inject({
       method: "GET",
       url: `/api/v1/me/days?from=${from}&to=${to}`,
-      headers: bearer(await signToken({ oid: "md-4" })),
+      headers: bearer(await signToken({ oid: "md-4a" })),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<DaySummaryLike[]>();
+    expect(body).toHaveLength(92);
+  });
+
+  it("rejects a 93-day span with 400 range-too-wide — one day past the boundary", async () => {
+    await student("md-4b");
+    const { from } = resolveRange();
+    const to = addDays(from, 92); // from..to inclusive is exactly 93 days
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/me/days?from=${from}&to=${to}`,
+      headers: bearer(await signToken({ oid: "md-4b" })),
     });
 
     expect(res.statusCode).toBe(400);
@@ -133,7 +149,7 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
     expect(body.type).toBe("https://irp.bistec.example/problems/range-too-wide");
   });
 
-  it("rejects from after to with 400 range-too-wide", async () => {
+  it("rejects from after to with 400 invalid-range, distinct from range-too-wide", async () => {
     await student("md-5");
     const { from } = resolveRange();
     const to = addDays(from, -1);
@@ -146,7 +162,22 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
 
     expect(res.statusCode).toBe(400);
     const body = res.json<ProblemLike>();
-    expect(body.type).toBe("https://irp.bistec.example/problems/range-too-wide");
+    expect(body.type).toBe("https://irp.bistec.example/problems/invalid-range");
+    expect(body.title).toBe("Invalid range");
+  });
+
+  it("rejects a calendar-invalid date (2026-02-30, not a leap-valid day) with 400 before it ever reaches civilDate()", async () => {
+    await student("md-invalid-date");
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me/days?from=2026-02-30",
+      headers: bearer(await signToken({ oid: "md-invalid-date" })),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    const body = res.json<ProblemLike>();
+    expect(body.type).toBe("https://irp.bistec.example/problems/validation-failed");
   });
 
   it("rejects an unknown query property with 400", async () => {
@@ -171,7 +202,7 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
     expect(body.type).toBe("https://irp.bistec.example/problems/unauthorized");
   });
 
-  it("gives a mentor an empty-ish list rather than 403 — mentors have no enrolment days", async () => {
+  it("gives a mentor a uniform none/future list rather than 403 or 'missed' — mentors have no enrolment days", async () => {
     await mentor("md-mentor");
     const { from, to } = resolveRange();
 
@@ -184,5 +215,11 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<DaySummaryLike[]>();
     expect(body.every((d) => d.entries.length === 0)).toBe(true);
+    // Enrolment-clipped obligation: no enrolment means no obligation, so a
+    // mentor's days are never "missed" — only "none" or (for a range that
+    // reaches into the future) "future".
+    for (const d of body) {
+      expect(["none", "future"]).toContain(d.status);
+    }
   });
 });

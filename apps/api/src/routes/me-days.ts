@@ -34,8 +34,8 @@ export function resolveRange(from?: string, to?: string, now = new Date()) {
   const f = from === undefined ? cycle.start : civilDate(from);
   const t = to === undefined ? cycle.end : civilDate(to);
   if (compareDates(f, t) > 0) {
-    throw new HttpError(400, "https://irp.bistec.example/problems/range-too-wide",
-      "Range too wide", "`from` is after `to`.");
+    throw new HttpError(400, "https://irp.bistec.example/problems/invalid-range",
+      "Invalid range", "`from` is after `to`.");
   }
   let width = 0;
   for (let d = f; compareDates(d, t) <= 0 && width <= MAX_RANGE_DAYS; d = addDays(d, 1)) width++;

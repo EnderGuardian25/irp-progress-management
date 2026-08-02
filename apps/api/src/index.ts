@@ -5,6 +5,7 @@ import { createPrismaClient } from "./db/client.js";
 import { createUserRepo } from "./db/user-repo.js";
 import { createEntryRepo } from "./db/entry-repo.js";
 import { createAbsenceRepo } from "./db/absence-repo.js";
+import { createBatchRepo } from "./db/batch-repo.js";
 import { selectSpanExporter } from "./exporter.js";
 import { buildServer } from "./server.js";
 import { registerShutdown } from "./shutdown.js";
@@ -25,7 +26,8 @@ await bootstrap({
     const userRepo = createUserRepo(prisma);
     const entryRepo = createEntryRepo(prisma);
     const absenceRepo = createAbsenceRepo(prisma);
-    const dayService = createDayService({ entryRepo, absenceRepo });
+    const batchRepo = createBatchRepo(prisma);
+    const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
     const app = await buildServer({ config, userRepo, entryRepo, dayService, getKey, tracerProvider });
