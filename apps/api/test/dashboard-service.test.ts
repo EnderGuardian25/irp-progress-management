@@ -268,13 +268,20 @@ describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
     expect(row.counts.late).toBe(1);
     expect(row.counts.absent).toBe(1);
     expect(row.counts.extra).toBe(1);
-    // Every required day up to and including 2026-08-04 has settled by NOW
-    // (2026-08-05 10:00 Colombo); later days are future and in neither side.
-    expect(row.counts.settledDays).toBe(row.counts.onTime + row.counts.late + row.counts.absent + row.counts.missed);
-    expect(row.counts.requiredDays).toBeGreaterThan(row.counts.settledDays);
-    expect(row.counts.complianceRate).toBeCloseTo(
-      (row.counts.onTime + row.counts.late + row.counts.absent) / row.counts.settledDays, 4,
-    );
+    // Independently derived from @irp/core against this fixture (see the
+    // fix-wave report for the scratch script): the cycle 2026-07-10 ..
+    // 2026-08-09 has 21 weekdays. Each one with no entry/absence classifies
+    // via classifyDay(date, facts, NOW) as: 07-10 and 07-16..07-31 and 08-03
+    // (14 days) "missed" -- their grace (end of the next weekday) has closed
+    // by NOW; 08-04 and 08-05 "pending" -- 08-04's grace closes end of 08-05,
+    // 08-05 (today) closes end of 08-06, neither has passed at NOW's 10:00;
+    // 08-06 and 08-07 "future". Settled = 14 missed + the 3 recorded outcomes
+    // (onTime/late/absent) above = 17; requiredDays = 21 (17 settled + 2
+    // pending + 2 future); complianceRate = round4(3/17) = 0.1765.
+    expect(row.counts.requiredDays).toBe(21);
+    expect(row.counts.missed).toBe(14);
+    expect(row.counts.settledDays).toBe(17);
+    expect(row.counts.complianceRate).toBe(0.1765);
   });
 
   it("reports complianceRate null, not zero, when no day has settled", async () => {
@@ -336,6 +343,96 @@ describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
     });
     // The current cycle for NOW (2026-08-05) is the batch's 4th; 5 has not happened.
     await expect(dashboards.batchSummary(batch.id, 99, NOW)).rejects.toBeInstanceOf(InvalidCycleError);
+  });
+
+  // BATCH_OFF_TENTH admits on the 15th, not the 10th, so FR-27 pushes its
+  // first evaluated cycle to the FOLLOWING month: firstEvaluatedCycleStart
+  // (2026-06-15) is 2026-07-10, not 2026-06-10. BEFORE_FIRST_CYCLE is a "now"
+  // that precedes that opening, so cycleFor(today, batch.startDate) is null
+  // -- the `currentSeq === null` branch these two tests exist to exercise.
+  const BATCH_OFF_TENTH_START = civilDate("2026-06-15");
+  const BEFORE_FIRST_CYCLE = colomboInstant(civilDate("2026-06-20"), "09:00");
+
+  it("defaults to cycle 1 and reports everything future before a batch's first evaluated cycle opens", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Off Tenth", startDate: BATCH_OFF_TENTH_START, endDate: civilDate("2027-05-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "sum-off-tenth", email: "sum-off-tenth@dev.local", displayName: "Off Tenth", role: "STUDENT" },
+    });
+    await batchRepo.enrol(s.id, batch.id, BATCH_OFF_TENTH_START);
+
+    const view = await dashboards.batchSummary(batch.id, undefined, BEFORE_FIRST_CYCLE);
+
+    // seq defaults via `cycleSeq ?? currentSeq ?? 1` with currentSeq null, to 1.
+    expect(view.cycle.seq).toBe(1);
+    expect(view.cycle.startDate).toBe(civilDate("2026-07-10"));
+    expect(view.cycle.endDate).toBe(civilDate("2026-08-09"));
+    const row = view.students.find((r) => r.student.id === s.id)!;
+    expect(row.counts.settledDays).toBe(0);
+    expect(row.counts.complianceRate).toBeNull();
+  });
+
+  it("rejects cycle 2 with InvalidCycleError when the batch has no evaluated cycle yet", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Off Tenth Reject", startDate: BATCH_OFF_TENTH_START, endDate: civilDate("2027-05-09"),
+    });
+    // currentSeq is null (no evaluated cycle yet); the guard is
+    // `currentSeq === null && seq > 1`, distinct from the currentSeq-not-null
+    // guard the previous test exercises.
+    await expect(dashboards.batchSummary(batch.id, 2, BEFORE_FIRST_CYCLE))
+      .rejects.toBeInstanceOf(InvalidCycleError);
+  });
+
+  it("collapses a transfer-out-and-back into one roster row, and clips counts to time actually spent in this batch", async () => {
+    const batchA = await batchRepo.create({
+      name: "Batch Transfer A", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+    const batchB = await batchRepo.create({
+      name: "Batch Transfer B", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "sum-transfer", email: "sum-transfer@dev.local", displayName: "Transfer", role: "STUDENT" },
+    });
+
+    // A: 07-10..07-12 (on time on the 07-10 Friday) -> B: 07-13..07-19 -> A: 07-20..open (on time on the 07-20 Monday).
+    await batchRepo.enrol(s.id, batchA.id, CYCLE_START);
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: CYCLE_START, body: "Onboard.",
+      submittedAt: colomboInstant(CYCLE_START, "17:00"),
+    });
+    await batchRepo.transfer(s.id, batchB.id, civilDate("2026-07-13"));
+    await batchRepo.transfer(s.id, batchA.id, civilDate("2026-07-20"));
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: civilDate("2026-07-20"), body: "Back in A.",
+      submittedAt: colomboInstant(civilDate("2026-07-20"), "17:00"),
+    });
+
+    const view = await dashboards.batchSummary(batchA.id, undefined, NOW);
+    const rows = view.students.filter((r) => r.student.id === s.id);
+
+    // Exactly one row despite two enrolment intervals in batch A.
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+
+    // Independently derived (see the fix-wave report's scratch script):
+    // batch A's own weekdays in this cycle are 07-10 and 07-20..08-07 (16 of
+    // the cycle's 21 weekdays -- 07-13..07-17, the 5 weekdays spent enrolled
+    // in B, are excluded). Of those 16: 07-10 and 07-20 onTime (2 entries
+    // above); 07-21..08-03 (10 weekdays) missed, no entry/absence and grace
+    // closed by NOW; 08-04/08-05 pending; 08-06/08-07 future. Settled =
+    // 2 onTime + 10 missed = 12; complianceRate = round4(2/12) = 0.1667.
+    // Before this fix, `countCycle` trusted `day.status !== "none"` as the
+    // obligation check, which is student- not batch-scoped -- the student
+    // was enrolled in B throughout, so those days never read "none" and
+    // batch A's row wrongly absorbed them (requiredDays 21, missed 15,
+    // complianceRate 0.1176). A real defect, fixed alongside this test.
+    expect(row.counts.requiredDays).toBe(16);
+    expect(row.counts.settledDays).toBe(12);
+    expect(row.counts.onTime).toBe(2);
+    expect(row.counts.missed).toBe(10);
+    expect(row.counts.pending).toBe(2);
+    expect(row.counts.complianceRate).toBe(0.1667);
   });
 
   it("throws BatchNotFoundError for an unknown batch id", async () => {

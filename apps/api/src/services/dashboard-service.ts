@@ -103,17 +103,26 @@ function round4(value: number): number {
 }
 
 /**
- * One student's cycle, counted from their already-classified days.
+ * One student's cycle, counted from their already-classified days, clipped to
+ * their enrolment interval(s) IN THIS BATCH.
  *
- * `requiredDays` is enrolment-clipped: a weekday the student was not enrolled
- * for classifies as `none` and is not their obligation (FR-27). `extra` counts
- * weekend ENTRIES, matching RosterRow.extraCountThisCycle, not weekend days.
+ * `requiredDays` is enrolment-clipped, but NOT by trusting `day.status ===
+ * "none"` — that comes from the day service's own obligation check, which is
+ * student-scoped across every batch the student has ever held (FR-27's
+ * "not enrolled ANYWHERE" reading, correct for a student's own day list). A
+ * transfer out to a different batch and back leaves the student enrolled
+ * somewhere the whole time, so those days never read `none` — left
+ * unguarded, they would attribute the OTHER batch's obligation to this one's
+ * summary. `enrolments` is this batch's own interval(s)
+ * (`enrolmentsInRange(thisBatchId, ...)`), so `covers` here re-clips against
+ * the batch actually being summarised. `extra` counts weekend ENTRIES,
+ * matching RosterRow.extraCountThisCycle, not weekend days.
  *
  * // ASSUMPTION: O-7 — absence counts as accounted-for. O-7 is still open on
  * whether lateness or absence carries an automatic penalty; the PRD's stated
  * assumption is that it does not, and this is the one place that shows.
  */
-export function countCycle(days: DayView[]): CycleCounts {
+export function countCycle(days: DayView[], enrolments: RosterEnrolment[]): CycleCounts {
   const counts: CycleCounts = {
     requiredDays: 0, settledDays: 0, onTime: 0, late: 0,
     absent: 0, missed: 0, pending: 0, extra: 0, complianceRate: null,
@@ -123,7 +132,7 @@ export function countCycle(days: DayView[]): CycleCounts {
       counts.extra += day.entries.filter((e) => e.isExtra).length;
       continue;
     }
-    if (day.status === "none") continue; // not enrolled: no obligation
+    if (!enrolments.some((e) => covers(e, day.date))) continue; // not enrolled in THIS batch: no obligation
     counts.requiredDays += 1;
     switch (day.status) {
       case "onTime": counts.onTime += 1; counts.settledDays += 1; break;
@@ -167,6 +176,21 @@ export function createDashboardService(deps: {
     };
   }
 
+  /**
+   * The roster read `batchToday` and `batchSummary` both need: this batch's
+   * enrolments overlapping the window, and every one of those students'
+   * classified days across it. Extracted once a third consumer (Task 4) was
+   * imminent — kept to exactly what both existing callers use, nothing more.
+   */
+  async function loadRoster(
+    batchId: string, bounds: CycleBounds, now: Date,
+  ): Promise<{ enrolments: RosterEnrolment[]; byStudent: Map<string, DayView[]> }> {
+    const enrolments = await deps.batchRepo.enrolmentsInRange(batchId, bounds.start, bounds.end);
+    const studentIds = [...new Set(enrolments.map((e) => e.studentId))];
+    const byStudent = await deps.dayService.listDaysForStudents(studentIds, bounds.start, bounds.end, now);
+    return { enrolments, byStudent };
+  }
+
   return {
     async batchToday(batchId, now) {
       const batch = await deps.batchRepo.getBatch(batchId);
@@ -175,11 +199,7 @@ export function createDashboardService(deps: {
       const today = toProgrammeDate(now);
       const bounds = cycleContaining(today);
       const requiredDays = cycleWorkingDays(bounds);
-      const enrolments = await deps.batchRepo.enrolmentsInRange(batchId, bounds.start, bounds.end);
-      const studentIds = [...new Set(enrolments.map((e) => e.studentId))];
-      const byStudent = await deps.dayService.listDaysForStudents(
-        studentIds, bounds.start, bounds.end, now,
-      );
+      const { enrolments, byStudent } = await loadRoster(batchId, bounds, now);
 
       // Index every student's cycle once; each per-day count is then a lookup.
       const dayIndex = new Map<string, Map<CivilDate, DayView>>();
@@ -264,26 +284,32 @@ export function createDashboardService(deps: {
       }
 
       const bounds = cycleContaining(shiftCycle(first, seq - 1));
-      const enrolments = await deps.batchRepo.enrolmentsInRange(batchId, bounds.start, bounds.end);
-      const studentIds = [...new Set(enrolments.map((e) => e.studentId))];
-      const byStudent = await deps.dayService.listDaysForStudents(
-        studentIds, bounds.start, bounds.end, now,
-      );
+      const { enrolments, byStudent } = await loadRoster(batchId, bounds, now);
 
       // enrolmentsInRange is ordered by displayName, so first-seen order is
       // already the response order; the Map dedupes a student holding two
-      // intervals in this cycle (a transfer into and out of the same batch).
+      // intervals in this cycle (a transfer into and out of the same batch)
+      // into ONE roster row. That dedup is display-only: `countCycle` still
+      // needs EVERY interval the student held in this batch to clip their
+      // days correctly (a transfer out and back is exactly two), so those are
+      // kept separately, grouped by student rather than collapsed.
       const seen = new Map<string, RosterEnrolment>();
-      for (const e of enrolments) if (!seen.has(e.studentId)) seen.set(e.studentId, e);
+      const byStudentEnrolments = new Map<string, RosterEnrolment[]>();
+      for (const e of enrolments) {
+        if (!seen.has(e.studentId)) seen.set(e.studentId, e);
+        const intervals = byStudentEnrolments.get(e.studentId);
+        if (intervals) intervals.push(e); else byStudentEnrolments.set(e.studentId, [e]);
+      }
 
       return {
         batch,
         cycle: { ...cycleView(bounds, batch), seq },
         students: [...seen.values()].map((e) => {
           const days = byStudent.get(e.studentId) ?? [];
+          const studentEnrolments = byStudentEnrolments.get(e.studentId) ?? [e];
           return {
             student: { id: e.studentId, displayName: e.displayName, email: e.email },
-            counts: countCycle(days),
+            counts: countCycle(days, studentEnrolments),
             reviewProgress: countReviewProgress(days),
           };
         }),
