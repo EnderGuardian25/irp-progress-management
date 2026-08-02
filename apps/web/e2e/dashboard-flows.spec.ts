@@ -8,7 +8,7 @@ import { signInAsMentor, signInAsStudent } from "./helpers";
  * percentage would pass today and fail on the 10th.
  */
 test.describe("mentor Today (FR-28)", () => {
-  test("shows N of M submitted for each seeded batch, with N never exceeding M", async ({ page }) => {
+  test("shows N of M submitted for each seeded batch, with N never exceeding M nor undercounting late submitters", async ({ page }) => {
     await signInAsMentor(page);
 
     for (const name of Object.values(SEED_BATCH_NAMES)) {
@@ -18,6 +18,17 @@ test.describe("mentor Today (FR-28)", () => {
       const [submitted, enrolled] = /(\d+) of (\d+)/.exec(counts!)!.slice(1).map(Number);
       expect(submitted).toBeLessThanOrEqual(enrolled!);
       expect(enrolled).toBeGreaterThan(0);
+
+      // "submitted" is defined (spec: BatchTodayCounts.submitted) as
+      // students with at least one entry for the day, LATE INCLUDED -- so
+      // it structurally can never be smaller than the late figure beside
+      // it. Unlike a hard-coded ">0", this bound holds regardless of which
+      // day the suite happens to run on, and it would catch a counter stuck
+      // at 0 even on a day nothing else in this test can distinguish from
+      // a genuinely quiet one.
+      const lateText = await section.locator('[data-testid^="late-count-"]').textContent();
+      const late = Number(/^(\d+)/.exec(lateText!)![1]);
+      expect(submitted).toBeGreaterThanOrEqual(late);
     }
   });
 
@@ -44,13 +55,21 @@ test.describe("mentor Today (FR-28)", () => {
     await expect(page.locator("tbody tr")).toHaveCount(enrolled);
   });
 
-  test("renders a ribbon whose required-day count matches the cycle length it names", async ({ page }) => {
+  test("renders a ribbon whose required-day count matches the cycle length it names, with an actual bar per day", async ({ page }) => {
     await signInAsMentor(page);
     const section = page.getByRole("region", { name: SEED_BATCH_NAMES.A });
-    const label = await section.getByRole("figure").locator("figcaption").textContent();
+    const figure = section.getByRole("figure");
+    const label = await figure.locator("figcaption").textContent();
     const declared = Number(/of (\d+)/.exec(label!)![1]);
     await expect(section.getByTestId("required-day-count"))
       .toHaveText(`${String(declared)} required days in this cycle`);
+
+    // Asserting the figure exists proves nothing about what it drew. One
+    // <li> bar renders per required day, plus an extra half-slot on a
+    // worked weekend -- so the bar count can only ever meet or exceed the
+    // declared day count, never fall short of it.
+    const barCount = await figure.locator("ol > li").count();
+    expect(barCount).toBeGreaterThanOrEqual(declared);
   });
 
   test("the Cycles page lists a row per Batch Aurora student and never a score", async ({ page }) => {

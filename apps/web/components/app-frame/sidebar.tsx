@@ -7,27 +7,22 @@ import type { Route } from "next";
  * collapse/drawer treatment is provided in this task.
  *
  * `typedRoutes: true` (apps/web/next.config.ts) validates every `<Link
- * href>` against routes that actually exist. Task 9 added
- * `apps/web/app/(app)/page.tsx`, so "/" is a real route and Today is a real
- * link on both destination lists. Task 13 added `apps/web/app/(app)/roster/
- * page.tsx`, so Roster is now a real link; Task 14 added
- * `apps/web/app/(app)/review/page.tsx`, so Review is now a real link too —
- * but only on the mentor list. Task 15 added `apps/web/app/(app)/students/
- * page.tsx`, so Students is now a real link too. Task 7 added
- * `apps/web/app/(app)/cycles/page.tsx`, so Cycles is now a real link as
- * well — the only remaining label-only destination is "My month", which
- * Task 8 removes. Each destination becomes a real `<Link href="...">` in
- * the task that adds its page — no `as Route` casts in the meantime.
+ * href>` against routes that actually exist. Every destination on both
+ * lists is now a real link: Task 9 added `apps/web/app/(app)/page.tsx`
+ * ("/", Today); Task 13 added `.../roster/page.tsx` (Roster); Task 14 added
+ * `.../review/page.tsx` (Review, mentor list only); Task 15 added
+ * `.../students/page.tsx` (Students); Task 7 added `.../cycles/page.tsx`
+ * (Cycles); Task 8 added `.../my-month/page.tsx`, so "My month" joined the
+ * others last. Each destination became a real `<Link href="...">` in the
+ * task that added its page — no `as Route` cast was needed in the meantime.
  *
  * Navigation is role-gated, not just link-gated: a Student never sees
  * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
  * than seeing them disabled. Students get their own two-item list.
  *
- * Every destination on both lists is now a real link — Task 8 added
- * `apps/web/app/(app)/my-month/page.tsx`, so "My month" joined the others.
- * The label-only branch below is kept regardless: it is what lets a future
- * destination be added to either list before its page exists, without an
- * `as Route` cast.
+ * The label-only rendering branch below is kept even with no destination
+ * currently using it: it is what lets a future destination be added to
+ * either list before its page exists, without an `as Route` cast.
  *
  * `Destination` is a real union, not inferred from the array literals: once
  * every entry on both lists carries an `href`, inference alone would narrow

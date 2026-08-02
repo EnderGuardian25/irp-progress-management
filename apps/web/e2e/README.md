@@ -1,12 +1,13 @@
 # End-to-end suite
 
-Three spec files, one Playwright config, one seeded database:
+Four spec files, one Playwright config, one seeded database:
 
 | Spec | Proves |
 |---|---|
 | `signin.spec.ts` | The chain this slice exists to prove: browser → Auth.js → encrypted cookie → decrypt → `@irp/client` → `apps/api` → Postgres → rendered user. Every dev-identity-picker branch, including the unregistered-user 403 and the never-a-token-in-the-browser assertion. |
 | `student-flows.spec.ts` | The Plan 6 student surface — on-time submission, the legal submission window (never older than the previous weekday), the absence round-trip, FR-20's lock from the student's own view, the mentor-page redirect, and sign-out. Signed in as `dev-student-1` ("Dev Student") only — see "Personas" below for why. |
 | `mentor-flows.spec.ts` | The Plan 6 mentor surface — Roster (row-per-student, the weekend persona's Extra badge), Roster → Review → attendance/tasks record → Submitted → In Review → Evaluated → locked, the Students directory's archive flow, and registering + archiving a throwaway student. Signed in as `dev-admin-1` ("Dev Mentor"). |
+| `dashboard-flows.spec.ts` | The Plan 7 dashboards — mentor Today's per-batch figures and ribbon, the Cycles view, and FR-29/FR-30's student My month. Signed in as `dev-admin-1` for the mentor side and `dev-student-1` for the student side; see its own section further below for the full test table. |
 
 ## Personas
 
@@ -20,18 +21,18 @@ signed-in identity:
 
 | externalId | Name | Batch | Kind | Exercised in |
 |---|---|---|---|---|
-| `dev-student-1` | Dev Student | Aurora (A) | compliant | `student-flows.spec.ts` (signed in as), `mentor-flows.spec.ts` (roster row count) |
-| `seed-student-a2` | Nuwan Perera | Aurora (A) | late | `mentor-flows.spec.ts` (roster row count) |
-| `seed-student-a3` | Sachini Silva | Aurora (A) | missed | `mentor-flows.spec.ts` (roster row count) |
-| `seed-student-a4` | Kavindu Jayasuriya | Aurora (A) | absent | `mentor-flows.spec.ts` (roster row count) |
-| `seed-student-a5` | Tharindu Weerasinghe | Aurora (A) | **archived** | `mentor-flows.spec.ts` (asserted ABSENT from the active roster) |
-| `seed-student-b1` | Ishara Gunawardena | Basalt (B) | compliant | — |
-| `seed-student-b2` | Dilini Rathnayake | Basalt (B) | **weekend** | `mentor-flows.spec.ts` (roster's `+N extra` badge) |
-| `seed-student-b3` | Ramesh Kumar | Basalt (B) | joiner | — |
-| `seed-student-b4` | Amaya Wickramasinghe | Basalt (B) | transfer | — |
-| `seed-student-b5` | Chamodi Herath | Basalt (B) | **mixed** | `mentor-flows.spec.ts` (review's Submitted → In Review → Evaluated walk, and the archive flow) |
-| `dev-admin-1` | Dev Mentor | — | mentor | `mentor-flows.spec.ts` (signed in as) |
-| `seed-mentor-2` | Priya Fernando | — | mentor | — |
+| `dev-student-1` | Dev Student | Aurora (A) | compliant | `student-flows.spec.ts` (signed in as), `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (signed in as for the whole student My month suite; also part of Batch Aurora's dashboard/Cycles figures) |
+| `seed-student-a2` | Nuwan Perera | Aurora (A) | late | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch Aurora's N of M and Cycles listing) |
+| `seed-student-a3` | Sachini Silva | Aurora (A) | missed | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch Aurora's N of M and Cycles listing) |
+| `seed-student-a4` | Kavindu Jayasuriya | Aurora (A) | absent | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch Aurora's N of M and Cycles listing) |
+| `seed-student-a5` | Tharindu Weerasinghe | Aurora (A) | **archived** | `mentor-flows.spec.ts` (asserted ABSENT from the active roster), `dashboard-flows.spec.ts` (asserted ABSENT from the Cycles listing too) |
+| `seed-student-b1` | Ishara Gunawardena | Basalt (B) | compliant | `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
+| `seed-student-b2` | Dilini Rathnayake | Basalt (B) | **weekend** | `mentor-flows.spec.ts` (roster's `+N extra` badge), `dashboard-flows.spec.ts` (Batch Basalt's N of M figure) |
+| `seed-student-b3` | Ramesh Kumar | Basalt (B) | joiner | `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
+| `seed-student-b4` | Amaya Wickramasinghe | Basalt (B) | transfer | `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
+| `seed-student-b5` | Chamodi Herath | Basalt (B) | **mixed** | `mentor-flows.spec.ts` (review's Submitted → In Review → Evaluated walk, and the archive flow), `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
+| `dev-admin-1` | Dev Mentor | — | mentor | `mentor-flows.spec.ts` (signed in as), `dashboard-flows.spec.ts` (signed in as for the whole mentor Today/Cycles suite) |
+| `seed-mentor-2` | Priya Fernando | — | mentor | — (never signed in by any spec) |
 
 ## Relative-date honesty
 
@@ -111,7 +112,7 @@ the Cycles view, and FR-29/FR-30's student My month.
 
 | Test | Personas it touches | What it proves |
 |---|---|---|
-| N of M submitted, per batch | Both mentors' view of Batch Aurora and Batch Basalt | The must-ship figure renders for every batch, and N never exceeds M |
+| N of M submitted, per batch | `dev-admin-1`'s view of Batch Aurora and Batch Basalt | The must-ship figure renders for every batch, N never exceeds M, and N is never smaller than the late count shown beside it |
 | M matches the Roster's row count | Batch Aurora's active students | The dashboard's denominator and the Roster agree for the *same day* |
 | Ribbon length matches the cycle it names | Batch Aurora | The figcaption's "Day x of y" and the ribbon's rendered day count agree — see the caveat below |
 | Cycles lists every active Aurora student, never a score | All Batch A personas; the archived one (Tharindu) | FR-5 — an archived student leaves active views; and no score exists to leak |
@@ -153,8 +154,16 @@ Both figures it compares — the figcaption's "Day x of **y**" and the ribbon's
 array, computed once per request. So the check catches a rendering bug (the UI
 reading the wrong field, or the two elements falling out of step), but it
 cannot catch a backend miscalculation of `requiredDayCount` itself: both
-numbers would then be wrong identically and still agree. The unit tests in
-`apps/api/test/dashboard-service.test.ts` are what cover that.
+numbers would then be wrong identically and still agree.
+
+The general-purpose proof that `cycleWorkingDays` itself is correct —
+weekday-only, starts/ends within the cycle's own bounds, a plausible count for
+a typical cycle — lives in `packages/core/src/cycle.test.ts`, independent of
+any one fixture date. `apps/api/test/dashboard-service.test.ts` additionally
+pins a handful of specific scenarios to independently-derived literals
+(Finding 5 of this same whole-branch review, API scope), which is real
+regression coverage for those exact fixtures but is not itself a general proof
+of the algorithm — it is `packages/core/src/cycle.test.ts` that is.
 
 ### A note for whoever ships the evaluation UI
 

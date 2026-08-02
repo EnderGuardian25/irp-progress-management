@@ -10,6 +10,10 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatCivilDateLabel } from "../format-civil-date";
 
+/** Required-day outcomes whose result is final -- FR-29's history list keeps
+ * a day for this reason alone even when it carries no entry (e.g. Missed). */
+const SETTLED_STATUSES = new Set(["onTime", "late", "absent", "missed"]);
+
 /**
  * FR-29: the student's own month. FR-30 is structural here — this page calls
  * only /me endpoints, which take no student identifier, so there is no
@@ -71,11 +75,33 @@ export default async function MyMonthPage() {
         : "You are not enrolled in a batch yet.";
 
   const complianceLabel =
-    summary.complianceRate === null ? "—" : `${String(Math.round(summary.complianceRate * 100))}% compliance`;
+    summary.complianceRate === null ? "— compliance" : `${String(Math.round(summary.complianceRate * 100))}% compliance`;
 
+  // listMyDays defaults to the whole current cycle -- every calendar date,
+  // including weekends and days that haven't arrived yet. Rendering one
+  // unfiltered card per date meant the 10th of a month opened this page to
+  // roughly 29 empty placeholders (a stray weekday with a "—" pill, or a
+  // bare-dated weekend card) stacked above whatever real content existed
+  // (Finding 4, Plan 7 whole-branch review). A day earns its card by
+  // carrying something real: an entry, a recorded absence, or a settled
+  // (final) status -- never merely by existing on the calendar. This is a
+  // stricter test than "not future": a weekday still open within its grace
+  // window with nothing submitted yet is dropped too, same as a quiet
+  // weekend, because there is nothing to show for it either.
+  //
+  // Corollary: the empty-state branch below (orderedDays.length === 0) was
+  // unreachable before this filter -- the array always held one row per
+  // calendar date. It is now genuinely reachable for a student at the very
+  // start of a cycle, before anything has settled.
+  //
   // listMyDays returns oldest first; the history list reads newest first
   // (brief R5) — reverse a copy rather than mutating the response.
-  const orderedDays = [...(dayRows ?? [])].reverse();
+  const orderedDays = [...(dayRows ?? [])]
+    .filter(
+      (day) =>
+        day.entries.length > 0 || day.absenceReason !== null || SETTLED_STATUSES.has(day.status),
+    )
+    .reverse();
 
   return (
     <div>

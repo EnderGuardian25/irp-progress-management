@@ -99,12 +99,20 @@ export default async function CyclesPage({
 
         {/* Switching batch drops the cycle number on purpose: cycle 3 of one
             batch is not cycle 3 of another, and carrying it forward would
-            silently show a different month under the same label. */}
-        {data?.cycle.seq != null && (
+            silently show a different month under the same label.
+
+            The picker is built from currentSeq -- the batch's actual latest
+            started cycle -- never from cycle.seq, which is only the
+            REQUESTED cycle. Building it from cycle.seq made browsing a
+            one-way trip: selecting an earlier cycle re-rendered a picker
+            that only went up to the cycle just selected, with no link back
+            to the present (Finding 1, Plan 7 whole-branch review).
+            cycle.seq still drives which chip is aria-current. */}
+        {data?.currentSeq != null && (
           <div>
             <SectionLabel>Cycle</SectionLabel>
             <div className="mt-2 flex flex-wrap gap-2">
-              {Array.from({ length: data.cycle.seq }, (_, i) => i + 1).map((n) => (
+              {Array.from({ length: data.currentSeq }, (_, i) => i + 1).map((n) => (
                 <Link
                   key={n}
                   href={{ pathname: "/cycles", query: { batchId: selected.id, cycle: n } }}

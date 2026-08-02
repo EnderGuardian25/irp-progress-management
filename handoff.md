@@ -132,7 +132,7 @@ apps/api/                Fastify service — config, ajv 2020-12 validator compi
                          service reading a whole batch-cycle in one batched pass rather than the
                          roster's per-student fan-out (ADR-0018) behind three dashboard routes.
                          262 tests
-apps/api/prisma/         schema.prisma (nine tables, Plan 5's full data model) + committed
+apps/api/prisma/         schema.prisma (eleven tables, Plan 5's full data model) + committed
                          migrations
 apps/api/prisma.config.ts    Prisma 7 CLI datasource config (the schema block cannot hold `url`)
 apps/api/src/generated/prisma/   GENERATED, git-ignored — a THIRD generated package

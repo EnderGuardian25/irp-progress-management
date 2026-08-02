@@ -169,7 +169,14 @@ with.
 | As the student, look at the sidebar | Two items only: `Today`, `My month`. No mentor destination is offered. |
 | As the student, type `/cycles` into the address bar | Redirected home. Not a 403 page — the API is the security boundary, this is just the wrong screen. |
 | Sign in as **Unregistered user** | The terminal 403 page. Not a redirect loop. |
-| Sign in as the archived persona | Treated as unregistered. Archival revokes access; it does not delete history. |
+| As the mentor, look for Tharindu on Roster or Cycles | Absent from both. His history is intact in the database; he simply cannot be worked on (FR-5). |
+
+> **On the archived persona.** You cannot sign in *as* Tharindu — the dev picker
+> exposes three identities only (Mentor, Student, Unregistered), so there is no
+> archived login to demonstrate. What you can show is his absence from the
+> mentor's active views, which is the half of FR-5 that has a screen. That an
+> archived user is treated as unregistered when they do authenticate is proven
+> at the API, not in this demo.
 
 ---
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import CyclesPage from "@/app/(app)/cycles/page";
 
@@ -28,6 +28,7 @@ const summary = (over: Record<string, unknown> = {}) => ({
   batchId: "b1",
   batchName: "Batch Aurora",
   cycle: { seq: 3, startDate: "2026-07-10", endDate: "2026-08-09", requiredDayCount: 22 },
+  currentSeq: 3,
   students: [
     {
       student: { id: "s1", displayName: "Amaya Wickramasinghe", email: "amaya@dev.local" },
@@ -42,6 +43,15 @@ const summary = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("CyclesPage", () => {
+  // Without this, `toHaveBeenCalledWith` matches ANY recorded call across
+  // the whole file -- several earlier tests call getBatchDashboardSummary
+  // with the exact same shape the "ignores a non-numeric cycle param" test
+  // below asserts, so that test could pass even if the page forwarded a
+  // broken query (Finding 3, Plan 7 whole-branch review).
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("redirects a Student caller to / rather than rendering another student's figures", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
     await expect(CyclesPage({ searchParams: Promise.resolve({}) })).rejects.toBe(REDIRECT_SENTINEL);
@@ -109,6 +119,53 @@ describe("CyclesPage", () => {
 
     expect(screen.getByRole("link", { name: "Cycle 1" })).toHaveAttribute("href", "/cycles?batchId=b1&cycle=1");
     expect(screen.getByRole("link", { name: "Cycle 3" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps every started cycle reachable when browsing to an earlier one, not just the one selected (Finding 1)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH] });
+    // The batch is at its 3rd cycle (currentSeq), but cycle 1 was requested
+    // (cycle.seq). Building the picker from cycle.seq -- the shape the old
+    // test mocked -- would render only "Cycle 1" here, with no way back to
+    // the cycles that have actually happened.
+    getBatchDashboardSummary.mockResolvedValue({
+      data: summary({
+        cycle: { seq: 1, startDate: "2026-05-10", endDate: "2026-06-09", requiredDayCount: 21 },
+        currentSeq: 3,
+      }),
+      error: undefined,
+    });
+
+    render(await CyclesPage({ searchParams: Promise.resolve({ batchId: "b1", cycle: "1" }) }));
+
+    const cycle1 = screen.getByRole("link", { name: "Cycle 1" });
+    const cycle2 = screen.getByRole("link", { name: "Cycle 2" });
+    const cycle3 = screen.getByRole("link", { name: "Cycle 3" });
+    expect(cycle1).toHaveAttribute("aria-current", "page");
+    expect(cycle2).not.toHaveAttribute("aria-current");
+    expect(cycle3).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows the not-yet-open state and renders no cycle chips at all when the first evaluated cycle hasn't started (Finding 2)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH] });
+    getBatchDashboardSummary.mockResolvedValue({
+      data: summary({
+        cycle: { seq: null, startDate: "2026-08-10", endDate: "2026-09-09", requiredDayCount: 22 },
+        currentSeq: null,
+        students: [],
+      }),
+      error: undefined,
+    });
+
+    render(await CyclesPage({ searchParams: Promise.resolve({ batchId: "b1" }) }));
+
+    expect(screen.getByText(/First evaluated cycle opens/)).toBeInTheDocument();
+    expect(screen.queryByText(/Cycle null/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Cycle")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Cycle \d+$/ })).not.toBeInTheDocument();
   });
 
   it("requests the cycle named in the query string", async () => {

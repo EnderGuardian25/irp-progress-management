@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import MyMonthPage from "@/app/(app)/my-month/page";
 
@@ -35,6 +35,13 @@ const dash = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("MyMonthPage", () => {
+  // Same latent risk cycles-page.test.tsx had (Finding 3, Plan 7 whole-branch
+  // review): with no clearing, `toHaveBeenCalledWith` could match a call
+  // left over from an earlier test rather than the one this test made.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("shows Month N of 6 and the student's own ribbon", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
     apiClient.mockResolvedValue({});
@@ -123,6 +130,92 @@ describe("MyMonthPage", () => {
     expect(bodies).toEqual(["Newer entry.", "Older entry."]);
     expect(screen.getByText("Late")).toBeInTheDocument();
     expect(screen.getByText(/Evaluated \(locked\)/)).toBeInTheDocument();
+  });
+
+  it("drops future days and quiet weekends from the history, but keeps a settled day even with no entry (Finding 4)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({
+      data: [
+        // A settled weekday with a real entry -- kept.
+        {
+          date: "2026-07-31", status: "onTime", reportStatus: "Evaluated", reportId: "r1",
+          absenceReason: null,
+          entries: [{
+            id: "e1", entryDate: "2026-07-31", body: "Real work.",
+            submittedAt: "2026-07-31T11:30:00.000Z", isLate: false, isExtra: false,
+          }],
+        },
+        // A settled weekday with no entry at all (Missed) -- still kept,
+        // because "settled" alone is enough; nothing real should disappear.
+        {
+          date: "2026-08-03", status: "missed", reportStatus: null, reportId: null,
+          absenceReason: null, entries: [],
+        },
+        // A quiet weekend -- nothing recorded -- dropped.
+        {
+          date: "2026-08-01", status: "none", reportStatus: null, reportId: null,
+          absenceReason: null, entries: [],
+        },
+        // A future weekday that hasn't arrived yet -- dropped.
+        {
+          date: "2026-08-04", status: "future", reportStatus: null, reportId: null,
+          absenceReason: null, entries: [],
+        },
+      ],
+      error: undefined,
+    });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText("Real work.")).toBeInTheDocument();
+    expect(screen.getByText("Friday 31 July")).toBeInTheDocument();
+    expect(screen.getByText("Monday 3 August")).toBeInTheDocument();
+    expect(screen.queryByText("Saturday 1 August")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tuesday 4 August")).not.toBeInTheDocument();
+  });
+
+  it("shows the (now reachable) empty state once every day on record is future or a quiet weekend (Finding 4 corollary)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({
+      data: [
+        {
+          date: "2026-08-01", status: "none", reportStatus: null, reportId: null,
+          absenceReason: null, entries: [],
+        },
+        {
+          date: "2026-08-04", status: "future", reportStatus: null, reportId: null,
+          absenceReason: null, entries: [],
+        },
+      ],
+      error: undefined,
+    });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText("Nothing recorded this cycle yet.")).toBeInTheDocument();
+  });
+
+  it("labels a null compliance rate '— compliance', not a bare dash, among the other labelled figures (Finding 6)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({
+      data: dash({
+        summary: {
+          requiredDays: 22, settledDays: 0, onTime: 0, late: 0, absent: 0,
+          missed: 0, pending: 0, extra: 0, complianceRate: null,
+        },
+      }),
+      error: undefined,
+    });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText("— compliance")).toBeInTheDocument();
   });
 
   it("shows the absence reason on an absent day", async () => {
