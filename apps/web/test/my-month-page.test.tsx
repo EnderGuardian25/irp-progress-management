@@ -142,6 +142,44 @@ describe("MyMonthPage", () => {
     expect(screen.getByText("Medical appointment")).toBeInTheDocument();
   });
 
+  it("tells a caller with no enrolment at all, instead of a stray Month figure", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({
+      data: dash({
+        cycle: { seq: null, startDate: "2026-07-10", endDate: "2026-08-09", requiredDayCount: 22 },
+        firstEvaluatedCycleStart: null,
+      }),
+      error: undefined,
+    });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText(/not enrolled in a batch yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Month null/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Month \d/)).not.toBeInTheDocument();
+  });
+
+  it("surfaces a failed day-history load distinctly from the genuine empty state", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({
+      data: undefined,
+      error: { type: "about:blank", title: "Internal Server Error", status: 500, detail: "Your day history could not be loaded." },
+    });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText("Your day history could not be loaded.")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing recorded this cycle yet\./)).not.toBeInTheDocument();
+    // The dashboard heading, ribbon and counts still render -- only the
+    // day-history section is affected by listMyDays failing.
+    expect(screen.getByText(/Month 3 of 6/)).toBeInTheDocument();
+    expect(screen.getByRole("figure")).toBeInTheDocument();
+  });
+
   it("renders the problem detail when the dashboard call errors", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
     apiClient.mockResolvedValue({});

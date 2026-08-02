@@ -31,7 +31,7 @@ export default async function MyMonthPage() {
   if (user.role !== "Student") redirect("/");
 
   const client = await apiClient();
-  const [{ data: dashboard, error }, { data: dayRows }] = await Promise.all([
+  const [{ data: dashboard, error }, { data: dayRows, error: daysError }] = await Promise.all([
     getMyDashboard({ client }),
     listMyDays({ client }),
   ]);
@@ -125,7 +125,13 @@ export default async function MyMonthPage() {
 
       <SectionLabel>Your days</SectionLabel>
       <div className="mt-2 flex flex-col gap-4">
-        {orderedDays.length === 0 ? (
+        {daysError !== undefined ? (
+          <Panel>
+            <p role="alert" style={{ color: "var(--st-missed)" }}>
+              {daysError.detail ?? daysError.title ?? "Your day history could not be loaded."}
+            </p>
+          </Panel>
+        ) : orderedDays.length === 0 ? (
           <Panel>
             <EmptyState
               title="Nothing recorded this cycle yet."
