@@ -440,3 +440,94 @@ describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
       .rejects.toBeInstanceOf(BatchNotFoundError);
   });
 });
+
+describe.skipIf(!dbUrl)("createDashboardService — studentDashboard", () => {
+  const prisma = createPrismaClient(dbUrl!);
+  const entryRepo = createEntryRepo(prisma);
+  const absenceRepo = createAbsenceRepo(prisma);
+  const batchRepo = createBatchRepo(prisma);
+  const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
+  const dashboards = createDashboardService({ batchRepo, dayService });
+
+  beforeEach(async () => {
+    await resetDb(prisma);
+  });
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
+
+  it("reports Month N of 6 from the student's FIRST enrolment, surviving a transfer", async () => {
+    const a = await batchRepo.create({
+      name: "Batch Own A", startDate: civilDate("2026-06-10"), endDate: civilDate("2026-12-09"),
+    });
+    const b = await batchRepo.create({
+      name: "Batch Own B", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "own-mover", email: "own-mover@dev.local", displayName: "Mover", role: "STUDENT" },
+    });
+    await batchRepo.enrol(s.id, a.id, civilDate("2026-06-10"));
+    await batchRepo.transfer(s.id, b.id, civilDate("2026-07-10"));
+
+    const view = await dashboards.studentDashboard(s.id, NOW);
+
+    expect(view.programmeMonths).toBe(6);
+    expect(view.firstEvaluatedCycleStart).toBe(civilDate("2026-06-10"));
+    // NOW is 2026-08-05, in the 2026-07-10..2026-08-09 cycle — the 2nd since
+    // the FIRST enrolment, not the 1st in the batch they moved to.
+    expect(view.cycle.seq).toBe(2);
+    expect(view.cycle.startDate).toBe(CYCLE_START);
+  });
+
+  it("nulls seq for a joiner whose first evaluated cycle has not opened", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Own Joiner", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "own-joiner", email: "own-joiner@dev.local", displayName: "Joiner", role: "STUDENT" },
+    });
+    // Joined mid-cycle: FR-27 says this cycle is not evaluated, so the first
+    // evaluated cycle is the NEXT one and today has no sequence.
+    await batchRepo.enrol(s.id, batch.id, civilDate("2026-07-15"));
+
+    const view = await dashboards.studentDashboard(s.id, NOW);
+
+    expect(view.cycle.seq).toBeNull();
+    expect(view.firstEvaluatedCycleStart).toBe(civilDate("2026-08-10"));
+  });
+
+  it("returns required days only, with worked weekends surfaced through extraAfter", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Own Extra", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "own-extra", email: "own-extra@dev.local", displayName: "Extra", role: "STUDENT" },
+    });
+    await batchRepo.enrol(s.id, batch.id, CYCLE_START);
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: SAT, body: "Weekend polish.",
+      submittedAt: colomboInstant(SAT, "11:00"),
+    });
+
+    const view = await dashboards.studentDashboard(s.id, NOW);
+
+    expect(view.days).toHaveLength(view.cycle.requiredDayCount);
+    expect(view.days.some((d) => d.date === SAT)).toBe(false);
+    expect(view.extraAfter).toEqual([civilDate("2026-07-31")]);
+    expect(view.summary.extra).toBe(1);
+    expect(view.strengthsAndWeaknesses).toBeNull();
+  });
+
+  it("gives a caller with no enrolment a null first cycle and an empty obligation, not an error", async () => {
+    const m = await prisma.user.create({
+      data: { externalId: "own-mentor", email: "own-mentor@dev.local", displayName: "Mentor", role: "ADMIN" },
+    });
+
+    const view = await dashboards.studentDashboard(m.id, NOW);
+
+    expect(view.firstEvaluatedCycleStart).toBeNull();
+    expect(view.cycle.seq).toBeNull();
+    expect(view.summary.requiredDays).toBe(0);
+    expect(view.summary.complianceRate).toBeNull();
+  });
+});

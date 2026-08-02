@@ -79,4 +79,24 @@ export const dashboardRoutes: FastifyPluginAsync<{
       };
     },
   );
+
+  app.get(
+    "/api/v1/me/dashboard",
+    { preHandler: [app.authenticate] },
+    async (req): Promise<components["schemas"]["StudentDashboard"]> => {
+      // No role gate and no id parameter: the caller's own id is the only
+      // input, so FR-30 holds by construction rather than by a check.
+      const view = await opts.dashboardService.studentDashboard(req.user!.id, new Date());
+      return {
+        today: view.today,
+        programmeMonths: view.programmeMonths,
+        firstEvaluatedCycleStart: view.firstEvaluatedCycleStart,
+        cycle: toApiCycle(view.cycle),
+        days: view.days.map((d) => ({ date: d.date, status: d.status })),
+        extraAfter: [...view.extraAfter],
+        summary: toApiCycleCounts(view.summary),
+        strengthsAndWeaknesses: view.strengthsAndWeaknesses,
+      };
+    },
+  );
 };

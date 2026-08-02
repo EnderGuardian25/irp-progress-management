@@ -10,5 +10,5 @@ export function unusedDashboardService(): DashboardService {
   const unused = () => {
     throw new Error("unused: dashboardService was not expected to be called in this suite");
   };
-  return { batchToday: unused, batchSummary: unused };
+  return { batchToday: unused, batchSummary: unused, studentDashboard: unused };
 }

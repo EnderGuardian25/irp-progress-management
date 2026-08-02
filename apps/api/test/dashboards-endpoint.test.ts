@@ -158,4 +158,45 @@ describe.skipIf(!dbUrl)("Dashboards: GET /api/v1/batches/{id}/dashboard/today", 
     expect(res.statusCode).toBe(200);
     expect(res.json<{ cycle: { seq: number } }>().cycle.seq).toBe(1);
   });
+
+  it("returns the caller's own dashboard for a student token", async () => {
+    const s = await student("dash-me-student");
+    const b = await batch("Batch Me");
+    await createBatchRepo(prisma).enrol(s.id, b.id, civilDate("2026-05-10"));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me/dashboard",
+      headers: bearer(await signToken({ oid: "dash-me-student" })),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      programmeMonths: number;
+      days: { date: string; status: string }[];
+      summary: { requiredDays: number };
+      strengthsAndWeaknesses: string | null;
+    }>();
+    expect(body.programmeMonths).toBe(6);
+    expect(body.strengthsAndWeaknesses).toBeNull();
+    expect(body.summary.requiredDays).toBeGreaterThan(0);
+    // FR-30: the payload names no other student and carries no score.
+    expect(JSON.stringify(body)).not.toContain("performanceIndex");
+  });
+
+  it("accepts a mentor token too, reporting no obligation of their own", async () => {
+    await mentor("dash-me-mentor");
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me/dashboard",
+      headers: bearer(await signToken({ oid: "dash-me-mentor" })),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ summary: { requiredDays: number } }>().summary.requiredDays).toBe(0);
+  });
+
+  it("rejects an unauthenticated request to the student dashboard with 401", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/v1/me/dashboard" });
+    expect(res.statusCode).toBe(401);
+  });
 });

@@ -1,6 +1,7 @@
 import {
   compareDates, cycleContaining, cycleFor, cycleWorkingDays,
   firstEvaluatedCycleStart, isWeekday, previousWeekday, shiftCycle, toProgrammeDate,
+  PROGRAMME_MONTHS,
   type CivilDate, type CycleBounds, type DayStatus,
 } from "@irp/core";
 import type { BatchRecord, BatchRepo, RosterEnrolment } from "../db/batch-repo.js";
@@ -54,6 +55,24 @@ export interface ReviewProgress {
   evaluated: number;
 }
 
+export interface StudentDay {
+  date: CivilDate;
+  status: DayStatus;
+}
+
+export interface StudentDashboardView {
+  /** The server's civil date in Asia/Colombo — the ribbon's ring must not be derived from the browser's clock. */
+  today: CivilDate;
+  programmeMonths: number;
+  firstEvaluatedCycleStart: CivilDate | null;
+  cycle: CycleView;
+  days: StudentDay[];
+  extraAfter: CivilDate[];
+  summary: CycleCounts;
+  /** Always null in this release — O-5 blocks the AI provider, so no Evaluation row exists (spec D2/D6). */
+  strengthsAndWeaknesses: null;
+}
+
 export interface StudentSummaryView {
   student: { id: string; displayName: string; email: string };
   counts: CycleCounts;
@@ -69,10 +88,23 @@ export interface BatchSummaryView {
 export interface DashboardService {
   batchToday(batchId: string, now: Date): Promise<BatchTodayView>;
   batchSummary(batchId: string, cycleSeq: number | undefined, now: Date): Promise<BatchSummaryView>;
+  studentDashboard(studentId: string, now: Date): Promise<StudentDashboardView>;
+}
+
+/**
+ * The shape `covers`/`countCycle` actually need from an enrolment interval —
+ * satisfied by both `RosterEnrolment` (a batch's own roster read) and
+ * `EnrolmentRecord` (a student's full history across every batch). A batch
+ * summary clips against the former; a student's own month clips against the
+ * latter, because the obligation follows the student, not a batch.
+ */
+interface EnrolmentInterval {
+  startDate: CivilDate;
+  endDate: CivilDate | null;
 }
 
 /** Whether an enrolment interval covers `d` (open-ended when endDate is null). */
-function covers(e: RosterEnrolment, d: CivilDate): boolean {
+function covers(e: EnrolmentInterval, d: CivilDate): boolean {
   return compareDates(e.startDate, d) <= 0 && (e.endDate === null || compareDates(e.endDate, d) >= 0);
 }
 
@@ -132,7 +164,7 @@ function round4(value: number): number {
  * whether lateness or absence carries an automatic penalty; the PRD's stated
  * assumption is that it does not, and this is the one place that shows.
  */
-export function countCycle(days: DayView[], enrolments: RosterEnrolment[]): CycleCounts {
+export function countCycle(days: DayView[], enrolments: EnrolmentInterval[]): CycleCounts {
   const counts: CycleCounts = {
     requiredDays: 0, settledDays: 0, onTime: 0, late: 0,
     absent: 0, missed: 0, pending: 0, extra: 0, complianceRate: null,
@@ -172,8 +204,33 @@ export function countReviewProgress(days: DayView[]): ReviewProgress {
   return progress;
 }
 
+/**
+ * Weekend Extra (FR-33), attributed to the required day it follows so the
+ * ribbon can draw a half-width slot there. A weekend at the very start of a
+ * cycle anchors back into the previous one and is dropped rather than
+ * mis-attributed. Counts ENTRIES, not days — a Saturday worked twice is two.
+ */
+export function extraSlots(
+  dayLists: Iterable<DayView[]>,
+  cycleStart: CivilDate,
+): { extraCount: number; extraAfter: CivilDate[] } {
+  let extraCount = 0;
+  const anchors = new Set<CivilDate>();
+  for (const days of dayLists) {
+    for (const day of days) {
+      if (isWeekday(day.date)) continue;
+      const extras = day.entries.filter((e) => e.isExtra).length;
+      if (extras === 0) continue;
+      extraCount += extras;
+      const anchor = previousWeekday(day.date);
+      if (compareDates(anchor, cycleStart) >= 0) anchors.add(anchor);
+    }
+  }
+  return { extraCount, extraAfter: [...anchors].sort() };
+}
+
 export function createDashboardService(deps: {
-  batchRepo: Pick<BatchRepo, "getBatch" | "enrolmentsInRange">;
+  batchRepo: Pick<BatchRepo, "getBatch" | "enrolmentsInRange" | "firstEnrolmentStart" | "listEnrolments">;
   dayService: Pick<DayService, "listDaysForStudents">;
 }): DashboardService {
   /** The engine's cycle numbering for a batch (ADR-0019). Null before its first evaluated cycle. */
@@ -240,22 +297,7 @@ export function createDashboardService(deps: {
       const date = reportedDay(requiredDays, today);
       const counts = days.find((d) => d.date === date)!;
 
-      // Weekend Extra (FR-33): counted from entries, never from a status, and
-      // attributed to the required day it follows so the ribbon can draw a
-      // half-width slot there. A weekend at the very start of a cycle maps
-      // back into the previous one and is dropped rather than mis-attributed.
-      let extraCount = 0;
-      const extraAfter = new Set<CivilDate>();
-      for (const days of byStudent.values()) {
-        for (const day of days) {
-          if (isWeekday(day.date)) continue;
-          const extras = day.entries.filter((entry) => entry.isExtra).length;
-          if (extras === 0) continue;
-          extraCount += extras;
-          const anchor = previousWeekday(day.date);
-          if (compareDates(anchor, bounds.start) >= 0) extraAfter.add(anchor);
-        }
-      }
+      const { extraCount, extraAfter } = extraSlots(byStudent.values(), bounds.start);
 
       return {
         batch,
@@ -266,7 +308,7 @@ export function createDashboardService(deps: {
         counts,
         extraCount,
         days,
-        extraAfter: [...extraAfter].sort(),
+        extraAfter,
       };
     },
 
@@ -326,6 +368,46 @@ export function createDashboardService(deps: {
             reviewProgress: countReviewProgress(days),
           };
         }),
+      };
+    },
+
+    async studentDashboard(studentId, now) {
+      const today = toProgrammeDate(now);
+      const bounds = cycleContaining(today);
+      const admission = await deps.batchRepo.firstEnrolmentStart(studentId);
+      const byStudent = await deps.dayService.listDaysForStudents(
+        [studentId], bounds.start, bounds.end, now,
+      );
+      const days = byStudent.get(studentId) ?? [];
+      const { extraAfter } = extraSlots([days], bounds.start);
+
+      return {
+        today,
+        programmeMonths: PROGRAMME_MONTHS,
+        firstEvaluatedCycleStart: admission === null ? null : firstEvaluatedCycleStart(admission),
+        cycle: {
+          // The programme clock runs from the student's FIRST enrolment, so a
+          // transfer never resets "Month N of 6" (spec §3, Enrolment).
+          seq: admission === null ? null : (cycleFor(today, admission)?.index ?? null),
+          startDate: bounds.start,
+          endDate: bounds.end,
+          requiredDayCount: cycleWorkingDays(bounds).length,
+        },
+        days: days
+          .filter((d) => isWeekday(d.date))
+          .map((d) => ({ date: d.date, status: d.status })),
+        extraAfter,
+        // Corrected 2026-08-03: countCycle's signature changed in Task 3's fix
+        // wave to `countCycle(days, enrolments)`, because a batch summary must
+        // clip each student's obligation to THAT batch's intervals. A
+        // student's own month is the opposite case — the obligation follows
+        // the student, not a batch — so pass their full enrolment list. Widen
+        // `countCycle`/`covers` to accept a structural
+        // `{ startDate: CivilDate; endDate: CivilDate | null }` so both
+        // `RosterEnrolment` and `EnrolmentRecord` satisfy it; do not duplicate
+        // the counter.
+        summary: countCycle(days, await deps.batchRepo.listEnrolments(studentId)),
+        strengthsAndWeaknesses: null,
       };
     },
   };
