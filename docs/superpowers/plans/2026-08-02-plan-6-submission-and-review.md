@@ -2688,8 +2688,10 @@ export async function submitEntry(
   return null;
 }
 
+// Correction 2026-08-02: single-argument. The original two-arg reducer
+// signature contradicted Step 3's plain <form> wiring — FormData would have
+// landed in the unused prevState slot at runtime.
 export async function markAbsent(
-  _prev: { error: string } | null,
   formData: FormData,
 ): Promise<{ error: string } | null> {
   const client = await apiClient();
@@ -2745,7 +2747,7 @@ export default async function TodayPage() {
 }
 ```
 
-`student-today.tsx` (server component): compute `const window = submissionWindow(new Date());` — `window.targetDates` are the only submittable dates (FR-15 by construction in the UI too); fetch today's cycle days via `listMyDays({ client })` and pick the entries/absence for each target date. Render: `PageTitle` "Today"; the `EntryComposer` (pass `targetDates` and per-date absence state); beneath it, for each target date, the existing entries (body + submitted time + Late/Extra flag text) inside a `Panel`, and the absence toggle — a form posting `markAbsent` (date + reason inputs) when no absence and no entries, or the recorded reason with a quiet remove `Button` posting `removeAbsence` when marked. Deadline copy per §11: `You can still submit for {date} until {graceClosesAt formatted in Asia/Colombo}` — format with `Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Colombo", … })`.
+`student-today.tsx` (server component): compute `const window = submissionWindow(new Date());` — `window.targetDates` are the only submittable dates (FR-15 by construction in the UI too); fetch the day views via `listMyDays({ client, query: { from: <oldest targetDate>, to: <newest targetDate> } })` — an explicit range spanning the window, NOT the bare default-cycle call. *(Correction 2026-08-02: on the 10th of a month the window's oldest target can fall in the previous cycle, and the default range would silently drop it.)* Also: the page must preserve `data-testid="user-name"` AND `data-testid="user-role"` on BOTH role branches — `apps/web/e2e/signin.spec.ts` asserts both; visually-hidden spans are fine. Render: `PageTitle` "Today"; the `EntryComposer` (pass `targetDates` and per-date absence state); beneath it, for each target date, the existing entries (body + submitted time + Late/Extra flag text) inside a `Panel`, and the absence toggle — a form posting `markAbsent` (date + reason inputs) when no absence and no entries, or the recorded reason with a quiet remove `Button` posting `removeAbsence` when marked. Deadline copy per §11: `You can still submit for {date} until {graceClosesAt formatted in Asia/Colombo}` — format with `Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Colombo", … })`.
 
 - [ ] **Step 4: The composer (client)**
 
