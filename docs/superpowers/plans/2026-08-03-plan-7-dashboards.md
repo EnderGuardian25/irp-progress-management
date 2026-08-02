@@ -2131,7 +2131,7 @@ DATABASE_URL='postgresql://irp:irp@127.0.0.1:5433/irp?schema=public' \
   pnpm --filter @irp/api exec vitest run test/dashboard-service.test.ts
 ```
 
-Expected: PASS, all twelve tests.
+Expected: PASS — every test in the file, the pre-existing ones included. (Do not treat a specific count here as authoritative: earlier tasks' fix waves add tests to this same file, so the total drifts.)
 
 - [ ] **Step 7: Add the route, its query schema and its tests**
 
@@ -2660,7 +2660,7 @@ DATABASE_URL='postgresql://irp:irp@127.0.0.1:5433/irp?schema=public' \
   pnpm --filter @irp/api exec vitest run test/dashboard-service.test.ts
 ```
 
-Expected: PASS, all sixteen tests.
+Expected: PASS — every test in the file, the pre-existing ones included; the exact total drifts as earlier fix waves add to it.
 
 - [ ] **Step 7: Add the route and its tests**
 
@@ -2956,7 +2956,7 @@ export function toBatchRibbonDays(days: DayComplianceLike[], today: string): Rib
 pnpm --filter @irp/web exec vitest run test/ribbon.test.ts
 ```
 
-Expected: PASS, twelve tests.
+Expected: PASS — all eleven tests.
 
 - [ ] **Step 5: Record the precedence in the design system**
 
