@@ -3025,7 +3025,9 @@ export async function saveDayRecord(
 
 - [ ] **Step 4: The day-record form (client)**
 
-`day-record-form.tsx` — `useActionState(saveDayRecord, null)`; hidden `studentId`/`date` inputs; two labelled checkboxes (`attended`, `tasksCompleted`) defaulting from the roster's record when passed (pass `defaults?: { attended: boolean; tasksCompleted: boolean; note: string | null }` — the page does not have the record; fetch presence via the day view only, so pass `undefined` and let the form start unchecked with a `Saved records overwrite on save` hint); a `note` text input (maxLength 500); quiet `Button` "Save record"; `role="alert"` error line like Task 12.
+`day-record-form.tsx` — `useActionState(saveDayRecord, null)`; hidden `studentId`/`date` inputs; two labelled checkboxes (`attended`, `tasksCompleted`); a `note` text input (maxLength 500); quiet `Button` "Save record"; `role="alert"` error line like Task 12; a success line on save.
+
+*(Correction 2026-08-02, from the Task 14 review: the original "pass `undefined` and let the form start unchecked" instruction shipped a silent data-loss path — `upsertDayRecord` fully replaces the record, so reopening a recorded day to add a note wiped attendance to false/false with no signal. The form MUST prefill from the stored record. Since `DaySummary` deliberately carries no `DayRecord` — students must not receive the mentor's record via `/me/days`, which shares the schema — the review page gets its own mentor-only read: `GET /api/v1/students/{id}/day-records?from&to`, operationId `listDayRecords`, tag Reviews, 200 → array of `DayRecord`, 400/401/403/404/500, same range semantics as `listStudentDays`; `MentorRecordRepo` gains `listForStudent(studentId, from, to)` ordered date asc. The page fetches it alongside `listStudentDays`, builds a by-date map, and passes `defaults` to each form.)*
 
 - [ ] **Step 5: Tests + build + commit**
 
