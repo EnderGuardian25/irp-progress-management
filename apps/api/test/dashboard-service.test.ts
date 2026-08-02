@@ -19,6 +19,15 @@ const MON = civilDate("2026-08-03");
 const SAT = civilDate("2026-08-01");
 const NOW = colomboInstant(civilDate("2026-08-05"), "10:00");
 
+// 2026-10-10 is itself a Saturday (confirmed with @irp/core's dayOfWeek: it
+// is five weeks -- 35 days -- after the 2026-08-03 Monday anchor above, and
+// 35 is a multiple of 7), so the cycle it opens has no required day of its
+// own before the following Monday. cycleWorkingDays() over that cycle's
+// bounds ({ start: "2026-10-10", end: "2026-11-09" }) confirms its first
+// entry is 2026-10-12.
+const WEEKEND_CYCLE_START = civilDate("2026-10-10");
+const WEEKEND_CYCLE_FIRST_REQUIRED = civilDate("2026-10-12");
+
 describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
   const prisma = createPrismaClient(dbUrl!);
   const entryRepo = createEntryRepo(prisma);
@@ -142,6 +151,62 @@ describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
     // 2026-05-10 -> 2026-07-10 is two cycles on, so the current cycle is its 3rd.
     expect((await dashboards.batchToday(current.id, NOW)).cycle.seq).toBe(3);
     expect((await dashboards.batchToday(future.id, NOW)).cycle.seq).toBeNull();
+  });
+
+  it("clamps to the cycle's first required day when the cycle itself opens on a weekend", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Weekend Open", startDate: WEEKEND_CYCLE_START, endDate: civilDate("2027-04-09"),
+    });
+    const s = await student("dash-weekend-open", "Weekend Open");
+    await batchRepo.enrol(s.id, batch.id, WEEKEND_CYCLE_START);
+
+    // "Now" is the cycle-opening Saturday itself, before any required day of
+    // the cycle has arrived.
+    const view = await dashboards.batchToday(batch.id, colomboInstant(WEEKEND_CYCLE_START, "12:00"));
+
+    expect(view.date).toBe(WEEKEND_CYCLE_FIRST_REQUIRED);
+    expect(view.isFallbackDay).toBe(true);
+    expect(view.dayNumber).toBe(1);
+    expect(view.counts.enrolled).toBe(1);
+    expect(view.counts.submitted).toBe(0);
+    expect(view.counts.late).toBe(0);
+    expect(view.counts.absent).toBe(0);
+    expect(view.counts.missed).toBe(0);
+    expect(view.counts.pending).toBe(0);
+  });
+
+  it("returns a full days array with zero enrolled counts for a batch with no enrolments", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch No Enrolments", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+
+    const view = await dashboards.batchToday(batch.id, NOW);
+
+    expect(view.days).toHaveLength(view.cycle.requiredDayCount);
+    expect(view.days.every((d) => d.enrolled === 0)).toBe(true);
+    expect(view.extraCount).toBe(0);
+    expect(view.extraAfter).toEqual([]);
+  });
+
+  it("drops a weekend Extra whose anchor precedes the cycle start, rather than mis-attributing it", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Weekend Extra At Open", startDate: WEEKEND_CYCLE_START, endDate: civilDate("2027-04-09"),
+    });
+    const s = await student("dash-weekend-extra-open", "Weekend Extra Open");
+    await batchRepo.enrol(s.id, batch.id, WEEKEND_CYCLE_START);
+    // WEEKEND_CYCLE_START (2026-10-10) is the Saturday the cycle itself opens
+    // on. previousWeekday(2026-10-10) is 2026-10-09 (the preceding Friday),
+    // which precedes the cycle's own start -- the branch under test.
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: WEEKEND_CYCLE_START, body: "Weekend polish before the cycle's first weekday.",
+      submittedAt: colomboInstant(WEEKEND_CYCLE_START, "11:00"),
+    });
+
+    const view = await dashboards.batchToday(batch.id, colomboInstant(WEEKEND_CYCLE_FIRST_REQUIRED, "10:00"));
+
+    expect(view.extraCount).toBe(1);
+    expect(view.extraAfter).toEqual([]);
+    expect(view.days.some((d) => d.date === WEEKEND_CYCLE_START)).toBe(false);
   });
 
   it("throws BatchNotFoundError for an unknown batch id", async () => {
