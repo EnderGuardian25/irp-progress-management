@@ -17,10 +17,19 @@ const { getCurrentUserOrRedirect, apiClient } = vi.hoisted(() => ({
 vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
 
 // student-today.tsx calls listMyDays; mocked so the student branch never
-// needs a real client or network access.
-const { listMyDays } = vi.hoisted(() => ({ listMyDays: vi.fn() }));
+// needs a real client or network access. createEntry/createAbsence/
+// deleteAbsence are also exported from "@irp/client" and imported
+// (transitively, via entry-actions.ts <- entry-composer.tsx/absence-toggle.tsx)
+// by the tree StudentToday renders -- an honest mock declares them too,
+// even though these tests never submit a form and so never call them.
+const { listMyDays, createEntry, createAbsence, deleteAbsence } = vi.hoisted(() => ({
+  listMyDays: vi.fn(),
+  createEntry: vi.fn(),
+  createAbsence: vi.fn(),
+  deleteAbsence: vi.fn(),
+}));
 
-vi.mock("@irp/client", () => ({ listMyDays }));
+vi.mock("@irp/client", () => ({ listMyDays, createEntry, createAbsence, deleteAbsence }));
 
 /**
  * TodayPage() returns `<StudentToday .../>` unresolved on the Student

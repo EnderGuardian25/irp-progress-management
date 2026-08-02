@@ -1,14 +1,14 @@
 import { listMyDays, type Role } from "@irp/client";
-import { isWeekday, submissionWindow } from "@irp/core";
+import { graceDeadlineFor, isWeekday, submissionWindow } from "@irp/core";
 import { apiClient } from "@/lib/api-client";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
-import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EntryComposer } from "./entry-composer";
-import { markAbsent, removeAbsence } from "./entry-actions";
+import { AbsenceToggle } from "./absence-toggle";
+import { formatCivilDateLabel, formatWeekdayName } from "./format-civil-date";
 
 // §11's deadline copy ("You can still submit for {date} until …") is always
 // evaluated in Asia/Colombo, never the deploy region's local zone.
@@ -47,6 +47,10 @@ export async function StudentToday({ displayName, role }: { displayName: string;
   const { data, error } = await listMyDays(query !== undefined ? { client, query } : { client });
 
   const byDate = new Map((data ?? []).map((day) => [day.date, day]));
+  // submissionWindow() always includes today as the most recent target
+  // (index 0, since targetDates is most-recent-first) -- see its own
+  // "Today is always submittable" invariant.
+  const today = openWindow.targetDates[0];
 
   return (
     <div>
@@ -80,20 +84,26 @@ export async function StudentToday({ displayName, role }: { displayName: string;
           const absenceReason = day?.absenceReason ?? null;
           const weekday = isWeekday(date);
           const noRecord = entries.length === 0 && absenceReason === null;
+          const isToday = date === today;
+          // Review correction: the deadline is PER TARGET, not the window-
+          // level graceClosesAt -- that value is the OLDEST target's
+          // deadline (the one closing soonest) and understates every newer
+          // panel's actual window.
+          const deadline = graceDeadlineFor(date);
 
           return (
             <Panel key={date}>
               <div className="mb-3 flex items-center justify-between">
-                <SectionLabel>{date}</SectionLabel>
-                {day !== undefined && (
+                <SectionLabel>{formatCivilDateLabel(date)}</SectionLabel>
+                {day !== undefined && day.status !== "none" && (
                   <StatusPill status={day.status} reportStatus={day.reportStatus} />
                 )}
               </div>
 
               {noRecord && (
                 <EmptyState
-                  title="No entry for today yet."
-                  hint={`You can still submit for ${date} until ${DEADLINE_FORMAT.format(openWindow.graceClosesAt)}.`}
+                  title={isToday ? "No entry for today yet." : `No entry for ${formatWeekdayName(date)} yet.`}
+                  hint={`You can still submit for ${formatWeekdayName(date)} until ${DEADLINE_FORMAT.format(deadline)}.`}
                 />
               )}
 
@@ -110,47 +120,8 @@ export async function StudentToday({ displayName, role }: { displayName: string;
                 </div>
               ))}
 
-              {weekday && noRecord && (
-                <form
-                  action={async (formData: FormData) => {
-                    "use server";
-                    // A form's `action` prop must return void|Promise<void>;
-                    // markAbsent's own return type carries the error for
-                    // useActionState callers elsewhere, so this inline
-                    // server action adapts it rather than surfacing the
-                    // mismatch by loosening markAbsent's own signature.
-                    await markAbsent(formData);
-                  }}
-                  className="mt-3 flex items-end gap-2"
-                >
-                  <input type="hidden" name="date" value={date} />
-                  <label className="flex flex-1 flex-col gap-1">
-                    <SectionLabel>Mark absent</SectionLabel>
-                    <input
-                      name="reason"
-                      required
-                      placeholder="Reason"
-                      aria-label={`Absence reason for ${date}`}
-                      className="rounded-[var(--radius-control)] border px-3 py-2"
-                      style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
-                    />
-                  </label>
-                  <Button type="submit" variant="quiet">Mark absent</Button>
-                </form>
-              )}
-
-              {weekday && absenceReason !== null && (
-                <div className="mt-3 flex items-center justify-between">
-                  <p style={{ color: "var(--ink-muted)" }}>Marked absent — {absenceReason}</p>
-                  <form
-                    action={async () => {
-                      "use server";
-                      await removeAbsence(date);
-                    }}
-                  >
-                    <Button type="submit" variant="quiet">Remove</Button>
-                  </form>
-                </div>
+              {weekday && (noRecord || absenceReason !== null) && (
+                <AbsenceToggle date={date} absenceReason={absenceReason} />
               )}
             </Panel>
           );

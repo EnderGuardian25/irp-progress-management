@@ -22,6 +22,9 @@ export default async function TodayPage() {
           every branch. This card's design doesn't otherwise surface role
           (the mentor already knows they're a mentor); visually hidden,
           same pattern as user-name on the Student branch.
+
+          From GET /api/v1/me — the User row, the only source of truth.
+          Never from the session cookie.
         */}
         <span className="sr-only" data-testid="user-role">{user.role}</span>
         <p className="mt-2 text-sm" style={{ color: "var(--ink-muted)" }}>

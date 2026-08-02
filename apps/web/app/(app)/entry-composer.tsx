@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/ui/section-label";
 import { submitEntry } from "./entry-actions";
+import { formatCivilDateLabel } from "./format-civil-date";
 
 export function EntryComposer({ targetDates }: { targetDates: string[] }) {
   const [state, action, pending] = useActionState(submitEntry, null);
@@ -13,13 +14,20 @@ export function EntryComposer({ targetDates }: { targetDates: string[] }) {
       <SectionLabel>Submit an update</SectionLabel>
       <select
         name="entryDate"
-        defaultValue={targetDates[targetDates.length - 1] ?? ""}
+        // targetDates is most-recent-first, so index 0 is TODAY. Defaulting
+        // to the last index (a review-caught defect) preselected the OLDEST
+        // target -- yesterday on any normal Tue-Fri visit -- so the
+        // untouched fast path filed today's work against yesterday and the
+        // API flagged it Late.
+        defaultValue={targetDates[0] ?? ""}
         aria-label="Entry date"
         className="rounded-[var(--radius-control)] border px-3 py-2"
         style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
       >
         {targetDates.map((d) => (
-          <option key={d} value={d}>{d}</option>
+          // The ISO value is the wire format the server action reads;
+          // the label is student-facing copy, so it gets the weekday name.
+          <option key={d} value={d}>{formatCivilDateLabel(d)}</option>
         ))}
       </select>
       <textarea

@@ -21,9 +21,13 @@ describe("EntryComposer", () => {
     expect(options).toEqual(["2026-07-31", "2026-07-30"]);
   });
 
-  it("defaults to the oldest offered date -- the one whose grace closes soonest", () => {
+  it("defaults to the most recent offered date -- today, the untouched fast path", () => {
+    // Regression guard: an earlier version defaulted to index length-1 (the
+    // OLDEST target, since targetDates is most-recent-first), so the
+    // untouched fast path filed today's work against yesterday's date and
+    // the API flagged it Late.
     render(<EntryComposer targetDates={["2026-07-31", "2026-07-30"]} />);
-    expect(screen.getByLabelText("Entry date")).toHaveValue("2026-07-30");
+    expect(screen.getByLabelText("Entry date")).toHaveValue("2026-07-31");
   });
 
   it("renders no error before any submission", () => {
