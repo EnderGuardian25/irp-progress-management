@@ -113,7 +113,8 @@ exporter and nothing else changes.
 **What exists now**
 
 ```
-spec/openapi.yaml        OpenAPI 3.1, two operations, lints clean under recommended-strict
+spec/openapi.yaml        OpenAPI 3.1, 17 operations across 15 paths, lints clean under
+                         recommended-strict (two of those operations predate Plan 6)
 packages/core/           the cycle/date engine. Builds to dist/. 112 tests
 packages/types/          GENERATED, git-ignored, never committed
 packages/client/         GENERATED, git-ignored, never committed
@@ -128,7 +129,9 @@ apps/web/                Next.js 16 — Auth.js v5, route groups ((auth) bare, (
                          verified design tokens, app frame, CycleRibbon, server-only API client
                          factory, proxy guard. 141 unit tests + 15 Playwright tests
 apps/web/lib/dev-identity.ts     THE DEV BYPASS. server-only. Mints RS256 tokens with a local
-                         key. Guarded at three entry points — see ADR-0012
+                         key. FOUR entry points need the guard, covered by THREE call sites —
+                         the counts differ, which is exactly why "it's the same call" kept
+                         being wrong. See CLAUDE.md and ADR-0012 before touching it
 apps/web/e2e/            Playwright — signin.spec.ts (the sign-in chain) plus, as of Task 16,
                          student-flows.spec.ts and mentor-flows.spec.ts (Plan 6's submission and
                          review screens over the seeded personas)
