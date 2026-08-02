@@ -17,7 +17,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex flex-col" style={{ minHeight: "100dvh" }}>
       <Topbar userName={user.displayName} />
       <div className="flex flex-1">
-        <Sidebar />
+        <Sidebar role={user.role} />
         <main className="flex-1 p-8" style={{ background: "var(--bg)" }}>
           {children}
         </main>
