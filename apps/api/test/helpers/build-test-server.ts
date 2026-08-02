@@ -33,6 +33,7 @@ export async function buildTestServer(databaseUrl: string): Promise<{
     entryRepo,
     absenceRepo,
     batchRepo,
+    mentorRecordRepo,
     dayService,
     rosterService: createRosterService({ batchRepo, dayService, mentorRecordRepo }),
     getKey: await getLocalKeySet(),

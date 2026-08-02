@@ -55,3 +55,33 @@ export const ROSTER_QUERY = {
   additionalProperties: false,
   properties: { date: { type: "string", format: "date" } },
 } as const;
+
+export const TRANSITION_BODY = {
+  type: "object",
+  required: ["to"],
+  additionalProperties: false,
+  properties: {
+    to: { type: "string", enum: ["InReview", "Evaluated"] },
+  },
+} as const;
+
+export const DAY_RECORD_BODY = {
+  type: "object",
+  required: ["attended", "tasksCompleted"],
+  additionalProperties: false,
+  properties: {
+    attended: { type: "boolean" },
+    tasksCompleted: { type: "boolean" },
+    note: { type: "string", maxLength: 500 },
+  },
+} as const;
+
+export const STUDENT_DATE_PARAM = {
+  type: "object",
+  required: ["id", "date"],
+  additionalProperties: false,
+  properties: {
+    id: { type: "string", format: "uuid" },
+    date: { type: "string", format: "date" },
+  },
+} as const;

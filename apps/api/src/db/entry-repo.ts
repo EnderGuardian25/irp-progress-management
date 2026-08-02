@@ -1,6 +1,11 @@
 import type { CivilDate } from "@irp/core";
 import { decideEntryFlags } from "../domain/entry-flags.js";
-import { AbsentDayConflictError, LockedDayError } from "../domain/errors.js";
+import {
+  AbsentDayConflictError,
+  LockedDayError,
+  ReportNotFoundError,
+  InvalidTransitionError,
+} from "../domain/errors.js";
 import type { DailyReportStatus, PrismaClient } from "../generated/prisma/client.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
 import { lockStudentDay } from "./day-lock.js";
@@ -32,6 +37,12 @@ export interface EntryRepo {
   listEntries(studentId: string, from: CivilDate, to: CivilDate): Promise<EntryRecord[]>;
   getReport(studentId: string, date: CivilDate): Promise<DailyReportRecord | null>;
   listReports(studentId: string, from: CivilDate, to: CivilDate): Promise<DailyReportRecord[]>;
+  transition(
+    reportId: string,
+    to: "IN_REVIEW" | "EVALUATED",
+    mentorId: string,
+    now: Date,
+  ): Promise<DailyReportRecord>;
 }
 
 interface DbEntry {
@@ -121,6 +132,28 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
       return rows.map((r) => ({
         id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status,
       }));
+    },
+
+    // updateMany with the expected current status in the `where` is the
+    // concurrency guard: two mentors racing the same step both attempt the
+    // same conditional update, and exactly one sees count === 1.
+    async transition(reportId, to, mentorId, now) {
+      const expected = to === "IN_REVIEW" ? "SUBMITTED" : "IN_REVIEW";
+      const data =
+        to === "IN_REVIEW"
+          ? { status: to, reviewedById: mentorId, inReviewAt: now }
+          : { status: to, reviewedById: mentorId, evaluatedAt: now };
+      const { count } = await prisma.dailyReport.updateMany({
+        where: { id: reportId, status: expected },
+        data,
+      });
+      if (count === 0) {
+        const current = await prisma.dailyReport.findUnique({ where: { id: reportId } });
+        if (!current) throw new ReportNotFoundError(reportId);
+        throw new InvalidTransitionError(current.status, to);
+      }
+      const r = await prisma.dailyReport.findUniqueOrThrow({ where: { id: reportId } });
+      return { id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status };
     },
   };
 }

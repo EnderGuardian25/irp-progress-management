@@ -46,7 +46,7 @@ export function resolveRange(from?: string, to?: string, now = new Date()) {
   return { from: f, to: t };
 }
 
-const DAYS_QUERY = {
+export const DAYS_QUERY = {
   type: "object",
   additionalProperties: false,
   properties: {

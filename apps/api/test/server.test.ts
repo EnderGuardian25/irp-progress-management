@@ -10,6 +10,7 @@ import { fakeUserRepo } from "./helpers/fake-user-repo.js";
 import { unusedEntryRepo } from "./helpers/fake-entry-repo.js";
 import { unusedAbsenceRepo } from "./helpers/fake-absence-repo.js";
 import { unusedBatchRepo } from "./helpers/fake-batch-repo.js";
+import { unusedMentorRecordRepo } from "./helpers/fake-mentor-record-repo.js";
 import { unusedDayService } from "./helpers/fake-day-service.js";
 import { unusedRosterService } from "./helpers/fake-roster-service.js";
 import { problemSchema } from "./helpers/problem-schema.js";
@@ -32,6 +33,7 @@ beforeAll(async () => {
     entryRepo: unusedEntryRepo(),
     absenceRepo: unusedAbsenceRepo(),
     batchRepo: unusedBatchRepo(),
+    mentorRecordRepo: unusedMentorRecordRepo(),
     dayService: unusedDayService(),
     rosterService: unusedRosterService(),
     getKey,

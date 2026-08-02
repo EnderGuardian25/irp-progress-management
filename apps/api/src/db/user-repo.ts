@@ -13,6 +13,12 @@ export interface UserRecord {
 
 export interface UserRepo {
   findByExternalId(externalId: string): Promise<UserRecord | null>;
+  // Unfiltered by deletedAt, unlike findByExternalId — includes archived
+  // users. Callers decide whether an archived user is acceptable for their
+  // purpose (e.g. reviews.ts still rejects a non-STUDENT role, but does not
+  // reject an archived one; FR-5 hiding is a login-time concern, not this
+  // lookup's).
+  findById(id: string): Promise<(UserRecord & { deletedAt: Date | null }) | null>;
 }
 
 export function createUserRepo(prisma: PrismaClient): UserRepo {
@@ -28,6 +34,19 @@ export function createUserRepo(prisma: PrismaClient): UserRepo {
         email: u.email,
         displayName: u.displayName,
         role: u.role,
+      };
+    },
+
+    async findById(id) {
+      const u = await prisma.user.findUnique({ where: { id } });
+      if (!u) return null;
+      return {
+        id: u.id,
+        externalId: u.externalId,
+        email: u.email,
+        displayName: u.displayName,
+        role: u.role,
+        deletedAt: u.deletedAt,
       };
     },
   };

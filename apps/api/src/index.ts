@@ -35,7 +35,8 @@ await bootstrap({
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
     const app = await buildServer({
-      config, userRepo, entryRepo, absenceRepo, batchRepo, dayService, rosterService, getKey, tracerProvider,
+      config, userRepo, entryRepo, absenceRepo, batchRepo, mentorRecordRepo,
+      dayService, rosterService, getKey, tracerProvider,
     });
 
     registerShutdown({

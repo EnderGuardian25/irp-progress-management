@@ -39,6 +39,8 @@ tags:
     description: Explicitly recorded weekday absences. Recorded, not requested — there is no approval workflow.
   - name: Batches
     description: Cohorts and their enrolment rosters. Mentor (Admin) access only.
+  - name: Reviews
+    description: Mentor review of daily reports — forward-only state, attendance records, and the per-student day view.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -480,6 +482,203 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/daily-reports/{id}/transition:
+    post:
+      operationId: transitionDailyReport
+      summary: Advance a daily report's review state
+      description: |
+        Moves one report forward one step (FR-18): Submitted to InReview, or
+        InReview to Evaluated. Forward-only — there is no Rejected state and
+        no way back. The current state must match what the target expects
+        (409 otherwise); an `updateMany` guarded on the expected current
+        state makes two mentors racing the same step resolve to exactly one
+        winner rather than a lost update.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The daily report id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionRequest'
+      responses:
+        '200':
+          description: The report in its new state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReport'
+              examples:
+                inReview:
+                  summary: Moved from Submitted to InReview
+                  value:
+                    id: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                    studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    reportDate: '2026-08-03'
+                    status: InReview
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/students/{id}/day-records/{date}:
+    put:
+      operationId: upsertDayRecord
+      summary: Record (or update) a mentor's attendance/tasks note for a student-day
+      description: |
+        Stores the mentor's own attendance and task-completion record for one
+        student and one weekday (FR-19). Independent of entries — valid for a
+        day that holds no submission. A second call for the same student and
+        date overwrites the first; there is one record per student-day.
+        Weekends carry no such record (400) — there is nothing to attend.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        - name: date
+          in: path
+          required: true
+          description: The weekday the record applies to.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-03'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DayRecordUpsert'
+      responses:
+        '200':
+          description: The stored record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DayRecord'
+              examples:
+                recorded:
+                  summary: Attendance and tasks recorded
+                  value:
+                    id: 8c7b6a5d-4e3f-4d2c-9b1a-0f9e8d7c6b5a
+                    studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    date: '2026-08-03'
+                    attended: true
+                    tasksCompleted: true
+                    note: Paired on the deployment workflow.
+                    recordedById: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/students/{id}/days:
+    get:
+      operationId: listStudentDays
+      summary: A target student's rolled-up day history
+      description: |
+        The same day-by-day view `listMyDays` returns, but for a student the
+        mentor names rather than the caller — one element per calendar day in
+        the range, oldest first. Mentor only; a student token receives 403.
+
+        Defaults to the current evaluation cycle (the 10th of the month to
+        the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        - name: from
+          in: query
+          required: false
+          description: First day of the range (inclusive). Defaults to the current cycle's start.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-07-10'
+        - name: to
+          in: query
+          required: false
+          description: Last day of the range (inclusive). Defaults to the current cycle's end. Ranges over 92 days are rejected.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-09'
+      responses:
+        '200':
+          description: The day-by-day view, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DaySummary'
+              examples:
+                oneDay:
+                  summary: A single reviewed weekday
+                  value:
+                    - date: '2026-08-03'
+                      status: onTime
+                      reportStatus: InReview
+                      reportId: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                      absenceReason: null
+                      entries:
+                        - id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                          entryDate: '2026-08-03'
+                          body: Implemented the roster endpoint and its tests.
+                          submittedAt: '2026-08-03T11:30:00.000Z'
+                          isLate: false
+                          isExtra: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -882,6 +1081,121 @@ components:
           description: Weekend Extra entries inside the cycle containing the roster date. A count, not a status — Extra is not a compliance state.
           examples:
             - 2
+
+    TransitionRequest:
+      type: object
+      title: TransitionRequest
+      description: Advance a report one step. Forward-only — Submitted to InReview to Evaluated; there is no Rejected and no way back.
+      required: [to]
+      additionalProperties: false
+      properties:
+        to:
+          type: string
+          enum: [InReview, Evaluated]
+          description: The target state. InReview requires the report to be Submitted; Evaluated requires InReview.
+          examples:
+            - InReview
+
+    DailyReport:
+      type: object
+      title: DailyReport
+      description: One student-day's rolled-up review record (FR-18/FR-20).
+      required: [id, studentId, reportDate, status]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Report identifier.
+          examples:
+            - 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+        studentId:
+          type: string
+          format: uuid
+          description: The student the report belongs to.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        reportDate:
+          type: string
+          format: date
+          description: The civil date the report rolls up.
+          examples:
+            - '2026-08-03'
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+
+    DayRecordUpsert:
+      type: object
+      title: DayRecordUpsert
+      description: The mentor's own attendance/tasks record for a student-day (FR-19). Independent of entries — valid for entry-less days.
+      required: [attended, tasksCompleted]
+      additionalProperties: false
+      properties:
+        attended:
+          type: boolean
+          description: Whether the student attended.
+          examples:
+            - true
+        tasksCompleted:
+          type: boolean
+          description: Whether the day's tasks were completed.
+          examples:
+            - true
+        note:
+          type: string
+          maxLength: 500
+          description: Optional free-text note.
+          examples:
+            - Paired on the deployment workflow.
+
+    DayRecord:
+      type: object
+      title: DayRecord
+      description: A stored mentor day record.
+      required: [id, studentId, date, attended, tasksCompleted, note, recordedById]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Record identifier.
+          examples:
+            - 8c7b6a5d-4e3f-4d2c-9b1a-0f9e8d7c6b5a
+        studentId:
+          type: string
+          format: uuid
+          description: The student.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        date:
+          type: string
+          format: date
+          description: The weekday recorded.
+          examples:
+            - '2026-08-03'
+        attended:
+          type: boolean
+          description: Attendance as recorded by the mentor.
+          examples:
+            - true
+        tasksCompleted:
+          type: boolean
+          description: Task completion as recorded by the mentor.
+          examples:
+            - true
+        note:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: The mentor's note, when one was recorded.
+          examples:
+            - Paired on the deployment workflow.
+        recordedById:
+          type: string
+          format: uuid
+          description: The mentor who recorded it.
+          examples:
+            - 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
 
   responses:
     BadRequest:

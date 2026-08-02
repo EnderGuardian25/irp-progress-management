@@ -139,3 +139,39 @@ export class DuplicateBatchNameError extends DomainError {
     super(`A batch named "${name}" already exists.`);
   }
 }
+
+export class ReportNotFoundError extends DomainError {
+  readonly code = "report-not-found";
+  readonly status = 404;
+  readonly title = "Report not found";
+  constructor(id: string) {
+    super(`No daily report exists with id ${id}.`);
+  }
+}
+
+export class InvalidTransitionError extends DomainError {
+  readonly code = "invalid-transition";
+  readonly status = 409;
+  readonly title = "Invalid review transition";
+  constructor(from: string, to: string) {
+    super(`A report in state ${from} cannot move to ${to} — review is forward-only (FR-18), with no Rejected state.`);
+  }
+}
+
+export class WeekendDayRecordError extends DomainError {
+  readonly code = "weekend-day-record";
+  readonly status = 400;
+  readonly title = "Weekends have no day record";
+  constructor(date: string) {
+    super(`${date} is a weekend — attendance records apply to required days only (FR-19).`);
+  }
+}
+
+export class StudentNotFoundError extends DomainError {
+  readonly code = "student-not-found";
+  readonly status = 404;
+  readonly title = "Student not found";
+  constructor(id: string) {
+    super(`No student exists with id ${id}.`);
+  }
+}
