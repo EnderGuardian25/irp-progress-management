@@ -2890,7 +2890,14 @@ export default async function RosterPage({
   const { batchId, date } = await searchParams;
 
   const client = await apiClient();
-  const { data: batches } = await listBatches({ client });
+  // Correction 2026-08-02: destructure error too. Discarding it made a
+  // backend outage indistinguishable from an empty batch list — the page
+  // told a mentor facing a 5xx to "create one from the Students page".
+  const { data: batches, error: batchesError } = await listBatches({ client });
+  if (batchesError !== undefined) {
+    /* render a Panel with the problem detail — same treatment as the
+       roster error path */
+  }
   if (batches === undefined || batches.length === 0) {
     return (
       <div>
