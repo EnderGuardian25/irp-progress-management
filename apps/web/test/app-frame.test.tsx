@@ -54,18 +54,23 @@ describe("Sidebar", () => {
     }
   });
 
-  it("mentor (Admin) role: Roster is a real link; Review, Cycles, Students stay non-interactive", () => {
-    // Task 13 added apps/web/app/(app)/roster/page.tsx, so Roster is now a
-    // real link. Students lands in Task 15, Review in Task 14, Cycles in
-    // Plan 7 -- typedRoutes rejects a Link to any of the three, so they stay
-    // non-interactive until their own task lands.
+  it("mentor (Admin) role: Roster and Review are real links; Cycles, Students stay non-interactive", () => {
+    // Task 13 added apps/web/app/(app)/roster/page.tsx and Task 14 added
+    // apps/web/app/(app)/review/page.tsx, so both are now real links.
+    // Students lands in Task 15, Cycles in Plan 7 -- typedRoutes rejects a
+    // Link to either, so they stay non-interactive until their own task
+    // lands.
     render(<Sidebar role="Admin" />);
 
     const roster = screen.getByRole("link", { name: /Roster/ });
     expect(roster).toHaveAttribute("href", "/roster");
     expect(roster).not.toHaveAttribute("aria-disabled");
 
-    for (const item of ["Review", "Cycles", "Students"]) {
+    const review = screen.getByRole("link", { name: /^Review$/ });
+    expect(review).toHaveAttribute("href", "/review");
+    expect(review).not.toHaveAttribute("aria-disabled");
+
+    for (const item of ["Cycles", "Students"]) {
       expect(screen.queryByRole("link", { name: new RegExp(item) })).not.toBeInTheDocument();
       const el = screen.getByText(new RegExp(item));
       expect(el).toHaveAttribute("aria-disabled", "true");
@@ -84,20 +89,20 @@ describe("Sidebar", () => {
     }
   });
 
-  it("shows a review count on the (non-link) Review item only when there is something to review", () => {
-    // getByText matches on each node's own direct text ("Review"), not the
-    // nested badge span's "3" — so read the full textContent to confirm the
-    // rendered name is "Review 3" with a space, not "Review3" run together.
-    // That spacing requirement is the same one a link's accessible name
-    // would need; it still applies now that the item is a plain span.
+  it("shows a review count on the Review link only when there is something to review", () => {
+    // Task 14 turned Review into a real Link; the badge logic itself
+    // (sidebar.tsx's showCount/badge) is unchanged and applies inside
+    // whichever element wraps the label, link or span. Reading
+    // textContent confirms the rendered name is "Review 3" with a space,
+    // not "Review3" run together.
     const { rerender } = render(<Sidebar role="Admin" reviewCount={3} />);
-    const withCount = screen.getByText(/^Review$/);
-    expect(withCount).toHaveAttribute("aria-disabled", "true");
+    const withCount = screen.getByRole("link", { name: /^Review/ });
+    expect(withCount).not.toHaveAttribute("aria-disabled");
     expect(withCount.textContent).toBe("Review 3");
 
     rerender(<Sidebar role="Admin" reviewCount={0} />);
-    const withoutCount = screen.getByText(/^Review$/);
-    expect(withoutCount).toHaveAttribute("aria-disabled", "true");
+    const withoutCount = screen.getByRole("link", { name: /^Review/ });
+    expect(withoutCount).not.toHaveAttribute("aria-disabled");
     expect(withoutCount.textContent).toBe("Review");
   });
 });

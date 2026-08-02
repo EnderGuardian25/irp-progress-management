@@ -197,11 +197,13 @@ export default async function RosterPage({
                   <td className="px-2 py-2">
                     {row.hasMentorRecord ? "✓ recorded" : "— none"}
                   </td>
-                  <td className="px-2 py-2" style={{ color: "var(--ink-muted)" }}>
-                    {/* Task 14 turns this into a Link to /review/[studentId]. typedRoutes
-                        rejects a Link to a route that doesn't exist yet, so this is
-                        plain text until that page lands. */}
-                    Review
+                  <td className="px-2 py-2">
+                    <Link
+                      href={`/review/${row.student.id}`}
+                      style={{ color: "var(--ink)", textDecoration: "underline" }}
+                    >
+                      Review
+                    </Link>
                   </td>
                 </tr>
               ))}

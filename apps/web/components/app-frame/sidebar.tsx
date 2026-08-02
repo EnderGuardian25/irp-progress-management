@@ -9,12 +9,12 @@ import Link from "next/link";
  * href>` against routes that actually exist. Task 9 added
  * `apps/web/app/(app)/page.tsx`, so "/" is a real route and Today is a real
  * link on both destination lists. Task 13 added `apps/web/app/(app)/roster/
- * page.tsx`, so Roster is now a real link too — but only on the mentor list;
- * Review and Cycles still have no page (Review lands in Task 14, Cycles in
- * Plan 7) and Students keeps its href out until Task 15 even though its page
- * doesn't exist yet either. Each destination becomes a real `<Link
- * href="...">` in the task that adds its page — no `as Route` casts in the
- * meantime.
+ * page.tsx`, so Roster is now a real link; Task 14 added
+ * `apps/web/app/(app)/review/page.tsx`, so Review is now a real link too —
+ * but only on the mentor list. Cycles still has no page (Plan 7) and
+ * Students keeps its href out until Task 15 even though its page doesn't
+ * exist yet either. Each destination becomes a real `<Link href="...">` in
+ * the task that adds its page — no `as Route` casts in the meantime.
  *
  * Navigation is role-gated, not just link-gated: a Student never sees
  * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
@@ -24,7 +24,7 @@ import Link from "next/link";
 const MENTOR_DESTINATIONS = [
   { label: "Today", href: "/" },
   { label: "Roster", href: "/roster" },
-  { label: "Review" },
+  { label: "Review", href: "/review" },
   { label: "Cycles" },
   { label: "Students" },
 ] as const;
