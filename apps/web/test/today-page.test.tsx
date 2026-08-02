@@ -1,18 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import TodayPage from "@/app/(app)/page";
 import { StudentToday } from "@/app/(app)/student-today";
 import { MentorToday } from "@/app/(app)/mentor-today";
 
 // TodayPage is a thin role dispatcher: Student -> StudentToday, everyone
-// else -> MentorToday. Both branches' own rendering is covered by their
-// dedicated suites (student-today's tests, mentor-today.test.tsx) -- this
-// file only proves the dispatch itself, so it mocks nothing those
-// components need and never renders either branch's tree.
-const { getCurrentUserOrRedirect } = vi.hoisted(() => ({
+// else -> MentorToday. The mentor branch's own rendering is covered by its
+// dedicated suite (mentor-today.test.tsx) -- there is no equivalent
+// student-today suite yet, so this file also renders the Student branch far
+// enough to prove the sign-in contract (user-name/user-role testids,
+// e2e/signin.spec.ts) survives the dispatch, rather than only asserting the
+// dispatch itself.
+const { getCurrentUserOrRedirect, apiClient } = vi.hoisted(() => ({
   getCurrentUserOrRedirect: vi.fn(),
+  apiClient: vi.fn(),
 }));
-vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect }));
+vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
+
+// student-today.tsx calls listMyDays; mocked so the Student branch never
+// needs a real client or network access. createEntry/createAbsence/
+// deleteAbsence are also exported from "@irp/client" and imported
+// (transitively, via entry-actions.ts <- entry-composer.tsx/absence-toggle.tsx)
+// by the tree StudentToday renders -- an honest mock declares them too, even
+// though this test never submits a form and so never calls them.
+const { listMyDays, createEntry, createAbsence, deleteAbsence } = vi.hoisted(() => ({
+  listMyDays: vi.fn(),
+  createEntry: vi.fn(),
+  createAbsence: vi.fn(),
+  deleteAbsence: vi.fn(),
+}));
+vi.mock("@irp/client", () => ({ listMyDays, createEntry, createAbsence, deleteAbsence }));
 
 const ADMIN_USER = {
   id: "1",
@@ -51,5 +69,24 @@ describe("TodayPage role branches", () => {
       displayName: "Dev Student",
       role: "Student",
     });
+  });
+
+  it("renders both sign-in-contract testids on the Student branch, carrying the exact role string", async () => {
+    // e2e/signin.spec.ts asserts data-testid="user-name" and
+    // data-testid="user-role" after sign-in for every role. TodayPage()
+    // returns `<StudentToday .../>` unresolved -- a React element
+    // referencing an async function component, not yet invoked --
+    // react-dom/client's render() cannot execute an async function
+    // component itself, so the nested async Server Component is resolved
+    // by hand here, the same way Next's own RSC runtime would.
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT_USER);
+    apiClient.mockResolvedValue({});
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    const element = await TodayPage();
+    render(await StudentToday(element.props as ComponentProps<typeof StudentToday>));
+
+    expect(screen.getByTestId("user-name")).toHaveTextContent("Dev Student");
+    expect(screen.getByTestId("user-role")).toHaveTextContent("Student");
   });
 });

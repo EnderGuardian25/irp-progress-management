@@ -9,7 +9,9 @@ const WEEKDAY_DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
 });
 
 /**
- * "Friday, 31 July" for an ISO calendar date ("YYYY-MM-DD").
+ * "Friday 31 July" for an ISO calendar date ("YYYY-MM-DD") -- no comma; that
+ * is what this Node/ICU build's "en-GB" long-weekday formatter actually
+ * produces, verified against the running test output.
  *
  * Built from a UTC-midnight instant carrying the exact year/month/day, then
  * formatted in Asia/Colombo. That zone's offset is positive (+05:30), so

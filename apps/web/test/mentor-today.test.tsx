@@ -94,6 +94,20 @@ describe("MentorToday", () => {
     expect(screen.queryByText(/Cycle null/)).not.toBeInTheDocument();
   });
 
+  it("renders the problem detail and still keeps the identity testids when listBatches itself errors", async () => {
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({
+      data: undefined,
+      error: { type: "about:blank", title: "Internal Server Error", status: 500, detail: "Could not load batches." },
+    });
+
+    render(await MentorToday({ displayName: "Dev Mentor", role: "Admin" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load batches.");
+    expect(screen.getByTestId("user-name")).toHaveTextContent("Dev Mentor");
+    expect(screen.getByTestId("user-role")).toHaveTextContent("Admin");
+  });
+
   it("shows an empty state pointing at Students when there are no batches", async () => {
     apiClient.mockResolvedValue({});
     listBatches.mockResolvedValue({ data: [] });
@@ -118,6 +132,16 @@ describe("MentorToday", () => {
 
     expect(screen.getByTestId("submitted-count-b1")).toHaveTextContent("8 of 10 submitted");
     expect(screen.getByRole("alert")).toHaveTextContent("Aggregation failed.");
+  });
+
+  it("omits the extra-this-cycle line when extraCount is zero", async () => {
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH] });
+    getBatchDashboardToday.mockResolvedValue({ data: dashboard({ extraCount: 0 }), error: undefined });
+
+    render(await MentorToday({ displayName: "Dev Mentor", role: "Admin" }));
+
+    expect(screen.queryByText(/extra this cycle/)).not.toBeInTheDocument();
   });
 
   it("keeps the sign-in chain's identity testids on the mentor branch", async () => {
