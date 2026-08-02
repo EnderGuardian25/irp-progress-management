@@ -1,0 +1,131 @@
+import { listBatches, getBatchDashboardToday, type Role } from "@irp/client";
+import { apiClient } from "@/lib/api-client";
+import { CycleRibbon } from "@/components/cycle-ribbon/cycle-ribbon";
+import { toBatchRibbonDays } from "@/lib/ribbon";
+import { PageTitle } from "@/components/ui/page-title";
+import { Panel } from "@/components/ui/panel";
+import { SectionLabel } from "@/components/ui/section-label";
+import { EmptyState } from "@/components/ui/empty-state";
+import { formatCivilDateLabel } from "./format-civil-date";
+
+/**
+ * FR-28, must-ship (SC-4). The warm zone: one cycle ribbon per batch, with
+ * "N of M submitted" and the late/absent/missed counts beside it — all of it
+ * above the fold at 1280x800 (docs/design-system.md §8.1). The roster is a
+ * separate page and is allowed to scroll; these figures are not.
+ *
+ * One dashboard call per batch, issued concurrently. A batch whose call fails
+ * renders its own alert and the others still render — a single 500 must not
+ * blank the mentor's home screen.
+ */
+export async function MentorToday({ displayName, role }: { displayName: string; role: Role }) {
+  const client = await apiClient();
+  const { data: batches, error: batchesError } = await listBatches({ client });
+
+  const identity = (
+    <>
+      {/* e2e/signin.spec.ts asserts both on every role. Visually hidden — the
+          Topbar already shows the name, and a mentor knows they are a mentor. */}
+      <span className="sr-only" data-testid="user-name">{displayName}</span>
+      <span className="sr-only" data-testid="user-role">{role}</span>
+    </>
+  );
+
+  if (batchesError !== undefined) {
+    return (
+      <div>
+        <PageTitle>Today</PageTitle>
+        {identity}
+        <Panel>
+          <p role="alert" style={{ color: "var(--st-missed)" }}>
+            {batchesError.detail ?? batchesError.title}
+          </p>
+        </Panel>
+      </div>
+    );
+  }
+
+  if (batches === undefined || batches.length === 0) {
+    return (
+      <div>
+        <PageTitle>Today</PageTitle>
+        {identity}
+        <Panel>
+          <EmptyState title="No batches yet." hint="Create one from the Students page." />
+        </Panel>
+      </div>
+    );
+  }
+
+  const dashboards = await Promise.all(
+    batches.map(async (b) => ({
+      batch: b,
+      result: await getBatchDashboardToday({ client, path: { id: b.id } }),
+    })),
+  );
+
+  return (
+    <div>
+      <PageTitle>Today</PageTitle>
+      {identity}
+
+      <div className="flex flex-col gap-6">
+        {dashboards.map(({ batch, result }) => {
+          if (result.data === undefined) {
+            return (
+              <Panel key={batch.id}>
+                <SectionLabel>{batch.name}</SectionLabel>
+                <p role="alert" className="mt-2" style={{ color: "var(--st-missed)" }}>
+                  {result.error?.detail ?? result.error?.title ?? "This batch's figures could not be loaded."}
+                </p>
+              </Panel>
+            );
+          }
+
+          const d = result.data;
+          const label =
+            d.cycle.seq === null
+              ? `${batch.name} · first evaluated cycle opens ${formatCivilDateLabel(d.cycle.startDate)}`
+              : `${batch.name} · Cycle ${String(d.cycle.seq)} · Day ${String(d.dayNumber)} of ${String(d.cycle.requiredDayCount)}`;
+
+          return (
+            <section key={batch.id} aria-label={batch.name}>
+              <CycleRibbon
+                days={toBatchRibbonDays([...d.days], d.date)}
+                extraAfter={[...d.extraAfter]}
+                label={label}
+              />
+
+              <div className="mt-3 flex flex-wrap items-baseline gap-6 text-sm">
+                <span className="tabular font-semibold" data-testid={`submitted-count-${batch.id}`} style={{ color: "var(--ink)" }}>
+                  {d.counts.submitted} of {d.counts.enrolled} submitted
+                </span>
+                <span className="tabular" data-testid={`late-count-${batch.id}`} style={{ color: "var(--st-late)" }}>
+                  {d.counts.late} late
+                </span>
+                <span className="tabular" data-testid={`absent-count-${batch.id}`} style={{ color: "var(--st-absent)" }}>
+                  {d.counts.absent} absent
+                </span>
+                <span className="tabular" data-testid={`missed-count-${batch.id}`} style={{ color: "var(--st-missed)" }}>
+                  {d.counts.missed} missed
+                </span>
+                {d.extraCount > 0 && (
+                  <span className="tabular" style={{ color: "var(--ink-muted)" }}>
+                    +{d.extraCount} extra this cycle
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-1" data-testid={`day-label-${batch.id}`}>
+                <SectionLabel>
+                  {formatCivilDateLabel(d.date)}
+                  {d.isFallbackDay && " · the last required day, not today"}
+                </SectionLabel>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

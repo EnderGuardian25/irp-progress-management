@@ -42,10 +42,21 @@ export DATABASE_URL='postgresql://irp:irp@127.0.0.1:5433/irp?schema=public'
 
 # A fresh clone needs all three generated directories before typecheck passes
 pnpm install
-pnpm generate                                   # packages/types + packages/client
+pnpm generate                                   # packages/types + packages/client SOURCE
 pnpm --filter @irp/api exec prisma generate     # apps/api/src/generated/prisma
 pnpm --filter @irp/core build                   # packages/core/dist
+pnpm --filter @irp/client build                 # packages/client/DIST — see below
 ```
+
+**`pnpm generate` is not enough on its own, and neither `pnpm typecheck` nor Vitest
+will tell you.** `packages/client/package.json` points `types` at `./dist/index.d.ts`
+while `default` resolves to `./src` — so bundler-based consumers (Vitest, the dev
+server) see freshly generated source, and only `next build` type-checks against
+`dist`. Add an operation to the spec, regenerate, and every local gate passes green
+while `dist` still lacks the new SDK function; the real build then fails with
+`Module '"@irp/client"' has no exported member '…'`. **CI is unaffected** — it runs
+`pnpm --filter @irp/client build` before `next build` (`.github/workflows/ci.yml`).
+This bit Task 6 locally after three spec-changing tasks had already landed.
 
 `apps/api` is addressed as `127.0.0.1`; the browser is driven at `localhost` (Next canonicalises loopback hostnames — see CLAUDE.md).
 
