@@ -852,7 +852,7 @@ The rolled-up day view: per date — entries, report status, and the server-comp
     interface DayService {
       listDays(studentId: string, from: CivilDate, to: CivilDate, now: Date): Promise<DayView[]>;
     }
-    function createDayService(deps: { entryRepo: EntryRepo; absenceRepo: AbsenceRepo }): DayService
+    function createDayService(deps: { entryRepo: EntryRepo; absenceRepo: AbsenceRepo; batchRepo: Pick<BatchRepo, "listEnrolments"> }): DayService
     ```
   - Route `GET /api/v1/me/days?from&to`, operationId `listMyDays`, any authenticated registered user. *(Correction 2026-08-02, from the Task 5 review: obligation is enrolment-clipped. `BatchRepo` gains `listEnrolments(studentId): Promise<EnrolmentRecord[]>`; the day service takes `batchRepo` as a third dep and, for any date not inside one of the student's enrolment intervals (`startDate <= d` and (`endDate` null or `>= d`)) with no entry recorded, returns status `none` instead of the engine classification — no enrolment, no obligation. A mentor therefore gets a list of `none` days, not `missed`; a mid-cycle joiner's pre-enrolment weekdays are `none`, not `missed`. The spec's `DayStatus` description says so explicitly. The earlier prose promising a mentor "an empty list" was wrong — the list shape is uniform; only the statuses differ.)* Defaults to the current calendar cycle (`cycleContaining(toProgrammeDate(now))`). Range longer than 92 days → 400 (`HttpError`, type `…/problems/range-too-wide`, title `Range too wide`).
   - API mapping (later tasks reuse): `REPORT_STATUS_TO_API: Record<DailyReportStatus, "Submitted" | "InReview" | "Evaluated">` exported from `me-days.ts`.
