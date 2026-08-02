@@ -35,6 +35,16 @@ describe("Button", () => {
     expect(btn).toBeDisabled();
     expect(btn).toHaveTextContent("Save");
   });
+
+  it("marks the error state with data-error when set", () => {
+    render(<Button error>Save</Button>);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveAttribute("data-error", "true");
+  });
+
+  it("omits data-error when not set", () => {
+    render(<Button>Save</Button>);
+    expect(screen.getByRole("button", { name: "Save" })).not.toHaveAttribute("data-error");
+  });
 });
 
 describe("StatusPill", () => {

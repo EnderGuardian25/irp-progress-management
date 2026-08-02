@@ -108,6 +108,8 @@ h1, h2, h3 {
 .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn[aria-busy="true"] { opacity: 0.7; cursor: progress; }
+/* Post-action failure treatment — persists until the next interaction. */
+.btn[data-error="true"] { border-color: var(--st-missed); color: var(--st-missed); }
 .btn-primary { background: var(--primary); color: var(--surface); border: 1px solid var(--primary); }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn-primary:active:not(:disabled) { filter: brightness(0.92); }
