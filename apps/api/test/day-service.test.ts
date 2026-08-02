@@ -180,7 +180,7 @@ describe.skipIf(!dbUrl)("createDayService", () => {
     expect(byDate.get(THU_MISSED)!.status).toBe("missed");
   });
 
-  it("listDaysForStudents classifies every requested student in one pass, and agrees with listDays student-by-student", async () => {
+  it("listDaysForStudents classifies every requested student in one pass", async () => {
     const batch = await batchRepo.create({
       name: "Batch Batched", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09"),
     });
@@ -210,10 +210,14 @@ describe.skipIf(!dbUrl)("createDayService", () => {
     expect(batched.get(one.id)![0]!.status).toBe("onTime");
     expect(batched.get(two.id)![0]!.status).toBe("missed");
 
-    for (const id of [one.id, two.id]) {
-      const single = await service.listDays(id, civilDate("2026-06-01"), civilDate("2026-06-05"), now);
-      expect(batched.get(id)).toEqual(single);
-    }
+    // Finding 5, Plan 7 whole-branch review: this test used to close with
+    // `expect(batched.get(id)).toEqual(await service.listDays(id, ...))` for
+    // each student, framed as proving `listDaysForStudents` "agrees with"
+    // `listDays`. That could never fail: `listDays` (day-service.ts) IS
+    // `listDaysForStudents([studentId], ...).get(studentId)` -- one
+    // implementation, not two independent ones to cross-check. No coverage is
+    // lost by removing it: `listDays`'s own behaviour is already covered
+    // directly, with richer fixtures, by the three tests above this one.
   });
 
   it("listDaysForStudents returns an empty map for an empty id list, without querying", async () => {

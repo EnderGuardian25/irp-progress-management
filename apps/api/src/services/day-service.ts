@@ -53,9 +53,9 @@ function isEnrolledOn(enrolments: EnrolmentRecord[], d: CivilDate): boolean {
  * `from`/`to` it is given.
  */
 export function createDayService(deps: {
-  entryRepo: Pick<EntryRepo, "listEntries" | "listReports" | "listEntriesForStudents" | "listReportsForStudents">;
-  absenceRepo: Pick<AbsenceRepo, "listForStudent" | "listForStudents">;
-  batchRepo: Pick<BatchRepo, "listEnrolments" | "listEnrolmentsForStudents">;
+  entryRepo: Pick<EntryRepo, "listEntriesForStudents" | "listReportsForStudents">;
+  absenceRepo: Pick<AbsenceRepo, "listForStudents">;
+  batchRepo: Pick<BatchRepo, "listEnrolmentsForStudents">;
 }): DayService {
   /** Group rows by studentId, seeding every requested id so no key is missing. */
   function groupBy<T extends { studentId: string }>(rows: T[], ids: string[]): Map<string, T[]> {

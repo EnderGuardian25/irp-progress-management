@@ -48,6 +48,8 @@ the day it moves.
 
 ## Consequences
 
-Four repository interfaces grow a batched sibling, and the DB-less test fakes
-grow with them. `listDays`'s single-student behaviour is unchanged and its
-existing tests are the regression guard for the delegation.
+Three repository interfaces grow four batched siblings between them —
+`EntryRepo` gains two (`listEntriesForStudents`, `listReportsForStudents`),
+`AbsenceRepo` and `BatchRepo` one each — and the DB-less test fakes grow with
+them. `listDays`'s single-student behaviour is unchanged and its existing
+tests are the regression guard for the delegation.

@@ -97,7 +97,7 @@ describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
     expect(monday.pending).toBe(0);
   });
 
-  it("top-level counts are exactly the days entry for the reported date", async () => {
+  it("top-level counts and dayNumber match independently derived figures for the reported date", async () => {
     const batch = await batchRepo.create({
       name: "Batch Agree", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
     });
@@ -106,10 +106,36 @@ describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
 
     const view = await dashboards.batchToday(batch.id, NOW);
 
-    expect(view.counts).toEqual(view.days.find((d) => d.date === view.date));
+    // Independently derived (scratch tsx run against @irp/core, see the
+    // fix-wave report): CYCLE_START's cycle (2026-07-10..2026-08-09) has 21
+    // weekdays; NOW is 2026-08-05 10:00, still inside that Wednesday, so
+    // today reports as its own required day at position 19 of 21. The lone
+    // enrolled student has no entry and grace has not closed yet (2026-08-05
+    // and 2026-08-04 are both still pending, per classifyDay), so the day is
+    // "pending", not "missed".
+    //
+    // Fixed here, Finding 5 of the Plan 7 whole-branch review: the previous
+    // version of this test compared `view.counts` against
+    // `view.days.find((d) => d.date === view.date)` and `view.dayNumber`
+    // against `view.days.findIndex(...) + 1` -- both are the EXACT expression
+    // the service uses to produce those fields, so the assertions could never
+    // fail. Pinning against independently derived literals instead makes this
+    // a real check of the service's behaviour, not just its internal
+    // self-consistency.
+    expect(view.date).toBe(civilDate("2026-08-05"));
+    expect(view.dayNumber).toBe(19);
+    expect(view.cycle.requiredDayCount).toBe(21);
+    expect(view.days).toHaveLength(21);
+    expect(view.counts).toEqual({
+      date: civilDate("2026-08-05"),
+      enrolled: 1,
+      submitted: 0,
+      late: 0,
+      absent: 0,
+      missed: 0,
+      pending: 1,
+    });
     expect(view.days.every((d) => d.date >= view.cycle.startDate && d.date <= view.cycle.endDate)).toBe(true);
-    expect(view.days).toHaveLength(view.cycle.requiredDayCount);
-    expect(view.dayNumber).toBe(view.days.findIndex((d) => d.date === view.date) + 1);
   });
 
   it("reports the previous required day with isFallbackDay on a weekend", async () => {
@@ -186,7 +212,12 @@ describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
 
     const view = await dashboards.batchToday(batch.id, NOW);
 
-    expect(view.days).toHaveLength(view.cycle.requiredDayCount);
+    // 21 -- independently derived the same way as the "top-level counts" test
+    // above (CYCLE_START's cycle has 21 weekdays); pinned as a literal rather
+    // than against `view.cycle.requiredDayCount`, since both figures come
+    // from the same `cycleWorkingDays(bounds)` call and would agree even if
+    // one of them were wrong (Finding 5, Plan 7 whole-branch review).
+    expect(view.days).toHaveLength(21);
     expect(view.days.every((d) => d.enrolled === 0)).toBe(true);
     expect(view.extraCount).toBe(0);
     expect(view.extraAfter).toEqual([]);
@@ -337,6 +368,26 @@ describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
     expect(view.cycle.endDate).toBe(civilDate("2026-06-09"));
   });
 
+  it("keeps currentSeq at the batch's CURRENT cycle when an earlier cycle is explicitly requested (Finding 2)", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Seq Picker", startDate: civilDate("2026-05-10"), endDate: civilDate("2027-01-09"),
+    });
+
+    const view = await dashboards.batchSummary(batch.id, 1, NOW);
+
+    // Independently derived (scratch tsx run against @irp/core, see the
+    // fix-wave report): firstEvaluatedCycleStart(2026-05-10) is 2026-05-10
+    // itself (admission lands exactly on the 10th), and NOW (2026-08-05)
+    // falls inside the 2026-07-10..2026-08-09 cycle -- two whole cycles
+    // later, so the batch's CURRENT cycle is its 3rd. `cycle.seq` names the
+    // REQUESTED cycle (1); `currentSeq` must stay at the batch's actual
+    // current cycle (3) regardless -- this is the bug BatchCycleSummary
+    // shipped without: a picker built from `cycle.seq` alone could only ever
+    // shrink to the cycle last selected, with no way back to the present.
+    expect(view.cycle.seq).toBe(1);
+    expect(view.currentSeq).toBe(3);
+  });
+
   it("rejects a cycle beyond the current one with InvalidCycleError", async () => {
     const batch = await batchRepo.create({
       name: "Batch Seq Future", startDate: civilDate("2026-05-10"), endDate: civilDate("2027-01-09"),
@@ -353,7 +404,7 @@ describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
   const BATCH_OFF_TENTH_START = civilDate("2026-06-15");
   const BEFORE_FIRST_CYCLE = colomboInstant(civilDate("2026-06-20"), "09:00");
 
-  it("defaults to cycle 1 and reports everything future before a batch's first evaluated cycle opens", async () => {
+  it("reports the CURRENT CALENDAR cycle with seq null before a batch's first evaluated cycle opens, matching batchToday (Finding 1)", async () => {
     const batch = await batchRepo.create({
       name: "Batch Off Tenth", startDate: BATCH_OFF_TENTH_START, endDate: civilDate("2027-05-09"),
     });
@@ -364,13 +415,33 @@ describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
 
     const view = await dashboards.batchSummary(batch.id, undefined, BEFORE_FIRST_CYCLE);
 
-    // seq defaults via `cycleSeq ?? currentSeq ?? 1` with currentSeq null, to 1.
-    expect(view.cycle.seq).toBe(1);
-    expect(view.cycle.startDate).toBe(civilDate("2026-07-10"));
-    expect(view.cycle.endDate).toBe(civilDate("2026-08-09"));
+    // Before this fix, `const seq = cycleSeq ?? currentSeq ?? 1` floored the
+    // default to a fabricated Cycle 1 and reported that FUTURE cycle's bounds
+    // (2026-07-10..2026-08-09) -- disagreeing with batchToday, which
+    // correctly reports the CURRENT CALENDAR cycle with seq null for the same
+    // batch on the same day. ADR-0019 says seq is nullable in every response;
+    // this now matches batchToday exactly.
+    expect(view.cycle.seq).toBeNull();
+    expect(view.currentSeq).toBeNull();
+    expect(view.cycle.startDate).toBe(civilDate("2026-06-10"));
+    expect(view.cycle.endDate).toBe(civilDate("2026-07-09"));
+
+    // Independently derived (scratch tsx run against @irp/core, see the
+    // fix-wave report): of this calendar cycle's 22 weekdays, only the 19
+    // from BATCH_OFF_TENTH_START (2026-06-15) onward carry any obligation --
+    // 2026-06-10/11/12 precede the student's own enrolment and are excluded
+    // entirely, not counted as missed. Of those 19: 06-15..06-18 (4 days)
+    // are silent past grace -- missed; 06-19 is still inside grace as of
+    // BEFORE_FIRST_CYCLE (2026-06-20 09:00) -- pending; the remaining 14
+    // (06-22 onward) have not arrived yet -- future. Settled = 4 missed, so
+    // complianceRate is 0 (0 onTime+late+absent over 4 settled), NOT null --
+    // some of this window has already passed, unlike the old fabricated
+    // future-cycle bounds where nothing had.
     const row = view.students.find((r) => r.student.id === s.id)!;
-    expect(row.counts.settledDays).toBe(0);
-    expect(row.counts.complianceRate).toBeNull();
+    expect(row.counts.requiredDays).toBe(19);
+    expect(row.counts.missed).toBe(4);
+    expect(row.counts.settledDays).toBe(4);
+    expect(row.counts.complianceRate).toBe(0);
   });
 
   it("rejects cycle 2 with InvalidCycleError when the batch has no evaluated cycle yet", async () => {
@@ -477,6 +548,30 @@ describe.skipIf(!dbUrl)("createDashboardService — studentDashboard", () => {
     // the FIRST enrolment, not the 1st in the batch they moved to.
     expect(view.cycle.seq).toBe(2);
     expect(view.cycle.startDate).toBe(CYCLE_START);
+
+    // Finding 4, Plan 7 whole-branch review: this fixture is exactly the
+    // regression case for `countCycle(days, enrolments)` receiving the
+    // student's FULL cross-batch enrolment history rather than one batch's
+    // own intervals -- the student is continuously enrolled (batch A, then
+    // transferred to batch B on the cycle's own start date, with no gap:
+    // `transfer` ends the old interval the day before and starts the new one
+    // on `effectiveDate`) across the WHOLE of this cycle. Passing a single
+    // batch's enrolments here instead would still leave every one of this
+    // cycle's weekdays "covered" by ONE of the two batches, so `requiredDays`
+    // would be unaffected either way -- these two figures alone were not
+    // previously asserted, so a regression to batch-scoped enrolments could
+    // slip through with every other assertion in this test still green.
+    //
+    // Independently derived (scratch tsx run against @irp/core, see the
+    // fix-wave report): the cycle 2026-07-10..2026-08-09 has 21 weekdays.
+    // This student has no entries or absences anywhere, so every one of them
+    // is silent; classifyDay(d, {hasEntry:false,...}, NOW) with NOW =
+    // 2026-08-05 10:00 gives: 2026-07-10 through 2026-08-03 (17 weekdays)
+    // "missed" (grace closed by NOW); 2026-08-04 and 2026-08-05 "pending"
+    // (grace still open); 2026-08-06 and 2026-08-07 "future". Settled = 17
+    // missed + 0 onTime/late/absent = 17.
+    expect(view.summary.requiredDays).toBe(21);
+    expect(view.summary.settledDays).toBe(17);
   });
 
   it("nulls seq for a joiner whose first evaluated cycle has not opened", async () => {

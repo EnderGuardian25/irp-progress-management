@@ -71,6 +71,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
         batchId: view.batch.id,
         batchName: view.batch.name,
         cycle: toApiCycle(view.cycle),
+        currentSeq: view.currentSeq,
         students: view.students.map((s) => ({
           student: s.student,
           counts: toApiCycleCounts(s.counts),

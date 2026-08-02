@@ -675,6 +675,7 @@ paths:
                       startDate: '2026-06-10'
                       endDate: '2026-07-09'
                       requiredDayCount: 22
+                    currentSeq: 4
                     students:
                       - student:
                           id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
@@ -1735,8 +1736,14 @@ components:
       title: CycleView
       description: |
         Which evaluation cycle a dashboard describes. Bounds are the fixed
-        10th-to-9th calendar window (FR-9); `seq` is the batch's own 1-based
-        numbering, anchored on its first evaluated cycle (ADR-0019).
+        10th-to-9th calendar window (FR-9). `seq`'s anchor depends on the
+        endpoint: for the two batch dashboards
+        (`GET /batches/{id}/dashboard/today`, `GET /batches/{id}/dashboard/summary`)
+        it is the BATCH's own 1-based numbering, anchored on the batch's first
+        evaluated cycle (ADR-0019); for `GET /me/dashboard` it is anchored on
+        the CALLER's own first enrolment instead, deliberately, so
+        "Month N of 6" survives a transfer between batches. `null` means a
+        different thing at each anchor — see `seq` below.
       required: [seq, startDate, endDate, requiredDayCount]
       additionalProperties: false
       properties:
@@ -1745,7 +1752,14 @@ components:
             - type: integer
               minimum: 1
             - type: 'null'
-          description: The cycle's 1-based position in the batch's programme, or null when the batch's first evaluated cycle has not opened yet (FR-27).
+          description: |
+            The cycle's 1-based position. For `GET /batches/{id}/dashboard/today`
+            and `GET /batches/{id}/dashboard/summary` this is the BATCH's own
+            numbering, null when the batch's first evaluated cycle has not
+            opened yet (FR-27). For `GET /me/dashboard` this is instead
+            anchored on the CALLER's own first enrolment — null there means
+            the caller has never been enrolled at all, not that a batch
+            hasn't started.
           examples:
             - 3
         startDate:
@@ -2031,7 +2045,7 @@ components:
       type: object
       title: BatchCycleSummary
       description: Every student enrolled in a batch during one cycle, with that cycle's compliance figures.
-      required: [batchId, batchName, cycle, students]
+      required: [batchId, batchName, cycle, currentSeq, students]
       additionalProperties: false
       properties:
         batchId:
@@ -2047,6 +2061,22 @@ components:
             - Batch Aurora
         cycle:
           $ref: '#/components/schemas/CycleView'
+        currentSeq:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: |
+            The batch's CURRENT cycle sequence — the highest sequence that has
+            actually started — independent of which cycle `cycle.seq`
+            describes. A client uses this to render a complete cycle picker
+            (1..currentSeq) no matter which cycle was requested, so browsing
+            to an earlier cycle does not strand the picker without a way back
+            to the present. Null when the batch's first evaluated cycle has
+            not opened yet (ADR-0019), in which case there is no cycle to pick
+            from at all.
+          examples:
+            - 4
         students:
           type: array
           description: One row per student enrolled at any point in the cycle, ordered by display name.

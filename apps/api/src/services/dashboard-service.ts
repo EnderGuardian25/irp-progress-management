@@ -82,6 +82,14 @@ export interface StudentSummaryView {
 export interface BatchSummaryView {
   batch: BatchRecord;
   cycle: CycleView;
+  /**
+   * The batch's CURRENT cycle sequence — the highest sequence that has
+   * actually started — independent of which cycle `cycle.seq` names. Lets a
+   * client render a complete picker (1..currentSeq) no matter which cycle was
+   * requested (Finding 2, Plan 7 fix wave). Null when the batch's first
+   * evaluated cycle has not opened yet (ADR-0019).
+   */
+  currentSeq: number | null;
   students: StudentSummaryView[];
 }
 
@@ -116,7 +124,8 @@ function covers(e: EnrolmentInterval, d: CivilDate): boolean {
  * boundary: a cycle opening on a Saturday has no earlier required day of its
  * own, and reaching into last month's Friday would report figures the ribbon
  * does not contain. In that one case the cycle's FIRST required day is
- * reported instead, with every count zero — honest, and flagged by
+ * reported instead, with `enrolled` counted normally but every OTHER count
+ * zero — honest (nobody has had a chance to submit yet), and flagged by
  * `isFallbackDay` either way.
  */
 export function reportedDay(requiredDays: CivilDate[], today: CivilDate): CivilDate {
@@ -313,15 +322,74 @@ export function createDashboardService(deps: {
     },
 
     async batchSummary(batchId, cycleSeq, now) {
-      const batch = await deps.batchRepo.getBatch(batchId);
-      if (!batch) throw new BatchNotFoundError(batchId);
+      const found = await deps.batchRepo.getBatch(batchId);
+      if (!found) throw new BatchNotFoundError(batchId);
+      // Rebound to a `BatchRecord`-typed const: TS does not carry the
+      // null-narrowing above into the nested `summarise` closure below, since
+      // a closure could in principle be invoked at a point where the
+      // narrowing no longer holds. `batch` itself is never reassigned, so
+      // this is exactly as safe as the narrowing it restates.
+      const batch: BatchRecord = found;
 
       const today = toProgrammeDate(now);
       const first = firstEvaluatedCycleStart(batch.startDate);
       // The batch's own numbering for today. Null before its first evaluated
-      // cycle opens, in which case cycle 1 is the only one worth naming and
-      // it is still in the future — reported, with everything future.
+      // cycle opens — there is no "current" cycle yet to default to or to
+      // validate an explicit request against.
       const currentSeq = cycleFor(today, batch.startDate)?.index ?? null;
+
+      /** Load the roster/day data for `bounds` and shape the response. Shared by both branches below. */
+      async function summarise(bounds: CycleBounds, seq: number | null): Promise<BatchSummaryView> {
+        const { enrolments, byStudent } = await loadRoster(batchId, bounds, now);
+
+        // enrolmentsInRange is ordered by displayName, so first-seen order is
+        // already the response order; the Map dedupes a student holding two
+        // intervals in this cycle (a transfer into and out of the same batch)
+        // into ONE roster row. That dedup is display-only: `countCycle` still
+        // needs EVERY interval the student held in this batch to clip their
+        // days correctly (a transfer out and back is exactly two), so those are
+        // kept separately, grouped by student rather than collapsed.
+        const seen = new Map<string, RosterEnrolment>();
+        const byStudentEnrolments = new Map<string, RosterEnrolment[]>();
+        for (const e of enrolments) {
+          if (!seen.has(e.studentId)) seen.set(e.studentId, e);
+          const intervals = byStudentEnrolments.get(e.studentId);
+          if (intervals) intervals.push(e); else byStudentEnrolments.set(e.studentId, [e]);
+        }
+
+        return {
+          batch,
+          cycle: { ...cycleView(bounds, batch), seq },
+          currentSeq,
+          students: [...seen.values()].map((e) => {
+            const days = byStudent.get(e.studentId) ?? [];
+            // Non-null by construction: `seen` and `byStudentEnrolments` are
+            // populated from the same loop over `enrolments`, so every key in
+            // one is a key in the other.
+            const studentEnrolments = byStudentEnrolments.get(e.studentId)!;
+            return {
+              student: { id: e.studentId, displayName: e.displayName, email: e.email },
+              counts: countCycle(days, studentEnrolments),
+              reviewProgress: countReviewProgress(days),
+            };
+          }),
+        };
+      }
+
+      if (cycleSeq === undefined && currentSeq === null) {
+        // Finding 1, Plan 7 fix wave: ADR-0019 says seq is nullable in EVERY
+        // response. Flooring the default to a fabricated Cycle 1 (the old
+        // behaviour) reported a *future* window here while batchToday
+        // correctly reported the CURRENT CALENDAR cycle with seq null for the
+        // same batch on the same day — two mentor pages disagreeing about
+        // "now". Match batchToday: report the current calendar cycle's
+        // bounds, honestly with no sequence, and whatever roster/compliance
+        // data that window actually has (empty or future-only, as the data
+        // dictates). An EXPLICIT `?cycle=` request in this state is
+        // unaffected and still validated/rejected below as before.
+        return summarise(cycleContaining(today), null);
+      }
+
       const seq = cycleSeq ?? currentSeq ?? 1;
       if (!Number.isInteger(seq) || seq < 1) {
         throw new InvalidCycleError(`Cycle ${String(seq)} is not a valid 1-based cycle sequence.`);
@@ -335,40 +403,7 @@ export function createDashboardService(deps: {
         throw new InvalidCycleError(`Cycle ${String(seq)} has not started — this batch has no evaluated cycle yet.`);
       }
 
-      const bounds = cycleContaining(shiftCycle(first, seq - 1));
-      const { enrolments, byStudent } = await loadRoster(batchId, bounds, now);
-
-      // enrolmentsInRange is ordered by displayName, so first-seen order is
-      // already the response order; the Map dedupes a student holding two
-      // intervals in this cycle (a transfer into and out of the same batch)
-      // into ONE roster row. That dedup is display-only: `countCycle` still
-      // needs EVERY interval the student held in this batch to clip their
-      // days correctly (a transfer out and back is exactly two), so those are
-      // kept separately, grouped by student rather than collapsed.
-      const seen = new Map<string, RosterEnrolment>();
-      const byStudentEnrolments = new Map<string, RosterEnrolment[]>();
-      for (const e of enrolments) {
-        if (!seen.has(e.studentId)) seen.set(e.studentId, e);
-        const intervals = byStudentEnrolments.get(e.studentId);
-        if (intervals) intervals.push(e); else byStudentEnrolments.set(e.studentId, [e]);
-      }
-
-      return {
-        batch,
-        cycle: { ...cycleView(bounds, batch), seq },
-        students: [...seen.values()].map((e) => {
-          const days = byStudent.get(e.studentId) ?? [];
-          // Non-null by construction: `seen` and `byStudentEnrolments` are
-          // populated from the same loop over `enrolments`, so every key in
-          // one is a key in the other.
-          const studentEnrolments = byStudentEnrolments.get(e.studentId)!;
-          return {
-            student: { id: e.studentId, displayName: e.displayName, email: e.email },
-            counts: countCycle(days, studentEnrolments),
-            reviewProgress: countReviewProgress(days),
-          };
-        }),
-      };
+      return summarise(cycleContaining(shiftCycle(first, seq - 1)), seq);
     },
 
     async studentDashboard(studentId, now) {
