@@ -375,7 +375,7 @@ paths:
       summary: Create a batch
       description: |
         Creates a cohort (FR-6). startDate must precede endDate. `name` is
-        unique; a repeat (409).
+        unique; a repeated name is rejected with 409.
       tags: [Batches]
       requestBody:
         required: true

@@ -1504,6 +1504,9 @@ Tag `Batches` (`description: Cohorts and their enrolment rosters. Mentor (Admin)
           examples:
             - '2026-11-09'
 
+    # Correction 2026-08-02: Batch.name has carried @unique since Plan 5;
+    # the original "unique in practice but not enforced" wording was wrong.
+    # createBatch maps P2002 -> DuplicateBatchNameError (409) and documents it.
     BatchCreate:
       type: object
       title: BatchCreate
@@ -1515,7 +1518,7 @@ Tag `Batches` (`description: Cohorts and their enrolment rosters. Mentor (Admin)
           type: string
           minLength: 1
           maxLength: 120
-          description: Display name. Unique — a duplicate is rejected with 409. (Correction 2026-08-02 -- the schema has carried @unique since Plan 5; "not enforced" was wrong, and createBatch's responses gain '409' accordingly.)
+          description: Must be unique; a repeat is rejected with 409.
           examples:
             - Batch Cinder
         startDate:
@@ -1617,7 +1620,7 @@ Operations (each with the standard five responses plus `403`; roster and both ba
     post:
       operationId: createBatch
       summary: Create a batch
-      description: Creates a cohort (FR-6). startDate must precede endDate.
+      description: Creates a cohort (FR-6). startDate must precede endDate. `name` is unique; a repeated name is rejected with 409.
       tags: [Batches]
       requestBody:
         required: true
@@ -1646,6 +1649,8 @@ Operations (each with the standard five responses plus `403`; roster and both ba
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
