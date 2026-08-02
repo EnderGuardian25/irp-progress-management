@@ -74,6 +74,31 @@ describe("RosterPage", () => {
     expect(getBatchRoster).not.toHaveBeenCalled();
   });
 
+  it("renders the problem detail when listBatches itself errors -- must not fall through to the empty-batches state", async () => {
+    // An earlier version destructured only `data` off listBatches()'s result,
+    // so a 5xx (data undefined, error defined) looked identical to "there are
+    // genuinely no batches" and rendered the wrong empty state -- "No batches
+    // yet. Create one from the Students page." on what was actually a server
+    // failure the mentor could do nothing about from that page.
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({
+      data: undefined,
+      error: {
+        type: "about:blank",
+        title: "Internal Server Error",
+        status: 500,
+        detail: "The batch list could not be loaded.",
+      },
+    });
+
+    render(await RosterPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The batch list could not be loaded.");
+    expect(screen.queryByText("No batches yet.")).not.toBeInTheDocument();
+    expect(getBatchRoster).not.toHaveBeenCalled();
+  });
+
   it("renders a roster row with the student's name, status pill, and extra count", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
@@ -125,6 +150,30 @@ describe("RosterPage", () => {
     expect(screen.getByText("On time")).toBeInTheDocument();
     expect(screen.getByText("+2 extra")).toBeInTheDocument();
     expect(screen.getByText("✓ recorded")).toBeInTheDocument();
+  });
+
+  it("treats an empty-string date query param as absent -- the GET form submits date=\"\" once cleared", async () => {
+    // The date <input type="date"> form submits `date=""` when the mentor
+    // clears it, not by omitting the field entirely. An empty string is not
+    // a valid civil date, so it must be normalised to "not supplied" before
+    // it reaches getBatchRoster's query or the batch-switch links, exactly
+    // like an absent `date` param.
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH, BATCH_2] });
+    getBatchRoster.mockResolvedValue({ data: [], error: undefined });
+
+    render(
+      await RosterPage({ searchParams: Promise.resolve({ batchId: "b1", date: "" }) }),
+    );
+
+    expect(getBatchRoster).toHaveBeenCalledWith({
+      client: {},
+      path: { id: "b1" },
+      query: {},
+    });
+    const otherBatchLink = screen.getByRole("link", { name: BATCH_2.name });
+    expect(otherBatchLink).toHaveAttribute("href", "/roster?batchId=b2");
   });
 
   it("carries the current date forward on batch-switch links -- switching batch must not silently reset to today", async () => {

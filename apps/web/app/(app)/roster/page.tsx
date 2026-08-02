@@ -25,10 +25,28 @@ export default async function RosterPage({
   const user = await getCurrentUserOrRedirect();
   if (user.role !== "Admin") redirect("/");
 
-  const { batchId, date } = await searchParams;
+  const { batchId, date: rawDate } = await searchParams;
+  // The GET date form submits `date=""` once cleared -- an empty string is
+  // not a valid civil date and must be treated exactly like "not supplied",
+  // both for the roster query and for what the batch-switch links carry
+  // forward. Normalised once, here, so every later read agrees.
+  const date = rawDate === "" ? undefined : rawDate;
 
   const client = await apiClient();
-  const { data: batches } = await listBatches({ client });
+  const { data: batches, error: batchesError } = await listBatches({ client });
+
+  if (batchesError !== undefined) {
+    return (
+      <div>
+        <PageTitle>Roster</PageTitle>
+        <Panel>
+          <p role="alert" style={{ color: "var(--st-missed)" }}>
+            {batchesError.detail ?? batchesError.title}
+          </p>
+        </Panel>
+      </div>
+    );
+  }
 
   if (batches === undefined || batches.length === 0) {
     return (
