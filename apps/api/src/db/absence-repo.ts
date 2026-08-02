@@ -64,6 +64,7 @@ export function createAbsenceRepo(prisma: PrismaClient): AbsenceRepo {
 
     async remove(studentId, date) {
       await prisma.$transaction(async (tx) => {
+        await lockStudentDay(tx, studentId, date);
         await assertNotLocked(tx, studentId, date);
         const { count } = await tx.absenceRecord.deleteMany({ where: { studentId, date: toDbDate(date) } });
         if (count === 0) throw new AbsenceNotFoundError(date);
