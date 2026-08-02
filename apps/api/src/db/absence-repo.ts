@@ -8,6 +8,7 @@ import {
 } from "../domain/errors.js";
 import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
+import { lockStudentDay } from "./day-lock.js";
 
 // Duplicated from batch-repo.ts: two lines beats a premature shared module.
 function isUniqueViolation(err: unknown): boolean {
@@ -43,6 +44,7 @@ export function createAbsenceRepo(prisma: PrismaClient): AbsenceRepo {
     async create(input) {
       if (!isWeekday(input.date)) throw new WeekendAbsenceError(input.date);
       return prisma.$transaction(async (tx) => {
+        await lockStudentDay(tx, input.studentId, input.date);
         await assertNotLocked(tx, input.studentId, input.date);
         const entryCount = await tx.entry.count({
           where: { studentId: input.studentId, entryDate: toDbDate(input.date) },

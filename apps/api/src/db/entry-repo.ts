@@ -3,6 +3,7 @@ import { decideEntryFlags } from "../domain/entry-flags.js";
 import { AbsentDayConflictError, LockedDayError } from "../domain/errors.js";
 import type { DailyReportStatus, PrismaClient } from "../generated/prisma/client.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
+import { lockStudentDay } from "./day-lock.js";
 
 export interface EntryRecord {
   id: string;
@@ -60,6 +61,7 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
       const dbDate = toDbDate(input.entryDate);
 
       return prisma.$transaction(async (tx) => {
+        await lockStudentDay(tx, input.studentId, input.entryDate);
         const report = await tx.dailyReport.findUnique({
           where: { studentId_reportDate: { studentId: input.studentId, reportDate: dbDate } },
         });
