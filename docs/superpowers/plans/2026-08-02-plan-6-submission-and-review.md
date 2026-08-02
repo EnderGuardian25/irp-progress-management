@@ -2688,10 +2688,17 @@ export async function submitEntry(
   return null;
 }
 
-// Correction 2026-08-02: single-argument. The original two-arg reducer
-// signature contradicted Step 3's plain <form> wiring — FormData would have
-// landed in the unused prevState slot at runtime.
+// Correction 2 (2026-08-02, supersedes correction 1): TWO-argument reducer
+// after all — but wired through useActionState in an AbsenceToggle CLIENT
+// component, never a plain server-component <form>. Correction 1 made this
+// single-arg to match plain-form wiring; the Task 12 review showed that
+// wiring silently discards the { error } return, breaking the interface's
+// own "surfaces the RFC 7807 detail" contract. The plain-form shape was the
+// defect, not the signature. removeAbsence is wired the same way (bind the
+// date, useActionState). The reason input carries maxLength={500} to match
+// AbsenceCreate.
 export async function markAbsent(
+  _prev: { error: string } | null,
   formData: FormData,
 ): Promise<{ error: string } | null> {
   const client = await apiClient();
@@ -2747,7 +2754,7 @@ export default async function TodayPage() {
 }
 ```
 
-`student-today.tsx` (server component): compute `const window = submissionWindow(new Date());` — `window.targetDates` are the only submittable dates (FR-15 by construction in the UI too); fetch the day views via `listMyDays({ client, query: { from: <oldest targetDate>, to: <newest targetDate> } })` — an explicit range spanning the window, NOT the bare default-cycle call. *(Correction 2026-08-02: on the 10th of a month the window's oldest target can fall in the previous cycle, and the default range would silently drop it.)* Also: the page must preserve `data-testid="user-name"` AND `data-testid="user-role"` on BOTH role branches — `apps/web/e2e/signin.spec.ts` asserts both; visually-hidden spans are fine. Render: `PageTitle` "Today"; the `EntryComposer` (pass `targetDates` and per-date absence state); beneath it, for each target date, the existing entries (body + submitted time + Late/Extra flag text) inside a `Panel`, and the absence toggle — a form posting `markAbsent` (date + reason inputs) when no absence and no entries, or the recorded reason with a quiet remove `Button` posting `removeAbsence` when marked. Deadline copy per §11: `You can still submit for {date} until {graceClosesAt formatted in Asia/Colombo}` — format with `Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Colombo", … })`.
+`student-today.tsx` (server component): compute `const window = submissionWindow(new Date());` — `window.targetDates` are the only submittable dates (FR-15 by construction in the UI too); fetch the day views via `listMyDays({ client, query: { from: <oldest targetDate>, to: <newest targetDate> } })` — an explicit range spanning the window, NOT the bare default-cycle call. *(Correction 2026-08-02: on the 10th of a month the window's oldest target can fall in the previous cycle, and the default range would silently drop it.)* Also: the page must preserve `data-testid="user-name"` AND `data-testid="user-role"` on BOTH role branches — `apps/web/e2e/signin.spec.ts` asserts both; visually-hidden spans are fine. Render: `PageTitle` "Today"; the `EntryComposer` (pass `targetDates` and per-date absence state); beneath it, for each target date, the existing entries (body + submitted time + Late/Extra flag text) inside a `Panel`, and the absence toggle — a form posting `markAbsent` (date + reason inputs) when no absence and no entries, or the recorded reason with a quiet remove `Button` posting `removeAbsence` when marked. Deadline copy per §11: `You can still submit for {date} until {deadline formatted in Asia/Colombo}` — format with `Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Colombo", … })`. *(Correction 2026-08-02: the deadline is PER TARGET — `graceDeadlineFor(date)` from `@irp/core` — not the window-level `graceClosesAt`, which is the OLDEST target's deadline and understates every newer panel's window. Name the weekday in student-facing copy (§11 voice); keep ISO only in option values.)*
 
 - [ ] **Step 4: The composer (client)**
 
@@ -2769,7 +2776,11 @@ export function EntryComposer({ targetDates }: { targetDates: string[] }) {
       <SectionLabel>Submit an update</SectionLabel>
       <select
         name="entryDate"
-        defaultValue={targetDates[targetDates.length - 1]}
+        {/* Correction 2026-08-02: targetDates is most-recent-first, so index
+            0 is TODAY. The original len-1 default preselected the OLDEST
+            target — yesterday on every normal visit — so the untouched fast
+            path filed today's work against yesterday and flagged it Late. */}
+        defaultValue={targetDates[0]}
         aria-label="Entry date"
         className="rounded-[var(--radius-control)] border px-3 py-2"
         style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
