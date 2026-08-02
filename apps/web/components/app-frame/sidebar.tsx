@@ -11,24 +11,23 @@ import Link from "next/link";
  * link on both destination lists. Task 13 added `apps/web/app/(app)/roster/
  * page.tsx`, so Roster is now a real link; Task 14 added
  * `apps/web/app/(app)/review/page.tsx`, so Review is now a real link too —
- * but only on the mentor list. Cycles still has no page (Plan 7) and
- * Students keeps its href out until Task 15 even though its page doesn't
- * exist yet either. Each destination becomes a real `<Link href="...">` in
+ * but only on the mentor list. Task 15 added `apps/web/app/(app)/students/
+ * page.tsx`, so Students is now a real link too. Task 7 added
+ * `apps/web/app/(app)/cycles/page.tsx`, so Cycles is now a real link as
+ * well — the only remaining label-only destination is "My month", which
+ * Task 8 removes. Each destination becomes a real `<Link href="...">` in
  * the task that adds its page — no `as Route` casts in the meantime.
  *
  * Navigation is role-gated, not just link-gated: a Student never sees
  * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
  * than seeing them disabled. Students get their own two-item list; "My
- * month" stays label-only until Plan 7.
- *
- * Task 15 added `apps/web/app/(app)/students/page.tsx`, so Students is now a
- * real link too. Cycles still has no page (Plan 7) and stays label-only.
+ * month" stays label-only until Task 8.
  */
 const MENTOR_DESTINATIONS = [
   { label: "Today", href: "/" },
   { label: "Roster", href: "/roster" },
   { label: "Review", href: "/review" },
-  { label: "Cycles" },
+  { label: "Cycles", href: "/cycles" },
   { label: "Students", href: "/students" },
 ] as const;
 
