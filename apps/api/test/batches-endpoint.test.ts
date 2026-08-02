@@ -170,6 +170,30 @@ describe.skipIf(!dbUrl)("Batches: GET/POST /api/v1/batches, GET /api/v1/batches/
     expect(body.type).toBe("https://irp.bistec.example/problems/validation-failed");
   });
 
+  it("rejects a duplicate batch name with 409 duplicate-batch-name", async () => {
+    await mentor("batch-mentor-dup");
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/batches",
+      headers: bearer(await signToken({ oid: "batch-mentor-dup" })),
+      payload: { name: "Batch Repeat", startDate: "2026-09-10", endDate: "2027-03-09" },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/batches",
+      headers: bearer(await signToken({ oid: "batch-mentor-dup" })),
+      payload: { name: "Batch Repeat", startDate: "2026-05-10", endDate: "2026-11-09" },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    const body = res.json<ProblemLike>();
+    expect(body.type).toBe("https://irp.bistec.example/problems/duplicate-batch-name");
+  });
+
   it("rejects a roster request for an unknown batch id with 404 batch-not-found", async () => {
     await mentor("batch-mentor-4");
 

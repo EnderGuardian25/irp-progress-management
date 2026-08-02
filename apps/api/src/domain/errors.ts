@@ -130,3 +130,12 @@ export class InvalidBatchDatesError extends DomainError {
     super("startDate must be before endDate.");
   }
 }
+
+export class DuplicateBatchNameError extends DomainError {
+  readonly code = "duplicate-batch-name";
+  readonly status = 409;
+  readonly title = "Batch name already exists";
+  constructor(name: string) {
+    super(`A batch named "${name}" already exists.`);
+  }
+}

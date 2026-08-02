@@ -3,7 +3,9 @@ import { civilDate } from "@irp/core";
 import { createPrismaClient } from "../src/db/client.js";
 import { fromDbDate } from "../src/db/civil-date-map.js";
 import { createBatchRepo } from "../src/db/batch-repo.js";
-import { OpenEnrolmentExistsError, NoOpenEnrolmentError, InvalidTransferDateError } from "../src/domain/errors.js";
+import {
+  OpenEnrolmentExistsError, NoOpenEnrolmentError, InvalidTransferDateError, DuplicateBatchNameError,
+} from "../src/domain/errors.js";
 import { resetDb } from "./helpers/db.js";
 import { dbUrl } from "./helpers/require-db.js";
 
@@ -25,6 +27,13 @@ describe.skipIf(!dbUrl)("createBatchRepo", () => {
     const all = await repo.list();
     expect(all).toHaveLength(1);
     expect(all[0]!.startDate).toBe("2026-05-10"); // a string, not a Date
+  });
+
+  it("create() maps a duplicate name to DuplicateBatchNameError", async () => {
+    await repo.create({ name: "Batch Dup", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09") });
+    await expect(
+      repo.create({ name: "Batch Dup", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09") }),
+    ).rejects.toBeInstanceOf(DuplicateBatchNameError);
   });
 
   it("transfer closes the open enrolment and opens the new one (FR-8)", async () => {

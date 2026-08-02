@@ -1,6 +1,8 @@
 import { addDays, compareDates, type CivilDate } from "@irp/core";
 import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
-import { InvalidTransferDateError, NoOpenEnrolmentError, OpenEnrolmentExistsError } from "../domain/errors.js";
+import {
+  DuplicateBatchNameError, InvalidTransferDateError, NoOpenEnrolmentError, OpenEnrolmentExistsError,
+} from "../domain/errors.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
 
 function isUniqueViolation(err: unknown): boolean {
@@ -67,10 +69,17 @@ function mapEnrolment(e: DbEnrolment): EnrolmentRecord {
 export function createBatchRepo(prisma: PrismaClient): BatchRepo {
   return {
     async create(input) {
-      const b = await prisma.batch.create({
-        data: { name: input.name, startDate: toDbDate(input.startDate), endDate: toDbDate(input.endDate) },
-      });
-      return mapBatch(b);
+      try {
+        const b = await prisma.batch.create({
+          data: { name: input.name, startDate: toDbDate(input.startDate), endDate: toDbDate(input.endDate) },
+        });
+        return mapBatch(b);
+      } catch (err) {
+        // Batch has exactly one unique constraint besides its PK (`name`),
+        // so a blanket P2002 mapping to DuplicateBatchNameError is safe here.
+        if (isUniqueViolation(err)) throw new DuplicateBatchNameError(input.name);
+        throw err;
+      }
     },
 
     async list() {

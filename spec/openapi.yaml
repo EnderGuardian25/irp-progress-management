@@ -373,7 +373,9 @@ paths:
     post:
       operationId: createBatch
       summary: Create a batch
-      description: Creates a cohort (FR-6). startDate must precede endDate.
+      description: |
+        Creates a cohort (FR-6). startDate must precede endDate. `name` is
+        unique; a repeat (409).
       tags: [Batches]
       requestBody:
         required: true
@@ -402,6 +404,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -819,7 +823,7 @@ components:
           type: string
           minLength: 1
           maxLength: 120
-          description: Display name, unique in practice but not enforced.
+          description: Display name. Must be unique; a repeat is rejected with 409.
           examples:
             - Batch Cinder
         startDate:
