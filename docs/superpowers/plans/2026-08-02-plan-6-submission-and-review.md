@@ -347,7 +347,7 @@ export async function lockStudentDay(
   studentId: string,
   date: CivilDate,
 ): Promise<void> {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${studentId}:${date}`}, 0))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${studentId}:${date}`}, 0))`;
 }
 ```
 
