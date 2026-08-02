@@ -2774,12 +2774,13 @@ export function EntryComposer({ targetDates }: { targetDates: string[] }) {
   return (
     <form action={action} className="flex flex-col gap-3">
       <SectionLabel>Submit an update</SectionLabel>
+      {/* Correction 2026-08-02: targetDates is most-recent-first, so index
+          0 is TODAY. The original len-1 default preselected the OLDEST
+          target — yesterday on every normal visit — so the untouched fast
+          path filed today's work against yesterday and flagged it Late.
+          (Option labels carry the weekday name; ISO stays in values.) */}
       <select
         name="entryDate"
-        {/* Correction 2026-08-02: targetDates is most-recent-first, so index
-            0 is TODAY. The original len-1 default preselected the OLDEST
-            target — yesterday on every normal visit — so the untouched fast
-            path filed today's work against yesterday and flagged it Late. */}
         defaultValue={targetDates[0]}
         aria-label="Entry date"
         className="rounded-[var(--radius-control)] border px-3 py-2"
