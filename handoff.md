@@ -119,14 +119,14 @@ packages/types/          GENERATED, git-ignored, never committed
 packages/client/         GENERATED, git-ignored, never committed
 apps/api/                Fastify service — config, ajv 2020-12 validator compiler, hand-written
                          tracing plugin, RFC 7807 handler, Prisma + user repo, JWT auth plugin,
-                         routes, server composition, entrypoint. 34 tests
+                         routes, server composition, entrypoint. 223 tests
 apps/api/prisma/         schema.prisma (User + Role) + committed migration
 apps/api/prisma.config.ts    Prisma 7 CLI datasource config (the schema block cannot hold `url`)
 apps/api/src/generated/prisma/   GENERATED, git-ignored — a THIRD generated package
 apps/api/docker-compose.yml  local Postgres 16, host port ${IRP_DB_PORT:-5432}
 apps/web/                Next.js 16 — Auth.js v5, route groups ((auth) bare, (app) framed),
                          verified design tokens, app frame, CycleRibbon, server-only API client
-                         factory, middleware guard. 63 unit tests + 5 Playwright specs
+                         factory, proxy guard. 141 unit tests + 15 Playwright tests
 apps/web/lib/dev-identity.ts     THE DEV BYPASS. server-only. Mints RS256 tokens with a local
                          key. Guarded at three entry points — see ADR-0012
 apps/web/e2e/            Playwright — signin.spec.ts (the sign-in chain) plus, as of Task 16,
@@ -143,7 +143,7 @@ eslint.config.mjs        type-aware, generated dirs ignored
                          real-token job
 ```
 
-Test totals as of Task 16: **`@irp/core` 112 · `apps/api` 223 · `apps/web` 141 unit + 20
+Test totals as of Task 16: **`@irp/core` 112 · `apps/api` 223 · `apps/web` 141 unit + 15
 Playwright.** (`apps/api` and `apps/web`'s unit counts, and the Playwright count, all grew
 substantially over the Plan 5 figures this line used to carry — see the branch's own gate output,
 or the Task 16 report, to reconcile further.)
@@ -157,7 +157,7 @@ stays "In progress" until the PR lands), but the following exists on the branch 
   /api/v1/batches`, `GET /api/v1/batches/{id}/roster`), review transitions and mentor day records
   (`POST /api/v1/daily-reports/{id}/transition`, `/api/v1/students/{id}/day-records[/{date}]`), a
   student's own cycle of days for the mentor (`GET /api/v1/students/{id}/days`), user
-  administration (`GET`/`POST /api/v1/users`, `PATCH /api/v1/users/{id}`), and transfer + archive
+  administration (`GET`/`POST /api/v1/users`, `DELETE /api/v1/users/{id}`), and transfer + archive
   (`POST /api/v1/students/{id}/transfer`).
 - **Five `apps/web` (app) pages**: UI primitives + sign-out (Task 11), the student Today page with
   its composer and absence toggle (Task 12), the mentor Roster (Task 13), the mentor Review flow —

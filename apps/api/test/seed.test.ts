@@ -45,7 +45,11 @@ describe.skipIf(!dbUrl)("runSeed", () => {
     const externalId = "not-a-seed-user";
     // deleteMany, not delete: makes this test's own setup idempotent against
     // a previous failed run's leftover row, rather than 500ing on a unique
-    // constraint before the actual regression gets exercised.
+    // constraint before the actual regression gets exercised. Enrolment has
+    // no cascade in the schema, so the stray student's Enrolment rows must
+    // go first -- deleting the User while one still points at it would P2003
+    // this setup itself on a re-run after a mid-test failure.
+    await prisma.enrolment.deleteMany({ where: { student: { externalId } } });
     await prisma.user.deleteMany({ where: { externalId } });
 
     const batchA = await prisma.batch.findUniqueOrThrow({ where: { name: SEED_BATCH_NAMES.A } });

@@ -10,6 +10,18 @@ import type { DailyReportStatus, PrismaClient } from "../generated/prisma/client
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
 import { lockStudentDay } from "./day-lock.js";
 
+// Mirrors REPORT_STATUS_TO_API in ../routes/me-days.ts. Duplicated rather
+// than imported: db/ is a lower layer than routes/, and entry-repo.ts is
+// itself pulled in (type-only, today) by routes/entries.ts, which
+// routes/me-days.ts also imports -- reaching from here into routes/ would
+// invert that layering even though no runtime cycle exists yet. A three-line
+// map is cheaper than depending on that staying true.
+const TRANSITION_STATUS_TO_API: Record<DailyReportStatus, "Submitted" | "InReview" | "Evaluated"> = {
+  SUBMITTED: "Submitted",
+  IN_REVIEW: "InReview",
+  EVALUATED: "Evaluated",
+};
+
 export interface EntryRecord {
   id: string;
   studentId: string;
@@ -150,7 +162,13 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
       if (count === 0) {
         const current = await prisma.dailyReport.findUnique({ where: { id: reportId } });
         if (!current) throw new ReportNotFoundError(reportId);
-        throw new InvalidTransitionError(current.status, to);
+        // current.status/to are DB enum casing (SUBMITTED/IN_REVIEW/EVALUATED)
+        // -- InvalidTransitionError's message is API-facing, so both are
+        // mapped to API vocabulary before it ever sees them.
+        throw new InvalidTransitionError(
+          TRANSITION_STATUS_TO_API[current.status],
+          TRANSITION_STATUS_TO_API[to],
+        );
       }
       const r = await prisma.dailyReport.findUniqueOrThrow({ where: { id: reportId } });
       return { id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status };

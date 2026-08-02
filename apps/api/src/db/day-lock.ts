@@ -8,6 +8,14 @@ import type { Prisma } from "../generated/prisma/client.js";
  * transactions are only correct because this lock makes them mutually
  * exclusive. Transaction-scoped: released automatically at commit/rollback.
  *
+ * One deliberate exemption: entry-repo.ts's `transition()` writes DailyReport
+ * without taking this lock. It doesn't need it — its `updateMany` conditions
+ * on the expected current status (`where: { id: reportId, status: expected
+ * }`) in the same statement, which is its own atomic concurrency guard, not
+ * a separate check-then-write. Two mentors racing the same transition both
+ * issue that update; the database, not this lock, ensures only one sees
+ * `count === 1`.
+ *
  * $executeRaw, not $queryRaw: pg_advisory_xact_lock returns `void`, and
  * Prisma's $queryRaw result deserialiser has no mapping for that column
  * type — it throws "Failed to deserialize column of type 'void'" on every

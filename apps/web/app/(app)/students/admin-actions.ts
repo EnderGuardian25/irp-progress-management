@@ -112,11 +112,11 @@ export async function transferStudentAction(
  * (prevState, formData) pair on every dispatch, ignored here since only
  * `userId` matters.
  *
- * The API refuses self-archive and any archive that would leave a batch's
- * only mentor unassigned with a 409 -- that `detail` must reach the mentor,
- * which is exactly what the `{ error }` return here (rendered via role="alert"
- * in ArchiveButton) makes possible. The earlier plain-form-action shape this
- * plan's review has repeatedly rejected would await and discard it.
+ * The API refuses self-archive with a 409 (SelfArchiveError, routes/admin-
+ * actions.ts) -- that `detail` must reach the mentor, which is exactly what
+ * the `{ error }` return here (rendered via role="alert" in ArchiveButton)
+ * makes possible. The earlier plain-form-action shape this plan's review has
+ * repeatedly rejected would await and discard it.
  */
 export async function archiveUserAction(userId: string): Promise<{ ok: true } | { error: string }> {
   const client = await apiClient();

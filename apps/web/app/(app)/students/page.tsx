@@ -140,7 +140,7 @@ export default async function StudentsPage({
             </Link>
           </div>
           <div className="mt-3">
-            {(users === undefined || users.length === 0) ? (
+            {usersError !== undefined ? null : (users === undefined || users.length === 0) ? (
               <EmptyState title="No one registered yet." hint="Use Register to add the first mentor or student." />
             ) : (
               <ul className="flex flex-col gap-2">

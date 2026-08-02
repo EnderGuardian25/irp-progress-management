@@ -47,8 +47,19 @@ test.describe("student flows (dev-student-1, compliant, Batch Aurora)", () => {
       );
     }
 
-    const emptyToday = page.getByText("No entry for today yet.", { exact: true });
-    const isEmpty = await emptyToday.isVisible().catch(() => false);
+    // Scoped to today's own Panel throughout -- the compliant persona's other
+    // visible days never carry an absence, so an unscoped "Remove" would
+    // still be unique today, but scoping it removes that "still" and matches
+    // the reasonInput/Mark-absent scoping below. toHaveCount(1) is asserted
+    // (not swallowed) before probing emptiness: a `.catch(() => false)`
+    // around isVisible() would silently treat a strict-mode violation (e.g.
+    // today's Panel unexpectedly matching twice) as "not empty" and just
+    // skip, masking a real bug as a quiet skip instead of a loud failure.
+    const todayPanel = dayPanelByLabel(page, formatCivilDateLabel(today));
+    await expect(todayPanel).toHaveCount(1);
+
+    const emptyToday = todayPanel.getByText("No entry for today yet.", { exact: true });
+    const isEmpty = await emptyToday.isVisible();
     if (!isEmpty) {
       test.skip(
         true,
@@ -59,11 +70,6 @@ test.describe("student flows (dev-student-1, compliant, Batch Aurora)", () => {
       );
     }
 
-    // Scoped to today's own Panel throughout -- the compliant persona's other
-    // visible days never carry an absence, so an unscoped "Remove" would
-    // still be unique today, but scoping it removes that "still" and matches
-    // the reasonInput/Mark-absent scoping just above.
-    const todayPanel = dayPanelByLabel(page, formatCivilDateLabel(today));
     const reasonInput = todayPanel.getByLabel(`Absence reason for ${today}`);
     await reasonInput.fill("E2E absence round-trip");
     await todayPanel.getByRole("button", { name: "Mark absent" }).click();

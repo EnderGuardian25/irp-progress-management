@@ -202,7 +202,7 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
     expect(body.type).toBe("https://irp.bistec.example/problems/unauthorized");
   });
 
-  it("gives a mentor a uniform none/future list rather than 403 or 'missed' — mentors have no enrolment days", async () => {
+  it("gives a mentor a uniform 'none' list rather than 403 or 'missed' — mentors have no enrolment days", async () => {
     await mentor("md-mentor");
     const { from, to } = resolveRange();
 

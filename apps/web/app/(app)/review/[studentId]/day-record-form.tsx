@@ -88,7 +88,7 @@ export function DayRecordForm({
         </p>
       )}
       {state !== null && "ok" in state && (
-        <p className="text-sm" style={{ color: "var(--st-ok)" }}>Record saved.</p>
+        <p role="status" className="text-sm" style={{ color: "var(--st-ok)" }}>Record saved.</p>
       )}
       <div>
         <Button type="submit" variant="quiet" loading={pending}>
