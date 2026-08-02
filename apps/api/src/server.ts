@@ -3,6 +3,7 @@ import type { JWTVerifyGetKey } from "jose";
 import type { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import type { AppConfig } from "./config.js";
 import type { UserRepo } from "./db/user-repo.js";
+import type { EntryRepo } from "./db/entry-repo.js";
 import { createValidatorCompiler } from "./validation.js";
 import { tracingPlugin } from "./telemetry.js";
 import { problemDetailsPlugin } from "./plugins/problem-details.js";
@@ -10,10 +11,12 @@ import { authPlugin } from "./plugins/auth.js";
 import { requireAuthPlugin } from "./plugins/require-auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
+import { entryRoutes } from "./routes/entries.js";
 
 export interface ServerDeps {
   config: AppConfig;
   userRepo: UserRepo;
+  entryRepo: EntryRepo;
   getKey: JWTVerifyGetKey;
   tracerProvider: NodeTracerProvider;
 }
@@ -46,6 +49,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(requireAuthPlugin);
   await app.register(healthRoutes);
   await app.register(meRoutes);
+  await app.register(entryRoutes, { entryRepo: deps.entryRepo });
 
   await app.ready();
   return app;

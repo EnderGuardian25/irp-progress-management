@@ -3,6 +3,7 @@ import { bootstrap } from "./bootstrap.js";
 import { loadConfig } from "./config.js";
 import { createPrismaClient } from "./db/client.js";
 import { createUserRepo } from "./db/user-repo.js";
+import { createEntryRepo } from "./db/entry-repo.js";
 import { selectSpanExporter } from "./exporter.js";
 import { buildServer } from "./server.js";
 import { registerShutdown } from "./shutdown.js";
@@ -20,9 +21,10 @@ const timeoutMs =
 await bootstrap({
   start: async () => {
     const userRepo = createUserRepo(prisma);
+    const entryRepo = createEntryRepo(prisma);
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
-    const app = await buildServer({ config, userRepo, getKey, tracerProvider });
+    const app = await buildServer({ config, userRepo, entryRepo, getKey, tracerProvider });
 
     registerShutdown({
       close: () => app.close(),

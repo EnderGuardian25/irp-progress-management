@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { createPrismaClient } from "../../src/db/client.js";
 import { createUserRepo } from "../../src/db/user-repo.js";
+import { createEntryRepo } from "../../src/db/entry-repo.js";
 import { createTracerProvider } from "../../src/telemetry.js";
 import { buildServer } from "../../src/server.js";
 import { getLocalKeySet, testIssuer, testAudience } from "./keys.js";
@@ -19,6 +20,7 @@ export async function buildTestServer(databaseUrl: string): Promise<{
       jwtIssuer: testIssuer, jwtAudience: testAudience, version: "0.0.0", nodeEnv: "test",
     },
     userRepo: createUserRepo(prisma),
+    entryRepo: createEntryRepo(prisma),
     getKey: await getLocalKeySet(),
     tracerProvider: createTracerProvider(exporter),
   });

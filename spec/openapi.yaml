@@ -33,6 +33,8 @@ tags:
     description: Liveness and diagnostics. Unauthenticated.
   - name: Identity
     description: The authenticated caller.
+  - name: Submissions
+    description: Student daily entries and their rolled-up day view.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -119,6 +121,53 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/entries:
+    post:
+      operationId: createEntry
+      summary: Submit a daily entry
+      description: |
+        Creates one text entry for a target date the submission window
+        currently allows (FR-15: today or the previous weekday, weekends
+        included as optional Extra days — FR-33). The server computes
+        `isLate`/`isExtra` at the submission instant and creates the day's
+        DailyReport on first entry. Multiple entries per day are allowed.
+
+        Only students submit entries; a mentor token receives 403.
+      tags: [Submissions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntryCreate'
+      responses:
+        '200':
+          description: The stored entry, with server-computed flags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+              examples:
+                onTime:
+                  summary: Submitted on the target day
+                  value:
+                    id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                    entryDate: '2026-08-03'
+                    body: Implemented the roster endpoint and its tests.
+                    submittedAt: '2026-08-03T11:30:00.000Z'
+                    isLate: false
+                    isExtra: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
   securitySchemes:
@@ -243,6 +292,68 @@ components:
           examples:
             - 0.0.0
 
+    EntryCreate:
+      type: object
+      title: EntryCreate
+      description: A new daily entry. Text only — attachments are a confirmed non-goal.
+      required: [entryDate, body]
+      additionalProperties: false
+      properties:
+        entryDate:
+          type: string
+          format: date
+          description: The civil date (Asia/Colombo) this entry is for. Must be inside the caller's current submission window.
+          examples:
+            - '2026-08-03'
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: What was worked on. Plain text.
+          examples:
+            - Implemented the roster endpoint and its tests.
+
+    Entry:
+      type: object
+      title: Entry
+      description: One stored entry with server-computed flags.
+      required: [id, entryDate, body, submittedAt, isLate, isExtra]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Entry identifier.
+          examples:
+            - 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+        entryDate:
+          type: string
+          format: date
+          description: The civil date the entry targets.
+          examples:
+            - '2026-08-03'
+        body:
+          type: string
+          description: The submitted text.
+          examples:
+            - Implemented the roster endpoint and its tests.
+        submittedAt:
+          type: string
+          format: date-time
+          description: UTC instant the entry was accepted.
+          examples:
+            - '2026-08-03T11:30:00.000Z'
+        isLate:
+          type: boolean
+          description: True when a required day's entry arrived after that day ended but inside grace. Weekends are never late.
+          examples:
+            - false
+        isExtra:
+          type: boolean
+          description: True for entries on optional (weekend) days — FR-33.
+          examples:
+            - false
+
   responses:
     BadRequest:
       description: The request was malformed or failed schema validation.
@@ -295,6 +406,23 @@ components:
                 status: 403
                 detail: This account has not been registered by an Admin.
                 instance: /api/v1/me
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Conflict:
+      description: The request is valid but conflicts with the day's current state — locked (Evaluated), marked absent, or already holding contradictory records.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            lockedDay:
+              summary: The day is Evaluated and locked
+              value:
+                type: https://irp.bistec.example/problems/day-locked
+                title: Day is locked
+                status: 409
+                detail: 2026-08-03 is Evaluated and locked for the student (FR-20).
+                instance: /api/v1/entries
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
 
     InternalServerError:
