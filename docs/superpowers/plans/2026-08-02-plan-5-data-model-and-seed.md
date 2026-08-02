@@ -1590,6 +1590,12 @@ git commit -m "feat(api): cycle materialisation -- the engine's arithmetic cache
 - Modify: `apps/web/lib/dev-identities.ts`
 - Modify: `apps/web/package.json` (add dependency)
 - Modify: `apps/api/package.json` (add devDependency)
+- Modify: `Dockerfile` — a new workspace package must be COPY'd wherever the
+  existing ones are enumerated: its `package.json` in `deps` and `prod-deps`,
+  its source in `build` (apps/web bundles it). *(Correction 2026-08-02: this
+  line was missing; CI's `images` job caught the web build failing on
+  `Can't resolve '@irp/fixtures'` after every local gate passed — local
+  builds run in the real tree, where the package always exists.)*
 - Test: `apps/web/test/dev-identity.test.ts` (existing — must stay green unchanged)
 
 **Interfaces:**
