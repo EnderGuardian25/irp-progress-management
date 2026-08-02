@@ -2400,9 +2400,10 @@ git commit -m "feat(api): transfer and archive -- disjoint enrolments applied, a
   SectionLabel: { children: ReactNode }                       // the uppercase 12px label pattern the pages hand-roll today
   Panel:        { children: ReactNode; sunk?: boolean }        // surface card, radius-panel, 24px padding
   EmptyState:   { title: string; hint?: string }               // invitation copy, §11 — never "Nothing here"
-  Button:       { children; type?; variant?: "primary" | "quiet" | "danger"; disabled?; loading? }
+  Button:       { children; type?; variant?: "primary" | "quiet" | "danger"; disabled?; loading?; error? }
                 // all seven states via CSS classes btn/btn-primary/btn-quiet/btn-danger (§9);
-                // loading renders the label at reduced opacity + aria-busy, never a spinner swap
+                // loading renders the label at reduced opacity + aria-busy, never a spinner swap;
+                // error renders data-error="true" — missed-red border/text until the next interaction
   StatusPill:   { status: "onTime" | "late" | "absent" | "missed" | "pending" | "extra" | "none" | "future";
                   reportStatus?: "Submitted" | "InReview" | "Evaluated" | null }
   ```
@@ -2426,6 +2427,10 @@ Append to `apps/web/app/globals.css` (tokens exist; only component classes are n
 .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn[aria-busy="true"] { opacity: 0.7; cursor: progress; }
+/* Correction 2026-08-02: the original snippet shipped six states and
+   claimed seven. The error state is the post-action failure treatment —
+   a missed-red border that persists until the next interaction. */
+.btn[data-error="true"] { border-color: var(--st-missed); color: var(--st-missed); }
 .btn-primary { background: var(--primary); color: var(--surface); border: 1px solid var(--primary); }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn-primary:active:not(:disabled) { filter: brightness(0.92); }
