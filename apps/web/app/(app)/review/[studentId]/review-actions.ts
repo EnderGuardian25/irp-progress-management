@@ -61,11 +61,21 @@ export async function transitionReport(
  * Driven by DayRecordForm (a client component) via plain useActionState --
  * this already has the (prevState, formData) reducer shape useActionState
  * requires, same as submitEntry/markAbsent in entry-actions.ts.
+ *
+ * Returns `{ ok: true }` rather than `null` on success -- unlike every other
+ * action on this page, a successful save needs to say so. `upsertDayRecord`
+ * is a full replace (one record per student-day), not a merge, so silently
+ * resolving to nothing here would look identical to the pre-fix bug this
+ * return shape exists to close off: reopening a recorded day, editing only
+ * the note, and having attendance quietly revert to false/false with no
+ * on-screen signal that anything happened at all. `null` remains the
+ * *initial* state useActionState is seeded with (see day-record-form.tsx);
+ * the action itself never returns it.
  */
 export async function saveDayRecord(
-  _prev: { error: string } | null,
+  _prev: { ok: true } | { error: string } | null,
   formData: FormData,
-): Promise<{ error: string } | null> {
+): Promise<{ ok: true } | { error: string }> {
   const client = await apiClient();
   const studentId = formString(formData.get("studentId"));
   const date = formString(formData.get("date"));
@@ -81,5 +91,5 @@ export async function saveDayRecord(
   });
   if (error !== undefined) return { error: problemMessage(error, "The record was not saved.") };
   revalidatePath(`/review/${studentId}`);
-  return null;
+  return { ok: true };
 }

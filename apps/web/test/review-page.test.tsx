@@ -14,17 +14,24 @@ vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
 
 // review-actions.ts (unmocked -- exercised for real, same as the SDK-level
 // mocking roster-page.test.tsx uses) calls transitionDailyReport and
-// upsertDayRecord; page.tsx itself calls listStudentDays and listUsers. All
-// four are mocked here so the whole tree -- page, TransitionControl,
-// DayRecordForm, and the server actions underneath them -- runs without a
-// real client or network access.
-const { listStudentDays, listUsers, transitionDailyReport, upsertDayRecord } = vi.hoisted(() => ({
+// upsertDayRecord; page.tsx itself calls listStudentDays, listUsers, and
+// listDayRecords. All five are mocked here so the whole tree -- page,
+// TransitionControl, DayRecordForm, and the server actions underneath them --
+// runs without a real client or network access.
+const { listStudentDays, listUsers, listDayRecords, transitionDailyReport, upsertDayRecord } = vi.hoisted(() => ({
   listStudentDays: vi.fn(),
   listUsers: vi.fn(),
+  listDayRecords: vi.fn(),
   transitionDailyReport: vi.fn(),
   upsertDayRecord: vi.fn(),
 }));
-vi.mock("@irp/client", () => ({ listStudentDays, listUsers, transitionDailyReport, upsertDayRecord }));
+vi.mock("@irp/client", () => ({
+  listStudentDays,
+  listUsers,
+  listDayRecords,
+  transitionDailyReport,
+  upsertDayRecord,
+}));
 
 // redirect() in real Next never returns -- it throws a special NEXT_REDIRECT
 // signal that framework internals catch. The mock reproduces just the
@@ -39,6 +46,14 @@ const { redirect, REDIRECT_SENTINEL } = vi.hoisted(() => {
   };
 });
 vi.mock("next/navigation", () => ({ redirect }));
+
+// review-actions.ts runs for real (see the @irp/client mock's comment) and
+// calls revalidatePath on every success path. Outside an actual Next request
+// lifecycle that throws ("static generation store missing"), which the
+// error-path tests never hit (an error return skips revalidatePath) but the
+// prefill/success-line tests below do -- a no-op stub is all a unit test
+// needs, the same way next/navigation's redirect is stubbed above.
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const ADMIN_USER = {
   id: "1",
@@ -60,6 +75,16 @@ function params(studentId = "s1") {
   return Promise.resolve({ studentId });
 }
 
+// Every test below that renders past the Admin gate needs listDayRecords to
+// resolve to *something* -- page.tsx withholds DayRecordForm entirely when
+// it errors (see page.tsx's recordsByDate comment), so a test not about
+// prefill would otherwise silently lose its "Save record" assertions. Tests
+// that care about actual stored records override this with their own
+// mockResolvedValue.
+function noStoredRecords() {
+  listDayRecords.mockResolvedValue({ data: [], error: undefined });
+}
+
 describe("StudentReviewPage", () => {
   it("redirects a Student caller to / rather than rendering the review view", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT_USER);
@@ -74,6 +99,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: undefined,
       error: {
@@ -94,6 +120,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: [
         { date: "2026-07-28", status: "onTime", reportStatus: null, reportId: null, absenceReason: null, entries: [] },
@@ -119,6 +146,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: [
         {
@@ -147,6 +175,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: [
         {
@@ -173,6 +202,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: [
         {
@@ -204,6 +234,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: [
         {
@@ -244,6 +275,7 @@ describe("StudentReviewPage", () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
     listStudentDays.mockResolvedValue({
       data: [
         {
@@ -275,5 +307,112 @@ describe("StudentReviewPage", () => {
     fireEvent.click(within(panel!).getByRole("button", { name: "Save record" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The record was not saved.");
+  });
+
+  it("prefills the form from the stored day record -- reopening a recorded day must not start blank", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    listDayRecords.mockResolvedValue({
+      data: [
+        {
+          id: "dr1",
+          studentId: "s1",
+          date: "2026-07-28",
+          attended: true,
+          tasksCompleted: false,
+          note: "Caught up in the afternoon.",
+          recordedById: "m1",
+        },
+      ],
+      error: undefined,
+    });
+    listStudentDays.mockResolvedValue({
+      data: [
+        { date: "2026-07-28", status: "onTime", reportStatus: null, reportId: null, absenceReason: null, entries: [] },
+      ],
+      error: undefined,
+    });
+
+    render(await StudentReviewPage({ params: params() }));
+
+    expect(screen.getByLabelText("Attended")).toBeChecked();
+    expect(screen.getByLabelText("Tasks completed")).not.toBeChecked();
+    expect(screen.getByLabelText("Mentor note for 2026-07-28")).toHaveValue("Caught up in the afternoon.");
+  });
+
+  it("preserves the stored checked boxes in the submitted FormData when only the note is edited", async () => {
+    // The regression this whole correction exists to prevent: reopening a
+    // recorded day, touching only the note field, and having attendance
+    // silently revert to false/false because the form started unchecked.
+    // defaultChecked (uncontrolled) means the checkbox's live DOM state
+    // already reflects the stored record without the mentor touching it --
+    // this asserts that state is what actually reaches upsertDayRecord.
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    listDayRecords.mockResolvedValue({
+      data: [
+        {
+          id: "dr1",
+          studentId: "s1",
+          date: "2026-07-28",
+          attended: true,
+          tasksCompleted: true,
+          note: null,
+          recordedById: "m1",
+        },
+      ],
+      error: undefined,
+    });
+    listStudentDays.mockResolvedValue({
+      data: [
+        { date: "2026-07-28", status: "onTime", reportStatus: null, reportId: null, absenceReason: null, entries: [] },
+      ],
+      error: undefined,
+    });
+    upsertDayRecord.mockResolvedValueOnce({
+      data: { id: "dr1", studentId: "s1", date: "2026-07-28", attended: true, tasksCompleted: true, note: "Followed up by evening.", recordedById: "m1" },
+      error: undefined,
+    });
+
+    render(await StudentReviewPage({ params: params() }));
+
+    fireEvent.change(screen.getByLabelText("Mentor note for 2026-07-28"), {
+      target: { value: "Followed up by evening." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save record" }));
+
+    await screen.findByText("Record saved.");
+    expect(upsertDayRecord).toHaveBeenCalledWith({
+      client: {},
+      path: { id: "s1", date: "2026-07-28" },
+      body: { attended: true, tasksCompleted: true, note: "Followed up by evening." },
+    });
+  });
+
+  it("shows a success line after a save resolves without error", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listUsers.mockResolvedValue({ data: [STUDENT], error: undefined });
+    noStoredRecords();
+    listStudentDays.mockResolvedValue({
+      data: [
+        { date: "2026-07-28", status: "none", reportStatus: null, reportId: null, absenceReason: null, entries: [] },
+      ],
+      error: undefined,
+    });
+    upsertDayRecord.mockResolvedValueOnce({
+      data: { id: "dr2", studentId: "s1", date: "2026-07-28", attended: false, tasksCompleted: false, note: null, recordedById: "m1" },
+      error: undefined,
+    });
+
+    render(await StudentReviewPage({ params: params() }));
+
+    expect(screen.queryByText("Record saved.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save record" }));
+
+    expect(await screen.findByText("Record saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

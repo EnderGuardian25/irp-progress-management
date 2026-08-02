@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { listStudentDays, listUsers } from "@irp/client";
+import { listStudentDays, listUsers, listDayRecords } from "@irp/client";
 import { civilDate, isWeekday } from "@irp/core";
 import { getCurrentUserOrRedirect, apiClient } from "@/lib/api-client";
 import { PageTitle } from "@/components/ui/page-title";
@@ -40,9 +40,24 @@ export default async function StudentReviewPage({
   // read this SDK offers for a display name, and the roster is capped at a
   // v1 handful of students, so fetching the whole Student list and finding
   // by id here is cheap and doesn't warrant a new endpoint.
-  const [{ data: students, error: usersError }, { data: days, error: daysError }] = await Promise.all([
+  //
+  // listDayRecords is a separate read from listStudentDays -- DaySummary
+  // deliberately carries no DayRecord field (students must never receive the
+  // mentor's own record through the schema /me/days shares with
+  // listStudentDays), so the mentor's stored attendance/tasks records are
+  // fetched here and mapped by date below to prefill DayRecordForm. Skipping
+  // this and letting the form start blank was the exact bug this fetch
+  // exists to close: upsertDayRecord fully replaces the record, so an
+  // unprefilled reopen-to-add-a-note would silently revert attendance to
+  // false/false with no on-screen signal.
+  const [
+    { data: students, error: usersError },
+    { data: days, error: daysError },
+    { data: records, error: recordsError },
+  ] = await Promise.all([
     listUsers({ client, query: { role: "Student" } }),
     listStudentDays({ client, path: { id: studentId } }),
+    listDayRecords({ client, path: { id: studentId } }),
   ]);
 
   // Task 13's listBatches lesson: destructuring only `data` off an SDK call
@@ -66,6 +81,15 @@ export default async function StudentReviewPage({
   const student = students?.find((s) => s.id === studentId);
   const displayName = student?.displayName ?? studentId;
 
+  // Undefined only when listDayRecords itself failed -- a genuinely empty
+  // result is still an array, and `.get()` on the map correctly yields
+  // undefined for any date with no stored record (the "start blank" case,
+  // which is the honest state for a day the mentor has never recorded).
+  const recordsByDate =
+    recordsError === undefined
+      ? new Map((records ?? []).map((r) => [r.date, r]))
+      : undefined;
+
   return (
     <div>
       <PageTitle>Review — {displayName}</PageTitle>
@@ -74,6 +98,18 @@ export default async function StudentReviewPage({
         <Panel>
           <p role="alert" style={{ color: "var(--st-missed)" }}>
             {usersError.detail ?? usersError.title}
+          </p>
+        </Panel>
+      )}
+
+      {recordsError !== undefined && (
+        <Panel>
+          <p role="alert" style={{ color: "var(--st-missed)" }}>
+            {recordsError.detail ?? recordsError.title}
+          </p>
+          <p className="mt-1 text-sm" style={{ color: "var(--ink-muted)" }}>
+            Attendance/tasks records could not be loaded, so the record form is hidden below
+            rather than risk overwriting a stored record with blank defaults.
           </p>
         </Panel>
       )}
@@ -96,8 +132,15 @@ export default async function StudentReviewPage({
             const weekday = isWeekday(civilDate(day.date));
             // FR-20: an Evaluated day is locked -- no transition buttons, no
             // record form. A weekend never carries a record at all (the API
-            // 400s -- "there is nothing to attend").
-            const showForm = weekday && day.reportStatus !== "Evaluated";
+            // 400s -- "there is nothing to attend"). recordsByDate is
+            // undefined only when listDayRecords itself errored -- the form
+            // is withheld entirely rather than risk rendering it with wrong
+            // (blank) defaults; see the Panel above explaining why.
+            const showForm = weekday && day.reportStatus !== "Evaluated" && recordsByDate !== undefined;
+            const record = recordsByDate?.get(day.date);
+            const defaults = record === undefined
+              ? undefined
+              : { attended: record.attended, tasksCompleted: record.tasksCompleted, note: record.note };
 
             return (
               <Panel key={day.date}>
@@ -129,6 +172,21 @@ export default async function StudentReviewPage({
                   <p style={{ color: "var(--ink-muted)" }}>Absent — {day.absenceReason}</p>
                 )}
 
+                {/*
+                  Two separate conditional branches, not one TransitionControl
+                  with a `reportStatus` prop that changes in place -- this is
+                  load-bearing, not a style choice. React reconciles these as
+                  distinct slots (only one is ever truthy), so when a
+                  transition succeeds and revalidatePath re-renders this page
+                  with the day's new reportStatus, the previous branch's
+                  TransitionControl unmounts and the next one mounts fresh.
+                  That remount is what resets useActionState back to its
+                  initial `null` -- without it, a single long-lived instance
+                  would carry the *first* step's pending/error state into the
+                  *second* step's button, and a stale error from "Start
+                  review" could linger on screen under "Mark evaluated" after
+                  the transition that produced it already succeeded.
+                */}
                 {day.reportStatus === "Submitted" && day.reportId !== null && (
                   <TransitionControl
                     studentId={studentId}
@@ -144,7 +202,18 @@ export default async function StudentReviewPage({
                   />
                 )}
 
-                {showForm && <DayRecordForm studentId={studentId} date={day.date} />}
+                {/*
+                  Two full branches rather than `defaults={defaults}` --
+                  exactOptionalPropertyTypes forbids passing an explicit
+                  `undefined` to an optional prop (same reasoning as
+                  student-today.tsx's `query` construction).
+                */}
+                {showForm && defaults === undefined && (
+                  <DayRecordForm studentId={studentId} date={day.date} />
+                )}
+                {showForm && defaults !== undefined && (
+                  <DayRecordForm studentId={studentId} date={day.date} defaults={defaults} />
+                )}
               </Panel>
             );
           })}

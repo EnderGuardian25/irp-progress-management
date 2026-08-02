@@ -57,9 +57,10 @@ function weekdayInWindow(): CivilDate {
 // which are not submission-window-gated and so need no fixed clock.
 const A_MONDAY: CivilDate = "2026-08-03" as CivilDate;
 const A_SUNDAY: CivilDate = "2026-08-02" as CivilDate;
+const THE_NEXT_TUESDAY: CivilDate = "2026-08-04" as CivilDate;
 
 describe.skipIf(!dbUrl)(
-  "POST /api/v1/daily-reports/{id}/transition, PUT /api/v1/students/{id}/day-records/{date}, GET /api/v1/students/{id}/days",
+  "POST /api/v1/daily-reports/{id}/transition, PUT /api/v1/students/{id}/day-records/{date}, GET /api/v1/students/{id}/days, GET /api/v1/students/{id}/day-records",
   () => {
     let app: FastifyInstance;
     let prisma: Awaited<ReturnType<typeof buildTestServer>>["prisma"];
@@ -352,6 +353,77 @@ describe.skipIf(!dbUrl)(
           url: `/api/v1/students/${s.id}/day-records/${A_MONDAY}`,
           headers: bearer(await signToken({ oid: "rev-d6-student" })),
           payload: { attended: true, tasksCompleted: true },
+        });
+
+        expect(res.statusCode).toBe(403);
+        expect(res.headers["content-type"]).toContain("application/problem+json");
+        const body = res.json<ProblemLike>();
+        expect(body.type).toBe("https://irp.bistec.example/problems/admin-only");
+      });
+    });
+
+    describe("list day records", () => {
+      it("returns stored records in range, oldest first", async () => {
+        const s = await student("rev-l1-student");
+        await mentor("rev-l1-mentor");
+        const bearerHeader = bearer(await signToken({ oid: "rev-l1-mentor" }));
+
+        // Written out of chronological order -- listForStudent's ORDER BY,
+        // not insertion order, is what the assertion below is actually
+        // checking.
+        const second = await app.inject({
+          method: "PUT",
+          url: `/api/v1/students/${s.id}/day-records/${THE_NEXT_TUESDAY}`,
+          headers: bearerHeader,
+          payload: { attended: true, tasksCompleted: true, note: "Tuesday." },
+        });
+        expect(second.statusCode).toBe(200);
+        const first = await app.inject({
+          method: "PUT",
+          url: `/api/v1/students/${s.id}/day-records/${A_MONDAY}`,
+          headers: bearerHeader,
+          payload: { attended: false, tasksCompleted: true },
+        });
+        expect(first.statusCode).toBe(200);
+
+        const res = await app.inject({
+          method: "GET",
+          url: `/api/v1/students/${s.id}/day-records?from=${A_MONDAY}&to=${THE_NEXT_TUESDAY}`,
+          headers: bearerHeader,
+        });
+
+        expect(res.statusCode).toBe(200);
+        const body = res.json<DayRecordLike[]>();
+        expect(body).toHaveLength(2);
+        expect(body[0]!.date).toBe(A_MONDAY);
+        expect(body[0]!.attended).toBe(false);
+        expect(body[0]!.note).toBeNull();
+        expect(body[1]!.date).toBe(THE_NEXT_TUESDAY);
+        expect(body[1]!.note).toBe("Tuesday.");
+      });
+
+      it("rejects an unknown student id with 404 student-not-found", async () => {
+        await mentor("rev-l2-mentor");
+
+        const res = await app.inject({
+          method: "GET",
+          url: `/api/v1/students/${UNKNOWN_UUID}/day-records`,
+          headers: bearer(await signToken({ oid: "rev-l2-mentor" })),
+        });
+
+        expect(res.statusCode).toBe(404);
+        expect(res.headers["content-type"]).toContain("application/problem+json");
+        const body = res.json<ProblemLike>();
+        expect(body.type).toBe("https://irp.bistec.example/problems/student-not-found");
+      });
+
+      it("rejects a student token with 403 admin-only", async () => {
+        const s = await student("rev-l3-student");
+
+        const res = await app.inject({
+          method: "GET",
+          url: `/api/v1/students/${s.id}/day-records`,
+          headers: bearer(await signToken({ oid: "rev-l3-student" })),
         });
 
         expect(res.statusCode).toBe(403);

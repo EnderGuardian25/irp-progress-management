@@ -13,5 +13,6 @@ export function unusedMentorRecordRepo(): MentorRecordRepo {
   return {
     upsert: unused,
     get: unused,
+    listForStudent: unused,
   };
 }

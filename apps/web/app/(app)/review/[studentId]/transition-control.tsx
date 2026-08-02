@@ -46,7 +46,7 @@ export function TransitionControl({
       </Button>
       {state !== null && (
         <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
-          {state.error}
+          {state.error ?? "Something went wrong."}
         </p>
       )}
     </form>

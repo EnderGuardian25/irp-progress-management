@@ -105,4 +105,16 @@ export const reviewRoutes: FastifyPluginAsync<{
       return days.map(toApiDay);
     },
   );
+
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
+    "/api/v1/students/:id/day-records",
+    { schema: { params: UUID_PARAM, querystring: DAYS_QUERY }, preHandler: [app.authenticate] },
+    async (req): Promise<ApiDayRecord[]> => {
+      requireAdmin(req);
+      await resolveStudent(opts.userRepo, req.params.id);
+      const { from, to } = resolveRange(req.query.from, req.query.to, new Date());
+      const records = await opts.mentorRecordRepo.listForStudent(req.params.id, from, to);
+      return records.map(toApiDayRecord);
+    },
+  );
 };

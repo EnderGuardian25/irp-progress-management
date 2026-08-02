@@ -22,6 +22,13 @@ export interface MentorRecordRepo {
     recordedById: string;
   }): Promise<MentorDayRecordShape>;
   get(studentId: string, date: CivilDate): Promise<MentorDayRecordShape | null>;
+  /**
+   * Every stored record for one student in [from, to], date ascending — the
+   * review page's prefill source (GET /api/v1/students/{id}/day-records).
+   * Same range shape as EntryRepo/AbsenceRepo's listForStudent: a gte/lte
+   * window over the mapped DB date, ordered by that same column.
+   */
+  listForStudent(studentId: string, from: CivilDate, to: CivilDate): Promise<MentorDayRecordShape[]>;
 }
 
 interface DbRecord {
@@ -56,6 +63,14 @@ export function createMentorRecordRepo(prisma: PrismaClient): MentorRecordRepo {
         where: { studentId_date: { studentId, date: toDbDate(date) } },
       });
       return row ? map(row) : null;
+    },
+
+    async listForStudent(studentId, from, to) {
+      const rows = await prisma.mentorDayRecord.findMany({
+        where: { studentId, date: { gte: toDbDate(from), lte: toDbDate(to) } },
+        orderBy: { date: "asc" },
+      });
+      return rows.map(map);
     },
   };
 }

@@ -806,6 +806,84 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/students/{id}/day-records:
+    get:
+      operationId: listDayRecords
+      summary: A target student's stored mentor day records
+      description: |
+        The mentor's own attendance/tasks records for one student, one row per
+        date recorded (FR-19) — the review page uses this to prefill its
+        per-day form, since `upsertDayRecord` fully replaces the stored record
+        on every call and an unprefilled reopen would silently wipe attendance
+        back to false/false.
+
+        Deliberately a separate read from `listStudentDays`: `DaySummary`
+        carries no `DayRecord` field, because students must never receive the
+        mentor's own record through the schema `/me/days` shares with this
+        endpoint's sibling.
+
+        Defaults to the current evaluation cycle (the 10th of the month to
+        the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        - name: from
+          in: query
+          required: false
+          description: First day of the range (inclusive). Defaults to the current cycle's start.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-07-10'
+        - name: to
+          in: query
+          required: false
+          description: Last day of the range (inclusive). Defaults to the current cycle's end. Ranges over 92 days are rejected.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-09'
+      responses:
+        '200':
+          description: The stored records in range, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DayRecord'
+              examples:
+                oneRecord:
+                  summary: A single recorded weekday
+                  value:
+                    - id: 8c7b6a5d-4e3f-4d2c-9b1a-0f9e8d7c6b5a
+                      studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                      date: '2026-08-03'
+                      attended: true
+                      tasksCompleted: true
+                      note: Paired on the deployment workflow.
+                      recordedById: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/students/{id}/days:
     get:
       operationId: listStudentDays
