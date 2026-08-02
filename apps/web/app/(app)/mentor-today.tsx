@@ -116,7 +116,14 @@ export async function MentorToday({ displayName, role }: { displayName: string; 
                 )}
               </div>
 
-              <div className="mt-1" data-testid={`day-label-${batch.id}`}>
+              {/*
+                `data-date` carries the ISO form of the day these figures
+                describe. The visible label is prose ("Friday 31 July"), which
+                a test cannot turn back into a date, and on a weekend this day
+                is NOT today — so an e2e check that wants to cross-read the
+                Roster for the same day has no other way to address it.
+              */}
+              <div className="mt-1" data-testid={`day-label-${batch.id}`} data-date={d.date}>
                 <SectionLabel>
                   {formatCivilDateLabel(d.date)}
                   {d.isFallbackDay && " · the last required day, not today"}

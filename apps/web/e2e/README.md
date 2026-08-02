@@ -103,3 +103,45 @@ pnpm --filter @irp/web e2e
 If the JWKS fetch fails, `apps/api` returns **503** rather than 401 (Task
 11's behaviour). Check `JWKS_URI` in `apps/api/.env` points at
 `http://localhost:3000/api/dev-jwks` and that `apps/web` is up.
+
+## `dashboard-flows.spec.ts` (Plan 7)
+
+Seven tests over the same seeded personas, covering FR-28's mentor dashboard,
+the Cycles view, and FR-29/FR-30's student My month.
+
+| Test | Personas it touches | What it proves |
+|---|---|---|
+| N of M submitted, per batch | Both mentors' view of Batch Aurora and Batch Basalt | The must-ship figure renders for every batch, and N never exceeds M |
+| M matches the Roster's row count | Batch Aurora's active students | The dashboard's denominator and the Roster agree for the *same day* |
+| Ribbon length matches the cycle it names | Batch Aurora | The figcaption's "Day x of y" and the ribbon's own required-day count cannot drift |
+| Cycles lists every active Aurora student, never a score | All Batch A personas; the archived one (Tharindu) | FR-5 — an archived student leaves active views; and no score exists to leak |
+| Month N of 6, own pills, empty S&W | `dev-student-1` (fully compliant) | FR-29's three elements render together |
+| No score, rank, or peer name | `dev-student-1` vs every other persona | FR-30, asserted against the whole `<main>` text |
+| Student blocked from mentor dashboards | `dev-student-1` | `/cycles` redirects home, and the link is never offered |
+
+### Re-seed before running
+
+```bash
+export DATABASE_URL='postgresql://irp:irp@127.0.0.1:5433/irp?schema=public'
+pnpm --filter @irp/api db:seed
+```
+
+### Every assertion here is relational — and it has to be
+
+The seed is a **function of the run date**: `run-seed.ts` computes every
+persona's history backwards from "now" via `@irp/core`, so which days are
+late, missed or absent — and which cycle each batch is on — shifts with the
+calendar. A hard-coded count, date or percentage would pass on the day it was
+written and fail on the 10th.
+
+So these tests never assert a literal figure. They read what the page reports
+and check it against something that must agree: N against M, the ribbon's
+declared cycle length against its own rendered day count, the dashboard's
+denominator against the Roster's row count for the same day.
+
+**One trap worth knowing.** The Roster defaults to *today*; mentor Today falls
+back to the *last required day* when today is a weekend. Comparing the two
+against the Roster's default would pass Monday to Friday and fail every
+Saturday. The row-count test therefore addresses the Roster explicitly by the
+ISO date the dashboard exposes on `data-date`, alongside the batch id in its
+`data-testid` — neither value hard-coded, and no weekday assumption.
