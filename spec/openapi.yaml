@@ -33,6 +33,16 @@ tags:
     description: Liveness and diagnostics. Unauthenticated.
   - name: Identity
     description: The authenticated caller.
+  - name: Submissions
+    description: Student daily entries and their rolled-up day view.
+  - name: Absences
+    description: Explicitly recorded weekday absences. Recorded, not requested — there is no approval workflow.
+  - name: Batches
+    description: Cohorts and their enrolment rosters. Mentor (Admin) access only.
+  - name: Users
+    description: Registration and the user directory. Mentor (Admin) access only; there is no self-registration.
+  - name: Reviews
+    description: Mentor review of daily reports — forward-only state, attendance records, and the per-student day view.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -119,6 +129,836 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/entries:
+    post:
+      operationId: createEntry
+      summary: Submit a daily entry
+      description: |
+        Creates one text entry for a target date the submission window
+        currently allows (FR-15: today or the previous weekday, weekends
+        included as optional Extra days — FR-33). The server computes
+        `isLate`/`isExtra` at the submission instant and creates the day's
+        DailyReport on first entry. Multiple entries per day are allowed.
+
+        Only students submit entries; a mentor token receives 403.
+      tags: [Submissions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntryCreate'
+      responses:
+        '200':
+          description: The stored entry, with server-computed flags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+              examples:
+                onTime:
+                  summary: Submitted on the target day
+                  value:
+                    id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                    entryDate: '2026-08-03'
+                    body: Implemented the roster endpoint and its tests.
+                    submittedAt: '2026-08-03T11:30:00.000Z'
+                    isLate: false
+                    isExtra: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/me/days:
+    get:
+      operationId: listMyDays
+      summary: My rolled-up day history
+      description: |
+        One element per calendar day in the range, oldest first: the caller's
+        entries for that day, the review status of the day's report, and the
+        server-computed classification. Weekends appear with status `extra`
+        (work recorded) or `none` (nothing) — never late or missed (FR-33).
+        Days outside the caller's enrolment intervals also report `none` —
+        no enrolment, no obligation — even when such a day is in the future.
+
+        Defaults to the current evaluation cycle (the 10th of the month to
+        the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.
+      tags: [Submissions]
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: First day of the range (inclusive). Defaults to the current cycle's start.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-07-10'
+        - name: to
+          in: query
+          required: false
+          description: Last day of the range (inclusive). Defaults to the current cycle's end. Ranges over 92 days are rejected.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-09'
+      responses:
+        '200':
+          description: The day-by-day view, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DaySummary'
+              examples:
+                twoDays:
+                  summary: A submitted weekday and an untouched weekend day
+                  value:
+                    - date: '2026-07-31'
+                      status: onTime
+                      reportStatus: Submitted
+                      reportId: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                      absenceReason: null
+                      entries:
+                        - id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                          entryDate: '2026-07-31'
+                          body: Wrote the cycle materialisation tests.
+                          submittedAt: '2026-07-31T10:05:00.000Z'
+                          isLate: false
+                          isExtra: false
+                    - date: '2026-08-01'
+                      status: none
+                      reportStatus: null
+                      reportId: null
+                      absenceReason: null
+                      entries: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/absences:
+    post:
+      operationId: createAbsence
+      summary: Mark a weekday absent
+      description: |
+        Records an absence with a reason (FR-16). Weekdays only — a weekend
+        carries no obligation to be absent from (400). The day must still be
+        inside its submission window (400 otherwise), must not be locked
+        (409), and must not already hold entries (409) — absent and
+        submitted are contradictory.
+      tags: [Absences]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AbsenceCreate'
+      responses:
+        '200':
+          description: The recorded absence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Absence'
+              examples:
+                medical:
+                  summary: A recorded absence
+                  value:
+                    id: 1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9
+                    date: '2026-08-03'
+                    reason: medical appointment
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/absences/{date}:
+    delete:
+      operationId: deleteAbsence
+      summary: Remove an absence mark
+      description: |
+        Removes the caller's absence record for the date. Allowed only while
+        the day is still inside its submission window and not locked — a
+        finalised day is history, not editable state.
+      tags: [Absences]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          description: The civil date whose absence mark to remove.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-03'
+      responses:
+        '200':
+          description: The absence was removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Absence'
+              examples:
+                removed:
+                  summary: The removed record
+                  value:
+                    id: 1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9
+                    date: '2026-08-03'
+                    reason: medical appointment
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches:
+    get:
+      operationId: listBatches
+      summary: List batches
+      description: All cohorts, oldest first. Mentor only.
+      tags: [Batches]
+      responses:
+        '200':
+          description: Every batch.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Batch'
+              examples:
+                two:
+                  summary: Two concurrent cohorts
+                  value:
+                    - id: 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      name: Batch Aurora
+                      startDate: '2026-05-10'
+                      endDate: '2026-11-09'
+                    - id: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                      name: Batch Basalt
+                      startDate: '2026-07-10'
+                      endDate: '2027-01-09'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createBatch
+      summary: Create a batch
+      description: |
+        Creates a cohort (FR-6). startDate must precede endDate. `name` is
+        unique; a repeated name is rejected with 409.
+      tags: [Batches]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchCreate'
+      responses:
+        '200':
+          description: The created batch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+              examples:
+                created:
+                  summary: A new cohort
+                  value:
+                    id: 7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d
+                    name: Batch Cinder
+                    startDate: '2026-09-10'
+                    endDate: '2027-03-09'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches/{id}/roster:
+    get:
+      operationId: getBatchRoster
+      summary: The batch roster for a date
+      description: |
+        Every student enrolled on the given date (archived students leave
+        active rosters), each with their day view, mentor-record presence,
+        and the cycle's Extra count. Defaults to today (Asia/Colombo).
+      tags: [Batches]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The batch id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+        - name: date
+          in: query
+          required: false
+          description: The roster date. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-03'
+      responses:
+        '200':
+          description: One row per enrolled student, ordered by display name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RosterRow'
+              examples:
+                oneRow:
+                  summary: A single enrolled student
+                  value:
+                    - student:
+                        id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                        displayName: Amaya Perera
+                        email: a.perera@bistecglobal.com
+                      day:
+                        date: '2026-08-03'
+                        status: onTime
+                        reportStatus: Submitted
+                        reportId: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                        absenceReason: null
+                        entries:
+                          - id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                            entryDate: '2026-08-03'
+                            body: Implemented the roster endpoint and its tests.
+                            submittedAt: '2026-08-03T11:30:00.000Z'
+                            isLate: false
+                            isExtra: false
+                      hasMentorRecord: false
+                      extraCountThisCycle: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/students/{id}/transfer:
+    post:
+      operationId: transferStudent
+      summary: Transfer a student to another batch
+      description: |
+        Moves a student's open enrolment to a new batch, effective on the
+        given date (FR-8). The old enrolment closes the day before; the new
+        batch owns the effective date onward (ADR-0017) — the two intervals
+        never overlap. Mentor only.
+      tags: [Batches]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: The new open enrolment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Enrolment'
+              examples:
+                transferred:
+                  summary: Moved into Batch Basalt effective 2026-08-10
+                  value:
+                    id: 4c3b2a1f-6e5d-4c3b-8a29-1f0e9d8c7b6a
+                    studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    batchId: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                    startDate: '2026-08-10'
+                    endDate: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: The user directory
+      description: |
+        Every registered user, active by default, ordered by display name.
+        Mentor only. `archived=true` switches to the FR-5 archive view —
+        soft-deleted users, kept for history but without access.
+      tags: [Users]
+      parameters:
+        - name: role
+          in: query
+          required: false
+          description: Filter by role.
+          schema:
+            $ref: '#/components/schemas/Role'
+        - name: archived
+          in: query
+          required: false
+          description: true lists archived users (the FR-5 archive view); default false.
+          schema:
+            type: boolean
+            examples:
+              - false
+      responses:
+        '200':
+          description: The matching users, ordered by display name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserDetail'
+              examples:
+                twoActive:
+                  summary: Two active users
+                  value:
+                    - id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                      email: a.perera@bistecglobal.com
+                      displayName: Amaya Perera
+                      role: Student
+                      archived: false
+                    - id: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+                      email: n.perera@bistecglobal.com
+                      displayName: Nuwan Perera
+                      role: Admin
+                      archived: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createUser
+      summary: Register a mentor or a student
+      description: |
+        Registers a new account (FR-3). Students require an initial
+        enrolment, created atomically with the user record; mentors must not
+        carry one. Mentor only; there is no self-registration.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '200':
+          description: The registered user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+              examples:
+                student:
+                  summary: A newly registered student, enrolled into a batch
+                  value:
+                    id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    email: a.perera@bistecglobal.com
+                    displayName: Amaya Perera
+                    role: Student
+                    archived: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/users/{id}:
+    delete:
+      operationId: archiveUser
+      summary: Archive a user
+      description: |
+        Soft archive (FR-5): the user leaves active rosters and loses
+        access, history is kept. Idempotent — archiving an archived user is
+        a no-op. Self-archive is rejected (409). Mentor only.
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user id to archive.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+      responses:
+        '200':
+          description: The archived user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+              examples:
+                archived:
+                  summary: A student, archived
+                  value:
+                    id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    email: a.perera@bistecglobal.com
+                    displayName: Amaya Perera
+                    role: Student
+                    archived: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/daily-reports/{id}/transition:
+    post:
+      operationId: transitionDailyReport
+      summary: Advance a daily report's review state
+      description: |
+        Moves one report forward one step (FR-18): Submitted to InReview, or
+        InReview to Evaluated. Forward-only — there is no Rejected state and
+        no way back. The current state must match what the target expects
+        (409 otherwise); an `updateMany` guarded on the expected current
+        state makes two mentors racing the same step resolve to exactly one
+        winner rather than a lost update.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The daily report id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionRequest'
+      responses:
+        '200':
+          description: The report in its new state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReport'
+              examples:
+                inReview:
+                  summary: Moved from Submitted to InReview
+                  value:
+                    id: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                    studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    reportDate: '2026-08-03'
+                    status: InReview
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/students/{id}/day-records/{date}:
+    put:
+      operationId: upsertDayRecord
+      summary: Record (or update) a mentor's attendance/tasks note for a student-day
+      description: |
+        Stores the mentor's own attendance and task-completion record for one
+        student and one weekday (FR-19). Independent of entries — valid for a
+        day that holds no submission. A second call for the same student and
+        date overwrites the first; there is one record per student-day.
+        Weekends carry no such record (400) — there is nothing to attend.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        - name: date
+          in: path
+          required: true
+          description: The weekday the record applies to.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-03'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DayRecordUpsert'
+      responses:
+        '200':
+          description: The stored record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DayRecord'
+              examples:
+                recorded:
+                  summary: Attendance and tasks recorded
+                  value:
+                    id: 8c7b6a5d-4e3f-4d2c-9b1a-0f9e8d7c6b5a
+                    studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    date: '2026-08-03'
+                    attended: true
+                    tasksCompleted: true
+                    note: Paired on the deployment workflow.
+                    recordedById: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/students/{id}/day-records:
+    get:
+      operationId: listDayRecords
+      summary: A target student's stored mentor day records
+      description: |
+        The mentor's own attendance/tasks records for one student, one row per
+        date recorded (FR-19) — the review page uses this to prefill its
+        per-day form, since `upsertDayRecord` fully replaces the stored record
+        on every call and an unprefilled reopen would silently wipe attendance
+        back to false/false.
+
+        Deliberately a separate read from `listStudentDays`: `DaySummary`
+        carries no `DayRecord` field, because students must never receive the
+        mentor's own record through the schema `/me/days` shares with this
+        endpoint's sibling.
+
+        Defaults to the current evaluation cycle (the 10th of the month to
+        the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        - name: from
+          in: query
+          required: false
+          description: First day of the range (inclusive). Defaults to the current cycle's start.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-07-10'
+        - name: to
+          in: query
+          required: false
+          description: Last day of the range (inclusive). Defaults to the current cycle's end. Ranges over 92 days are rejected.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-09'
+      responses:
+        '200':
+          description: The stored records in range, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DayRecord'
+              examples:
+                oneRecord:
+                  summary: A single recorded weekday
+                  value:
+                    - id: 8c7b6a5d-4e3f-4d2c-9b1a-0f9e8d7c6b5a
+                      studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                      date: '2026-08-03'
+                      attended: true
+                      tasksCompleted: true
+                      note: Paired on the deployment workflow.
+                      recordedById: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/students/{id}/days:
+    get:
+      operationId: listStudentDays
+      summary: A target student's rolled-up day history
+      description: |
+        The same day-by-day view `listMyDays` returns, but for a student the
+        mentor names rather than the caller — one element per calendar day in
+        the range, oldest first. Mentor only; a student token receives 403.
+
+        Defaults to the current evaluation cycle (the 10th of the month to
+        the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        - name: from
+          in: query
+          required: false
+          description: First day of the range (inclusive). Defaults to the current cycle's start.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-07-10'
+        - name: to
+          in: query
+          required: false
+          description: Last day of the range (inclusive). Defaults to the current cycle's end. Ranges over 92 days are rejected.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-09'
+      responses:
+        '200':
+          description: The day-by-day view, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DaySummary'
+              examples:
+                oneDay:
+                  summary: A single reviewed weekday
+                  value:
+                    - date: '2026-08-03'
+                      status: onTime
+                      reportStatus: InReview
+                      reportId: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                      absenceReason: null
+                      entries:
+                        - id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                          entryDate: '2026-08-03'
+                          body: Implemented the roster endpoint and its tests.
+                          submittedAt: '2026-08-03T11:30:00.000Z'
+                          isLate: false
+                          isExtra: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
   securitySchemes:
@@ -224,6 +1064,89 @@ components:
         role:
           $ref: '#/components/schemas/Role'
 
+    UserCreate:
+      type: object
+      title: UserCreate
+      description: |
+        Register a mentor or a student (FR-3). Students require an initial
+        enrolment; mentors must not carry one. The externalId is the Entra
+        object id (oid claim) the person will authenticate with.
+      required: [externalId, email, displayName, role]
+      additionalProperties: false
+      properties:
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Entra object id (oid) of the account.
+          examples:
+            - 00000000-aaaa-bbbb-cccc-000000000001
+        email:
+          type: string
+          format: email
+          description: Bistec account email. Unique.
+          examples:
+            - n.perera@bistecglobal.com
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Name as shown in the interface.
+          examples:
+            - Nuwan Perera
+        role:
+          $ref: '#/components/schemas/Role'
+        enrolment:
+          type: object
+          description: Initial enrolment — required for Students, forbidden for Admins.
+          required: [batchId, startDate]
+          additionalProperties: false
+          properties:
+            batchId:
+              type: string
+              format: uuid
+              description: The batch to enrol into.
+              examples:
+                - 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+            startDate:
+              type: string
+              format: date
+              description: Enrolment start (admission) date.
+              examples:
+                - '2026-08-10'
+
+    UserDetail:
+      type: object
+      title: UserDetail
+      description: A directory row — the User shape plus archival state (FR-5).
+      required: [id, email, displayName, role, archived]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable internal identifier.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        email:
+          type: string
+          format: email
+          description: Bistec account email.
+          examples:
+            - a.perera@bistecglobal.com
+        displayName:
+          type: string
+          description: Name as shown in the interface.
+          examples:
+            - Amaya Perera
+        role:
+          $ref: '#/components/schemas/Role'
+        archived:
+          type: boolean
+          description: True when the user has been archived (soft-deleted). Archived users keep history and lose access.
+          examples:
+            - false
+
     HealthStatus:
       type: object
       title: HealthStatus
@@ -242,6 +1165,464 @@ components:
           description: The running application version.
           examples:
             - 0.0.0
+
+    EntryCreate:
+      type: object
+      title: EntryCreate
+      description: A new daily entry. Text only — attachments are a confirmed non-goal.
+      required: [entryDate, body]
+      additionalProperties: false
+      properties:
+        entryDate:
+          type: string
+          format: date
+          description: The civil date (Asia/Colombo) this entry is for. Must be inside the caller's current submission window.
+          examples:
+            - '2026-08-03'
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: What was worked on. Plain text.
+          examples:
+            - Implemented the roster endpoint and its tests.
+
+    Entry:
+      type: object
+      title: Entry
+      description: One stored entry with server-computed flags.
+      required: [id, entryDate, body, submittedAt, isLate, isExtra]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Entry identifier.
+          examples:
+            - 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+        entryDate:
+          type: string
+          format: date
+          description: The civil date the entry targets.
+          examples:
+            - '2026-08-03'
+        body:
+          type: string
+          description: The submitted text.
+          examples:
+            - Implemented the roster endpoint and its tests.
+        submittedAt:
+          type: string
+          format: date-time
+          description: UTC instant the entry was accepted.
+          examples:
+            - '2026-08-03T11:30:00.000Z'
+        isLate:
+          type: boolean
+          description: True when a required day's entry arrived after that day ended but inside grace. Weekends are never late.
+          examples:
+            - false
+        isExtra:
+          type: boolean
+          description: True for entries on optional (weekend) days — FR-33.
+          examples:
+            - false
+
+    DayStatus:
+      type: string
+      title: DayStatus
+      enum: [onTime, late, absent, missed, pending, extra, none, future]
+      description: |
+        Server-computed classification of one day.
+
+        A day with no entry that falls outside every one of the student's
+        enrolment intervals — before joining, after leaving, or for a caller
+        with no enrolment at all — carries no obligation and is always
+        `none`, even when that day is in the future.
+
+        Otherwise (an entry was recorded, or the day falls inside an
+        enrolment interval): `future` means the day has not arrived yet. Of
+        the days that have arrived, required days (weekdays) resolve to
+        onTime/late/absent/missed/pending, and optional days (weekends)
+        resolve to extra/none — never late or missed. `pending` means the
+        grace window is still open. There is no rejected state.
+      examples:
+        - onTime
+
+    ReportStatus:
+      type: string
+      title: ReportStatus
+      enum: [Submitted, InReview, Evaluated]
+      description: Review state of one day's rolled-up report (FR-18/FR-20). Forward-only; Evaluated locks the day.
+      examples:
+        - Submitted
+
+    DaySummary:
+      type: object
+      title: DaySummary
+      description: Everything on record for one student and one calendar day.
+      required: [date, status, reportStatus, reportId, absenceReason, entries]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The civil date (Asia/Colombo).
+          examples:
+            - '2026-07-31'
+        status:
+          $ref: '#/components/schemas/DayStatus'
+        reportStatus:
+          oneOf:
+            - $ref: '#/components/schemas/ReportStatus'
+            - type: 'null'
+          description: Review state of the day's report, or null when no entry has created one.
+        reportId:
+          oneOf:
+            - type: string
+              format: uuid
+            - type: 'null'
+          description: The DailyReport id, used by mentors to transition review state. Null until a first entry exists.
+          examples:
+            - 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+        absenceReason:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: The recorded absence reason, when the day is marked absent.
+          examples:
+            - medical appointment
+        entries:
+          type: array
+          description: The day's entries, earliest first. Empty when nothing was submitted.
+          items:
+            $ref: '#/components/schemas/Entry'
+
+    AbsenceCreate:
+      type: object
+      title: AbsenceCreate
+      description: A new absence mark for a weekday still inside its submission window (FR-16).
+      required: [date, reason]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The weekday to mark absent. Must be inside the caller's current submission window.
+          examples:
+            - '2026-08-03'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the student was absent.
+          examples:
+            - medical appointment
+
+    Absence:
+      type: object
+      title: Absence
+      description: One recorded absence.
+      required: [id, date, reason]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Absence record identifier.
+          examples:
+            - 1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9
+        date:
+          type: string
+          format: date
+          description: The civil date marked absent.
+          examples:
+            - '2026-08-03'
+        reason:
+          type: string
+          description: Why the student was absent.
+          examples:
+            - medical appointment
+
+    Batch:
+      type: object
+      title: Batch
+      description: A cohort with its own start and end dates. Two run concurrently; calendars are independent.
+      required: [id, name, startDate, endDate]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Batch identifier.
+          examples:
+            - 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+        name:
+          type: string
+          description: Display name.
+          examples:
+            - Batch Aurora
+        startDate:
+          type: string
+          format: date
+          description: Admission date — anchors cycle numbering (FR-6, FR-9).
+          examples:
+            - '2026-05-10'
+        endDate:
+          type: string
+          format: date
+          description: Programme end for this cohort.
+          examples:
+            - '2026-11-09'
+
+    BatchCreate:
+      type: object
+      title: BatchCreate
+      description: A new cohort. startDate must precede endDate.
+      required: [name, startDate, endDate]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Display name. Must be unique; a repeat is rejected with 409.
+          examples:
+            - Batch Cinder
+        startDate:
+          type: string
+          format: date
+          description: Admission date.
+          examples:
+            - '2026-09-10'
+        endDate:
+          type: string
+          format: date
+          description: Programme end. Must be after startDate (400 otherwise).
+          examples:
+            - '2027-03-09'
+
+    TransferRequest:
+      type: object
+      title: TransferRequest
+      description: Move a student to another batch (FR-8). The new batch owns the effective date; the old enrolment closes the day before (ADR-0017).
+      required: [toBatchId, effectiveDate]
+      additionalProperties: false
+      properties:
+        toBatchId:
+          type: string
+          format: uuid
+          description: The destination batch.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        effectiveDate:
+          type: string
+          format: date
+          description: First day in the new batch. Must be after the open enrolment's start (400 otherwise).
+          examples:
+            - '2026-08-10'
+
+    Enrolment:
+      type: object
+      title: Enrolment
+      description: |
+        One student's enrolment interval in one batch. ADR-0017 guarantees
+        these are disjoint per student — at most one open (endDate null) at
+        a time.
+      required: [id, studentId, batchId, startDate, endDate]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Enrolment identifier.
+          examples:
+            - 4c3b2a1f-6e5d-4c3b-8a29-1f0e9d8c7b6a
+        studentId:
+          type: string
+          format: uuid
+          description: The enrolled student's user id.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        batchId:
+          type: string
+          format: uuid
+          description: The batch this interval belongs to.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        startDate:
+          type: string
+          format: date
+          description: First day of this interval, inclusive.
+          examples:
+            - '2026-08-10'
+        endDate:
+          oneOf:
+            - type: string
+              format: date
+            - type: 'null'
+          description: Last day of this interval, inclusive, or null while the enrolment is still open.
+          examples:
+            - null
+
+    RosterRow:
+      type: object
+      title: RosterRow
+      description: One enrolled student's state for the roster date — the mentor's working view (FR-28 groundwork).
+      required: [student, day, hasMentorRecord, extraCountThisCycle]
+      additionalProperties: false
+      properties:
+        student:
+          type: object
+          description: The enrolled student.
+          required: [id, displayName, email]
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: User id.
+              examples:
+                - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+            displayName:
+              type: string
+              description: Name as shown in the interface.
+              examples:
+                - Amaya Perera
+            email:
+              type: string
+              format: email
+              description: Bistec account email.
+              examples:
+                - a.perera@bistecglobal.com
+        day:
+          $ref: '#/components/schemas/DaySummary'
+        hasMentorRecord:
+          type: boolean
+          description: Whether the mentor has recorded attendance/tasks for this date (FR-19).
+          examples:
+            - true
+        extraCountThisCycle:
+          type: integer
+          minimum: 0
+          description: Weekend Extra entries inside the cycle containing the roster date. A count, not a status — Extra is not a compliance state.
+          examples:
+            - 2
+
+    TransitionRequest:
+      type: object
+      title: TransitionRequest
+      description: Advance a report one step. Forward-only — Submitted to InReview to Evaluated; there is no Rejected and no way back.
+      required: [to]
+      additionalProperties: false
+      properties:
+        to:
+          type: string
+          enum: [InReview, Evaluated]
+          description: The target state. InReview requires the report to be Submitted; Evaluated requires InReview.
+          examples:
+            - InReview
+
+    DailyReport:
+      type: object
+      title: DailyReport
+      description: One student-day's rolled-up review record (FR-18/FR-20).
+      required: [id, studentId, reportDate, status]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Report identifier.
+          examples:
+            - 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+        studentId:
+          type: string
+          format: uuid
+          description: The student the report belongs to.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        reportDate:
+          type: string
+          format: date
+          description: The civil date the report rolls up.
+          examples:
+            - '2026-08-03'
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+
+    DayRecordUpsert:
+      type: object
+      title: DayRecordUpsert
+      description: The mentor's own attendance/tasks record for a student-day (FR-19). Independent of entries — valid for entry-less days.
+      required: [attended, tasksCompleted]
+      additionalProperties: false
+      properties:
+        attended:
+          type: boolean
+          description: Whether the student attended.
+          examples:
+            - true
+        tasksCompleted:
+          type: boolean
+          description: Whether the day's tasks were completed.
+          examples:
+            - true
+        note:
+          type: string
+          maxLength: 500
+          description: Optional free-text note.
+          examples:
+            - Paired on the deployment workflow.
+
+    DayRecord:
+      type: object
+      title: DayRecord
+      description: A stored mentor day record.
+      required: [id, studentId, date, attended, tasksCompleted, note, recordedById]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Record identifier.
+          examples:
+            - 8c7b6a5d-4e3f-4d2c-9b1a-0f9e8d7c6b5a
+        studentId:
+          type: string
+          format: uuid
+          description: The student.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        date:
+          type: string
+          format: date
+          description: The weekday recorded.
+          examples:
+            - '2026-08-03'
+        attended:
+          type: boolean
+          description: Attendance as recorded by the mentor.
+          examples:
+            - true
+        tasksCompleted:
+          type: boolean
+          description: Task completion as recorded by the mentor.
+          examples:
+            - true
+        note:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: The mentor's note, when one was recorded.
+          examples:
+            - Paired on the deployment workflow.
+        recordedById:
+          type: string
+          format: uuid
+          description: The mentor who recorded it.
+          examples:
+            - 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
 
   responses:
     BadRequest:
@@ -295,6 +1676,40 @@ components:
                 status: 403
                 detail: This account has not been registered by an Admin.
                 instance: /api/v1/me
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    NotFound:
+      description: The referenced resource does not exist for this caller.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missingAbsence:
+              summary: No absence recorded on that date
+              value:
+                type: https://irp.bistec.example/problems/absence-not-found
+                title: No absence recorded
+                status: 404
+                detail: No absence is recorded for 2026-08-03.
+                instance: /api/v1/absences/2026-08-03
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Conflict:
+      description: The request is valid but conflicts with the day's current state — locked (Evaluated), marked absent, or already holding contradictory records.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            lockedDay:
+              summary: The day is Evaluated and locked
+              value:
+                type: https://irp.bistec.example/problems/day-locked
+                title: Day is locked
+                status: 409
+                detail: 2026-08-03 is Evaluated and locked for the student (FR-20).
+                instance: /api/v1/entries
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
 
     InternalServerError:

@@ -10,7 +10,7 @@ type ApiUser = components["schemas"]["User"];
 // ternary would then map the new member to "Student" in silence. `Record<...>`
 // makes this half of the chain exhaustive too: widening the union without
 // adding a case here is a type error.
-const ROLE_TO_API: Record<UserRecord["role"], ApiUser["role"]> = {
+export const ROLE_TO_API: Record<UserRecord["role"], ApiUser["role"]> = {
   ADMIN: "Admin",
   STUDENT: "Student",
 };

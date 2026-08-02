@@ -1,7 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Topbar } from "@/components/app-frame/topbar";
 import { Sidebar } from "@/components/app-frame/sidebar";
+
+// Topbar now imports signOut from @/auth for its sign-out form. Real
+// next-auth (pulled in transitively via @/auth) needs `next/server`, which
+// isn't resolvable under Vitest's environment — mock the app's thin wrapper,
+// same as signin.test.tsx does for NotRegisteredPage. The inline `"use
+// server"` action is asserted by presence, never invoked.
+vi.mock("@/auth", () => ({
+  signOut: vi.fn(),
+}));
 
 describe("Topbar", () => {
   it("shows the signed-in user's name", () => {
@@ -20,49 +29,82 @@ describe("Topbar", () => {
     render(<Topbar userName="A" />);
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
   });
+
+  it("offers a sign-out control", () => {
+    render(<Topbar userName="A" />);
+    expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
+  });
 });
 
 describe("Sidebar", () => {
   it("is a navigation landmark 216px wide", () => {
-    render(<Sidebar />);
+    render(<Sidebar role="Admin" />);
     expect(screen.getByRole("navigation")).toHaveStyle({ width: "216px" });
   });
 
-  it("renders Today as a real link now that / has a page", () => {
+  it("renders Today as a real link now that / has a page, on both role variants", () => {
     // Task 9 added apps/web/app/(app)/page.tsx, so "/" is a route typedRoutes
     // accepts. Today is a link; it carries no aria-disabled.
-    render(<Sidebar />);
-    const today = screen.getByRole("link", { name: /Today/ });
-    expect(today).toHaveAttribute("href", "/");
-    expect(today).not.toHaveAttribute("aria-disabled");
-  });
-
-  it("renders the remaining four destinations as non-interactive items — none has a page yet", () => {
-    // Roster and Students land in Plan 6, Review and Cycles in Plan 7.
-    // typedRoutes rejects a Link to any of the four, so they stay
-    // non-interactive until their own task lands.
-    render(<Sidebar />);
-    for (const item of ["Roster", "Review", "Cycles", "Students"]) {
-      expect(screen.queryByRole("link", { name: new RegExp(item) })).not.toBeInTheDocument();
-      const el = screen.getByText(new RegExp(item));
-      expect(el).toHaveAttribute("aria-disabled", "true");
+    for (const role of ["Admin", "Student"] as const) {
+      const { unmount } = render(<Sidebar role={role} />);
+      const today = screen.getByRole("link", { name: /Today/ });
+      expect(today).toHaveAttribute("href", "/");
+      expect(today).not.toHaveAttribute("aria-disabled");
+      unmount();
     }
   });
 
-  it("shows a review count on the (non-link) Review item only when there is something to review", () => {
-    // getByText matches on each node's own direct text ("Review"), not the
-    // nested badge span's "3" — so read the full textContent to confirm the
-    // rendered name is "Review 3" with a space, not "Review3" run together.
-    // That spacing requirement is the same one a link's accessible name
-    // would need; it still applies now that the item is a plain span.
-    const { rerender } = render(<Sidebar reviewCount={3} />);
-    const withCount = screen.getByText(/^Review$/);
-    expect(withCount).toHaveAttribute("aria-disabled", "true");
+  it("mentor (Admin) role: Roster, Review, and Students are real links; Cycles stays non-interactive", () => {
+    // Task 13 added apps/web/app/(app)/roster/page.tsx, Task 14 added
+    // apps/web/app/(app)/review/page.tsx, and Task 15 added
+    // apps/web/app/(app)/students/page.tsx, so all three are now real links.
+    // Cycles lands in Plan 7 -- typedRoutes rejects a Link to it, so it stays
+    // non-interactive until its own task lands.
+    render(<Sidebar role="Admin" />);
+
+    const roster = screen.getByRole("link", { name: /Roster/ });
+    expect(roster).toHaveAttribute("href", "/roster");
+    expect(roster).not.toHaveAttribute("aria-disabled");
+
+    const review = screen.getByRole("link", { name: /^Review$/ });
+    expect(review).toHaveAttribute("href", "/review");
+    expect(review).not.toHaveAttribute("aria-disabled");
+
+    const students = screen.getByRole("link", { name: /Students/ });
+    expect(students).toHaveAttribute("href", "/students");
+    expect(students).not.toHaveAttribute("aria-disabled");
+
+    expect(screen.queryByRole("link", { name: /Cycles/ })).not.toBeInTheDocument();
+    const cycles = screen.getByText(/Cycles/);
+    expect(cycles).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("Student role: sees only Today and My month -- no mentor-only destinations at all", () => {
+    // Role gating hides mentor destinations entirely rather than merely
+    // disabling them -- a Student should find no trace of Roster, Review,
+    // Cycles, or Students in the DOM.
+    render(<Sidebar role="Student" />);
+
+    expect(screen.getByText("My month")).toHaveAttribute("aria-disabled", "true");
+    for (const item of ["Roster", "Review", "Cycles", "Students"]) {
+      expect(screen.queryByText(new RegExp(item))).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows a review count on the Review link only when there is something to review", () => {
+    // Task 14 turned Review into a real Link; the badge logic itself
+    // (sidebar.tsx's showCount/badge) is unchanged and applies inside
+    // whichever element wraps the label, link or span. Reading
+    // textContent confirms the rendered name is "Review 3" with a space,
+    // not "Review3" run together.
+    const { rerender } = render(<Sidebar role="Admin" reviewCount={3} />);
+    const withCount = screen.getByRole("link", { name: /^Review/ });
+    expect(withCount).not.toHaveAttribute("aria-disabled");
     expect(withCount.textContent).toBe("Review 3");
 
-    rerender(<Sidebar reviewCount={0} />);
-    const withoutCount = screen.getByText(/^Review$/);
-    expect(withoutCount).toHaveAttribute("aria-disabled", "true");
+    rerender(<Sidebar role="Admin" reviewCount={0} />);
+    const withoutCount = screen.getByRole("link", { name: /^Review/ });
+    expect(withoutCount).not.toHaveAttribute("aria-disabled");
     expect(withoutCount.textContent).toBe("Review");
   });
 });

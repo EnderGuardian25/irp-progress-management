@@ -116,7 +116,7 @@ revokes access without deleting identity or history.
 | `PUT /students/{id}/day-records/{date}` | Upsert the mentor's attendance/tasks record (FR-19). Independent of entries — valid for entry-less days. |
 | `POST /users` | Register a mentor, or a student + initial enrolment `{ batchId, startDate }` (FR-3). 409 on duplicate email/externalId. |
 | `GET /users?role=&archived=` | Active by default; `archived=true` is the FR-5 archive view. |
-| `POST /students/{id}/transfer` | `{ toBatchId, effectiveDate }` — closes the open enrolment, opens the new one (FR-8). |
+| `POST /students/{id}/transfer` | `{ toBatchId, effectiveDate }` — closes the open enrolment, opens the new one (FR-8). Effective-date ownership: the NEW batch owns the effective date; the old enrolment closes the day before (ADR-0017). 400 if the effective date is on/before the open enrolment's start. |
 | `DELETE /users/{id}` | Soft archive: sets `deletedAt`. Archived students leave active rosters, keep all history. 409 on self-archive. |
 
 **Dashboard endpoints (Plan 7):**

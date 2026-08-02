@@ -6,6 +6,13 @@ import { createTracerProvider } from "../src/telemetry.js";
 import { buildServer } from "../src/server.js";
 import { signToken, getLocalKeySet, testIssuer, testAudience } from "./helpers/keys.js";
 import { fakeUserRepo } from "./helpers/fake-user-repo.js";
+import { unusedEntryRepo } from "./helpers/fake-entry-repo.js";
+import { unusedAbsenceRepo } from "./helpers/fake-absence-repo.js";
+import { unusedBatchRepo } from "./helpers/fake-batch-repo.js";
+import { unusedMentorRecordRepo } from "./helpers/fake-mentor-record-repo.js";
+import { unusedDayService } from "./helpers/fake-day-service.js";
+import { unusedRosterService } from "./helpers/fake-roster-service.js";
+import { unusedPrisma } from "./helpers/fake-prisma.js";
 
 // This suite exercises only the auth plugin's key-getter branching — it never
 // reaches `userRepo.findByExternalId` on any of the 503/401 paths below, so it
@@ -25,11 +32,18 @@ describe("when the JWKS endpoint is unreachable", () => {
         version: "0.0.0", nodeEnv: "test",
       },
       userRepo,
+      entryRepo: unusedEntryRepo(),
+      absenceRepo: unusedAbsenceRepo(),
+      batchRepo: unusedBatchRepo(),
+      mentorRecordRepo: unusedMentorRecordRepo(),
+      dayService: unusedDayService(),
+      rosterService: unusedRosterService(),
       // Stands in for createRemoteJWKSet against a dead endpoint.
       getKey: () => {
         throw new Error("ECONNREFUSED: the JWKS endpoint is unreachable");
       },
       tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+      prisma: unusedPrisma(),
     });
   });
 
@@ -79,12 +93,19 @@ describe("when a token's kid matches no published key", () => {
         version: "0.0.0", nodeEnv: "test",
       },
       userRepo,
+      entryRepo: unusedEntryRepo(),
+      absenceRepo: unusedAbsenceRepo(),
+      batchRepo: unusedBatchRepo(),
+      mentorRecordRepo: unusedMentorRecordRepo(),
+      dayService: unusedDayService(),
+      rosterService: unusedRosterService(),
       // A REAL key-getter over a healthy, reachable key set — this is not a
       // simulated outage. It simply does not contain the kid the forged
       // token below claims, which is exactly what a live server sees when
       // presented a token signed with an unpublished or rotated-out key.
       getKey: await getLocalKeySet(),
       tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+      prisma: unusedPrisma(),
     });
   });
 

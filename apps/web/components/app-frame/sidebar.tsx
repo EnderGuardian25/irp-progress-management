@@ -7,29 +7,52 @@ import Link from "next/link";
  *
  * `typedRoutes: true` (apps/web/next.config.ts) validates every `<Link
  * href>` against routes that actually exist. Task 9 added
- * `apps/web/app/(app)/page.tsx`, so "/" is now a real route and Today is a
- * real link. Roster, Review, Cycles and Students still have no page —
- * Roster and Students land in Plan 6, Review and Cycles in Plan 7 — so they
- * stay non-interactive items until the task that adds each one's page. Each
- * becomes a real `<Link href="...">` in that task — no `as Route` casts in
- * the meantime.
+ * `apps/web/app/(app)/page.tsx`, so "/" is a real route and Today is a real
+ * link on both destination lists. Task 13 added `apps/web/app/(app)/roster/
+ * page.tsx`, so Roster is now a real link; Task 14 added
+ * `apps/web/app/(app)/review/page.tsx`, so Review is now a real link too —
+ * but only on the mentor list. Cycles still has no page (Plan 7) and
+ * Students keeps its href out until Task 15 even though its page doesn't
+ * exist yet either. Each destination becomes a real `<Link href="...">` in
+ * the task that adds its page — no `as Route` casts in the meantime.
+ *
+ * Navigation is role-gated, not just link-gated: a Student never sees
+ * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
+ * than seeing them disabled. Students get their own two-item list; "My
+ * month" stays label-only until Plan 7.
+ *
+ * Task 15 added `apps/web/app/(app)/students/page.tsx`, so Students is now a
+ * real link too. Cycles still has no page (Plan 7) and stays label-only.
  */
-const DESTINATIONS = [
+const MENTOR_DESTINATIONS = [
   { label: "Today", href: "/" },
-  { label: "Roster" },
-  { label: "Review" },
+  { label: "Roster", href: "/roster" },
+  { label: "Review", href: "/review" },
   { label: "Cycles" },
-  { label: "Students" },
+  { label: "Students", href: "/students" },
 ] as const;
 
-export function Sidebar({ reviewCount = 0 }: { reviewCount?: number }) {
+const STUDENT_DESTINATIONS = [
+  { label: "Today", href: "/" },
+  { label: "My month" },
+] as const;
+
+export function Sidebar({
+  role,
+  reviewCount = 0,
+}: {
+  role: "Admin" | "Student";
+  reviewCount?: number;
+}) {
+  const destinations = role === "Admin" ? MENTOR_DESTINATIONS : STUDENT_DESTINATIONS;
+
   return (
     <nav
       aria-label="Primary"
       className="flex flex-col gap-1 border-r p-4"
       style={{ width: "216px", background: "var(--surface)", borderColor: "var(--line)" }}
     >
-      {DESTINATIONS.map((d) => {
+      {destinations.map((d) => {
         const showCount = d.label === "Review" && reviewCount > 0;
         const badge = showCount && (
           <span className="tabular ml-2" style={{ color: "var(--ink-muted)" }}>

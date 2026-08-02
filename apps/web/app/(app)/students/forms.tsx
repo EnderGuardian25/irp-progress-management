@@ -1,0 +1,248 @@
+"use client";
+
+import { useActionState, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { SectionLabel } from "@/components/ui/section-label";
+import { registerUser, addBatch, transferStudentAction, archiveUserAction } from "./admin-actions";
+
+const FIELD_CLASS = "rounded-[var(--radius-control)] border px-3 py-2";
+const FIELD_STYLE = { borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" } as const;
+
+export interface BatchOption {
+  id: string;
+  name: string;
+}
+
+export interface StudentOption {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+/**
+ * FR-3 registration. The role select drives whether batch/startDate render
+ * at all -- not just whether they're disabled -- because UserCreate's
+ * `enrolment` key must be entirely absent from the request for a Mentor
+ * (admin-actions.ts's registerUser reads it off formData, and an absent
+ * field is what makes that omission trivial rather than a second source of
+ * truth to keep in sync).
+ */
+export function RegisterForm({ batches }: { batches: BatchOption[] }) {
+  const [state, action, pending] = useActionState(registerUser, null);
+  const [role, setRole] = useState<"Student" | "Admin">("Student");
+
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Role</SectionLabel>
+        <select
+          name="role"
+          value={role}
+          onChange={(e) => setRole(e.target.value === "Admin" ? "Admin" : "Student")}
+          aria-label="Role"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        >
+          <option value="Student">Student</option>
+          <option value="Admin">Mentor</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Email</SectionLabel>
+        <input
+          name="email"
+          type="email"
+          required
+          aria-label="Email"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Display name</SectionLabel>
+        <input
+          name="displayName"
+          required
+          aria-label="Display name"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>External id</SectionLabel>
+        <input
+          name="externalId"
+          required
+          aria-label="External id"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        />
+      </label>
+      {role === "Student" && (
+        <>
+          <label className="flex flex-col gap-1">
+            <SectionLabel>Batch</SectionLabel>
+            <select name="batchId" required aria-label="Batch" className={FIELD_CLASS} style={FIELD_STYLE}>
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <SectionLabel>Start date</SectionLabel>
+            <input
+              name="startDate"
+              type="date"
+              required
+              aria-label="Start date"
+              className={FIELD_CLASS}
+              style={FIELD_STYLE}
+            />
+          </label>
+        </>
+      )}
+      {state !== null && "error" in state && (
+        <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
+          {state.error}
+        </p>
+      )}
+      {state !== null && "ok" in state && (
+        <p role="status" className="text-sm" style={{ color: "var(--st-ok)" }}>
+          Registered.
+        </p>
+      )}
+      <div>
+        <Button type="submit" loading={pending}>Register</Button>
+      </div>
+    </form>
+  );
+}
+
+/** FR-6 batch creation. */
+export function CreateBatchForm() {
+  const [state, action, pending] = useActionState(addBatch, null);
+
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Batch name</SectionLabel>
+        <input name="name" required aria-label="Batch name" className={FIELD_CLASS} style={FIELD_STYLE} />
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Batch start date</SectionLabel>
+        <input
+          name="startDate"
+          type="date"
+          required
+          aria-label="Batch start date"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Batch end date</SectionLabel>
+        <input
+          name="endDate"
+          type="date"
+          required
+          aria-label="Batch end date"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        />
+      </label>
+      {state !== null && "error" in state && (
+        <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
+          {state.error}
+        </p>
+      )}
+      {state !== null && "ok" in state && (
+        <p role="status" className="text-sm" style={{ color: "var(--st-ok)" }}>
+          Batch created.
+        </p>
+      )}
+      <div>
+        <Button type="submit" variant="quiet" loading={pending}>Create batch</Button>
+      </div>
+    </form>
+  );
+}
+
+/** FR-8 transfer, ADR-0017's new-batch-owns-the-effective-date rule. */
+export function TransferForm({
+  students,
+  batches,
+}: {
+  students: StudentOption[];
+  batches: BatchOption[];
+}) {
+  const [state, action, pending] = useActionState(transferStudentAction, null);
+
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Student</SectionLabel>
+        <select name="studentId" required aria-label="Student" className={FIELD_CLASS} style={FIELD_STYLE}>
+          {students.map((s) => (
+            <option key={s.id} value={s.id}>{s.displayName} ({s.email})</option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>New batch</SectionLabel>
+        <select name="toBatchId" required aria-label="New batch" className={FIELD_CLASS} style={FIELD_STYLE}>
+          {batches.map((b) => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <SectionLabel>Effective date</SectionLabel>
+        <input
+          name="effectiveDate"
+          type="date"
+          required
+          aria-label="Effective date"
+          className={FIELD_CLASS}
+          style={FIELD_STYLE}
+        />
+      </label>
+      {state !== null && "error" in state && (
+        <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
+          {state.error}
+        </p>
+      )}
+      {state !== null && "ok" in state && (
+        <p role="status" className="text-sm" style={{ color: "var(--st-ok)" }}>
+          Transferred.
+        </p>
+      )}
+      <div>
+        <Button type="submit" variant="quiet" loading={pending}>Transfer</Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * One row's archive control. A client component driven by useActionState,
+ * mirroring transition-control.tsx: `archiveUserAction.bind(null, userId)`
+ * fixes the one argument the action needs, leaving the (state, formData)
+ * pair useActionState supplies as ignored parameters. The API refuses
+ * self-archive (and archiving a batch's last mentor) with 409 -- that
+ * `detail` must reach the mentor rather than be discarded, which is why this
+ * is its own client component rather than a bound plain-form action.
+ */
+export function ArchiveButton({ userId }: { userId: string }) {
+  const [state, action, pending] = useActionState(archiveUserAction.bind(null, userId), null);
+
+  return (
+    <form action={action} className="flex flex-col items-end gap-1">
+      <Button type="submit" variant="danger" loading={pending}>Archive</Button>
+      {state !== null && "error" in state && (
+        <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
+          {state.error}
+        </p>
+      )}
+    </form>
+  );
+}

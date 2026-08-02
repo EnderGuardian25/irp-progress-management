@@ -113,32 +113,64 @@ exporter and nothing else changes.
 **What exists now**
 
 ```
-spec/openapi.yaml        OpenAPI 3.1, two operations, lints clean under recommended-strict
+spec/openapi.yaml        OpenAPI 3.1, 17 operations across 15 paths, lints clean under
+                         recommended-strict (two of those operations predate Plan 6)
 packages/core/           the cycle/date engine. Builds to dist/. 112 tests
 packages/types/          GENERATED, git-ignored, never committed
 packages/client/         GENERATED, git-ignored, never committed
 apps/api/                Fastify service — config, ajv 2020-12 validator compiler, hand-written
                          tracing plugin, RFC 7807 handler, Prisma + user repo, JWT auth plugin,
-                         routes, server composition, entrypoint. 34 tests
+                         routes, server composition, entrypoint. 223 tests
 apps/api/prisma/         schema.prisma (User + Role) + committed migration
 apps/api/prisma.config.ts    Prisma 7 CLI datasource config (the schema block cannot hold `url`)
 apps/api/src/generated/prisma/   GENERATED, git-ignored — a THIRD generated package
 apps/api/docker-compose.yml  local Postgres 16, host port ${IRP_DB_PORT:-5432}
 apps/web/                Next.js 16 — Auth.js v5, route groups ((auth) bare, (app) framed),
                          verified design tokens, app frame, CycleRibbon, server-only API client
-                         factory, middleware guard. 63 unit tests + 5 Playwright specs
+                         factory, proxy guard. 141 unit tests + 15 Playwright tests
 apps/web/lib/dev-identity.ts     THE DEV BYPASS. server-only. Mints RS256 tokens with a local
-                         key. Guarded at three entry points — see ADR-0012
-apps/web/e2e/            Playwright. The only test proving the whole sign-in chain
+                         key. FOUR entry points need the guard, covered by THREE call sites —
+                         the counts differ, which is exactly why "it's the same call" kept
+                         being wrong. See CLAUDE.md and ADR-0012 before touching it
+apps/web/e2e/            Playwright — signin.spec.ts (the sign-in chain) plus, as of Task 16,
+                         student-flows.spec.ts and mentor-flows.spec.ts (Plan 6's submission and
+                         review screens over the seeded personas)
 packages/client/dist/    GENERATED declarations, git-ignored. Consumers resolve TYPES from here
                          so apps/web keeps full strictness
 redocly.yaml             recommended-strict + a custom four-response assertion
 eslint.config.mjs        type-aware, generated dirs ignored
 .github/workflows/ci.yml 3-timezone matrix + Postgres, generation and tamper gates, next build,
-                         Playwright on the UTC leg, and a dormant real-token job
+                         Playwright on all three legs (Task 16: the suite gained genuine
+                         date/timezone-sensitive assertions, so the earlier UTC-only restriction
+                         no longer applies — its own comment said as much), and a dormant
+                         real-token job
 ```
 
-Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwright.**
+Test totals as of Task 16: **`@irp/core` 112 · `apps/api` 223 · `apps/web` 141 unit + 15
+Playwright.** (`apps/api` and `apps/web`'s unit counts, and the Playwright count, all grew
+substantially over the Plan 5 figures this line used to carry — see the branch's own gate output,
+or the Task 16 report, to reconcile further.)
+
+**Plan 6 surface, in progress on `feat/plan-6-submission-and-review`.** Not yet merged (§2a's row
+stays "In progress" until the PR lands), but the following exists on the branch as of Task 16:
+
+- **15 `apps/api` endpoints** across `spec/openapi.yaml`'s Plan 6 paths — entries (`POST
+  /api/v1/entries`), the student's own day view (`GET /api/v1/me/days`), absences (`POST
+  /api/v1/absences`, `DELETE /api/v1/absences/{date}`), batches + roster (`GET`/`POST
+  /api/v1/batches`, `GET /api/v1/batches/{id}/roster`), review transitions and mentor day records
+  (`POST /api/v1/daily-reports/{id}/transition`, `/api/v1/students/{id}/day-records[/{date}]`), a
+  student's own cycle of days for the mentor (`GET /api/v1/students/{id}/days`), user
+  administration (`GET`/`POST /api/v1/users`, `DELETE /api/v1/users/{id}`), and transfer + archive
+  (`POST /api/v1/students/{id}/transfer`).
+- **Five `apps/web` (app) pages**: UI primitives + sign-out (Task 11), the student Today page with
+  its composer and absence toggle (Task 12), the mentor Roster (Task 13), the mentor Review flow —
+  attendance/tasks record, forward-only Submitted → In Review → Evaluated transitions, FR-20's lock
+  (Task 14), and the mentor Students directory — register, create batch, transfer, archive (Task
+  15).
+- **`apps/web/e2e/student-flows.spec.ts` and `mentor-flows.spec.ts`** (Task 16), covering both
+  roles' Plan 6 screens over the seeded personas from `@irp/fixtures`, alongside the existing
+  `signin.spec.ts`. See `apps/web/e2e/README.md` for the persona-to-flow map and the re-seed
+  instruction the suite depends on.
 
 ### Not started
 
@@ -202,8 +234,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
 | | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **Merged, PR #8** |
 | | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **Merged, PR #9.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
-| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **This plan.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
-| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
+| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **Merged, PR #10.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
+| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | ⏳ **In progress** — branch `feat/plan-6-submission-and-review`; opens with the repo error contract, the entry-vs-absence race fix, and the transfer-day inclusivity decision deferred from Plan 5's pre-PR pass |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
 | **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |

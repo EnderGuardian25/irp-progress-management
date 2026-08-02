@@ -3,7 +3,13 @@ import { civilDate } from "@irp/core";
 import { createPrismaClient } from "../src/db/client.js";
 import { createAbsenceRepo } from "../src/db/absence-repo.js";
 import { createEntryRepo } from "../src/db/entry-repo.js";
-import { EntryConflictError, LockedDayError, WeekendAbsenceError } from "../src/domain/errors.js";
+import {
+  AbsenceExistsError,
+  AbsenceNotFoundError,
+  EntryConflictError,
+  LockedDayError,
+  WeekendAbsenceError,
+} from "../src/domain/errors.js";
 import { resetDb } from "./helpers/db.js";
 import { dbUrl } from "./helpers/require-db.js";
 
@@ -55,5 +61,17 @@ describe.skipIf(!dbUrl)("createAbsenceRepo", () => {
     await repo.create({ studentId: s.id, date: MONDAY, reason: "travel" });
     await repo.remove(s.id, MONDAY);
     expect(await prisma.absenceRecord.count()).toBe(0);
+  });
+
+  it("create() maps a duplicate to AbsenceExistsError", async () => {
+    const s = await student("a-6");
+    await repo.create({ studentId: s.id, date: MONDAY, reason: "sick" });
+    await expect(repo.create({ studentId: s.id, date: MONDAY, reason: "again" }))
+      .rejects.toBeInstanceOf(AbsenceExistsError);
+  });
+
+  it("remove() of a nonexistent absence throws AbsenceNotFoundError", async () => {
+    const s = await student("a-7");
+    await expect(repo.remove(s.id, MONDAY)).rejects.toBeInstanceOf(AbsenceNotFoundError);
   });
 });

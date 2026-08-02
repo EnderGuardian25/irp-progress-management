@@ -1,6 +1,13 @@
-import type { CivilDate } from "@irp/core";
-import type { PrismaClient } from "../generated/prisma/client.js";
+import { addDays, compareDates, type CivilDate } from "@irp/core";
+import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
+import {
+  DuplicateBatchNameError, InvalidTransferDateError, NoOpenEnrolmentError, OpenEnrolmentExistsError,
+} from "../domain/errors.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
 
 export interface BatchRecord {
   id: string;
@@ -17,13 +24,29 @@ export interface EnrolmentRecord {
   endDate: CivilDate | null;
 }
 
+export interface RosterMember {
+  studentId: string;
+  displayName: string;
+  email: string;
+}
+
 export interface BatchRepo {
   create(input: { name: string; startDate: CivilDate; endDate: CivilDate }): Promise<BatchRecord>;
   list(): Promise<BatchRecord[]>;
+  getBatch(id: string): Promise<BatchRecord | null>;
   enrol(studentId: string, batchId: string, startDate: CivilDate): Promise<EnrolmentRecord>;
   transfer(studentId: string, toBatchId: string, effectiveDate: CivilDate): Promise<EnrolmentRecord>;
   openEnrolment(studentId: string): Promise<EnrolmentRecord | null>;
   firstEnrolmentStart(studentId: string): Promise<CivilDate | null>;
+  listEnrolments(studentId: string): Promise<EnrolmentRecord[]>;
+  /**
+   * Students enrolled in `batchId` on `date`: startDate <= date AND
+   * (endDate IS NULL OR endDate >= date), excluding soft-deleted users,
+   * ordered by displayName. ADR-0017's disjoint intervals guarantee at
+   * most one batch per student-day, so this never double-counts a
+   * transfer's boundary.
+   */
+  rosterMembers(batchId: string, date: CivilDate): Promise<RosterMember[]>;
 }
 
 interface DbBatch { id: string; name: string; startDate: Date; endDate: Date }
@@ -46,10 +69,17 @@ function mapEnrolment(e: DbEnrolment): EnrolmentRecord {
 export function createBatchRepo(prisma: PrismaClient): BatchRepo {
   return {
     async create(input) {
-      const b = await prisma.batch.create({
-        data: { name: input.name, startDate: toDbDate(input.startDate), endDate: toDbDate(input.endDate) },
-      });
-      return mapBatch(b);
+      try {
+        const b = await prisma.batch.create({
+          data: { name: input.name, startDate: toDbDate(input.startDate), endDate: toDbDate(input.endDate) },
+        });
+        return mapBatch(b);
+      } catch (err) {
+        // Batch has exactly one unique constraint besides its PK (`name`),
+        // so a blanket P2002 mapping to DuplicateBatchNameError is safe here.
+        if (isUniqueViolation(err)) throw new DuplicateBatchNameError(input.name);
+        throw err;
+      }
     },
 
     async list() {
@@ -57,11 +87,21 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
       return rows.map(mapBatch);
     },
 
+    async getBatch(id) {
+      const b = await prisma.batch.findUnique({ where: { id } });
+      return b ? mapBatch(b) : null;
+    },
+
     async enrol(studentId, batchId, startDate) {
-      const e = await prisma.enrolment.create({
-        data: { studentId, batchId, startDate: toDbDate(startDate) },
-      });
-      return mapEnrolment(e);
+      try {
+        const e = await prisma.enrolment.create({
+          data: { studentId, batchId, startDate: toDbDate(startDate) },
+        });
+        return mapEnrolment(e);
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new OpenEnrolmentExistsError(studentId);
+        throw err;
+      }
     },
 
     // FR-8 in one transaction: the partial unique index makes "two open
@@ -70,10 +110,14 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
     async transfer(studentId, toBatchId, effectiveDate) {
       return prisma.$transaction(async (tx) => {
         const open = await tx.enrolment.findFirst({ where: { studentId, endDate: null } });
-        if (!open) throw new Error(`transfer: student ${studentId} has no open enrolment`);
+        if (!open) throw new NoOpenEnrolmentError(studentId);
+        if (compareDates(effectiveDate, fromDbDate(open.startDate)) <= 0) {
+          throw new InvalidTransferDateError(effectiveDate);
+        }
         await tx.enrolment.update({
           where: { id: open.id },
-          data: { endDate: toDbDate(effectiveDate) },
+          // ADR-0017: the new batch owns the effective date.
+          data: { endDate: toDbDate(addDays(effectiveDate, -1)) },
         });
         const next = await tx.enrolment.create({
           data: { studentId, batchId: toBatchId, startDate: toDbDate(effectiveDate) },
@@ -93,6 +137,32 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
         orderBy: { startDate: "asc" },
       });
       return e ? fromDbDate(e.startDate) : null;
+    },
+
+    async listEnrolments(studentId) {
+      const rows = await prisma.enrolment.findMany({
+        where: { studentId },
+        orderBy: { startDate: "asc" },
+      });
+      return rows.map(mapEnrolment);
+    },
+
+    async rosterMembers(batchId, date) {
+      const rows = await prisma.enrolment.findMany({
+        where: {
+          batchId,
+          startDate: { lte: toDbDate(date) },
+          OR: [{ endDate: null }, { endDate: { gte: toDbDate(date) } }],
+          student: { deletedAt: null },
+        },
+        include: { student: { select: { id: true, displayName: true, email: true } } },
+        orderBy: { student: { displayName: "asc" } },
+      });
+      return rows.map((r) => ({
+        studentId: r.student.id,
+        displayName: r.student.displayName,
+        email: r.student.email,
+      }));
     },
   };
 }

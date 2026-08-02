@@ -1,0 +1,50 @@
+/**
+ * The one button vocabulary across every screen — docs/design-system.md §9.
+ * All seven interactive states live in the `.btn`/`.btn-*` classes in
+ * app/globals.css; this component only ever picks a variant and the flags
+ * that select among the remaining states:
+ *
+ * - default / hover / focus / active — plain CSS on `.btn`/`.btn-*`, no prop.
+ * - disabled — the `disabled` attribute.
+ * - loading — renders the label at reduced opacity + `aria-busy`, never a
+ *   spinner swap (§9: skeletons for loading, never a centred spinner; a
+ *   spinner-swap here would also flash the button to a different size).
+ *   Also disables the control.
+ * - error — `data-error="true"` switches the border/text colour to
+ *   `--st-missed`, the post-action failure treatment. Set only when a prior
+ *   submit on this control failed; it persists until the next interaction
+ *   clears it, so the caller owns clearing it, not this component.
+ */
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+
+const VARIANT_CLASS = {
+  primary: "btn btn-primary",
+  quiet: "btn btn-quiet",
+  danger: "btn btn-danger",
+} as const;
+
+export function Button({
+  children,
+  variant = "primary",
+  loading = false,
+  error = false,
+  disabled,
+  ...rest
+}: {
+  children: ReactNode;
+  variant?: keyof typeof VARIANT_CLASS;
+  loading?: boolean;
+  error?: boolean;
+} & ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...rest}
+      className={VARIANT_CLASS[variant]}
+      disabled={disabled === true || loading}
+      aria-busy={loading || undefined}
+      data-error={error || undefined}
+    >
+      {children}
+    </button>
+  );
+}

@@ -1,39 +1,36 @@
 import { getCurrentUserOrRedirect } from "@/lib/api-client";
+import { StudentToday } from "./student-today";
+import { PageTitle } from "@/components/ui/page-title";
+import { Panel } from "@/components/ui/panel";
+import { SectionLabel } from "@/components/ui/section-label";
 
 export default async function TodayPage() {
   const user = await getCurrentUserOrRedirect();
+  if (user.role === "Student") {
+    return <StudentToday displayName={user.displayName} role={user.role} />;
+  }
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold" style={{ color: "var(--ink)" }}>
-        Today
-      </h1>
+      <PageTitle>Today</PageTitle>
+      <Panel>
+        <SectionLabel>Signed in as</SectionLabel>
+        <p style={{ color: "var(--ink)" }} data-testid="user-name">{user.displayName}</p>
+        {/*
+          Playwright's sign-in chain (e2e/signin.spec.ts) asserts
+          data-testid="user-role" carrying the exact API role string on
+          every branch. This card's design doesn't otherwise surface role
+          (the mentor already knows they're a mentor); visually hidden,
+          same pattern as user-name on the Student branch.
 
-      <dl
-        className="max-w-[48ch] rounded-[var(--radius-panel)] border p-6"
-        style={{ background: "var(--surface)", borderColor: "var(--line)" }}
-      >
-        <dt className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
-          Signed in as
-        </dt>
-        <dd className="mb-4 text-base" style={{ color: "var(--ink)" }} data-testid="user-name">
-          {user.displayName}
-        </dd>
-
-        <dt className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
-          Email
-        </dt>
-        <dd className="mb-4 text-base" style={{ color: "var(--ink)" }}>{user.email}</dd>
-
-        <dt className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
-          Role
-        </dt>
-        {/* From GET /api/v1/me — the User row, the only source of truth. Never
-            from the session cookie. */}
-        <dd className="text-base" style={{ color: "var(--ink)" }} data-testid="user-role">
-          {user.role}
-        </dd>
-      </dl>
+          From GET /api/v1/me — the User row, the only source of truth.
+          Never from the session cookie.
+        */}
+        <span className="sr-only" data-testid="user-role">{user.role}</span>
+        <p className="mt-2 text-sm" style={{ color: "var(--ink-muted)" }}>
+          The batch dashboard arrives with Plan 7. Use Roster to review today&apos;s submissions.
+        </p>
+      </Panel>
     </div>
   );
 }

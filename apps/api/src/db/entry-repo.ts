@@ -1,8 +1,26 @@
 import type { CivilDate } from "@irp/core";
 import { decideEntryFlags } from "../domain/entry-flags.js";
-import { AbsentDayConflictError, LockedDayError } from "../domain/errors.js";
+import {
+  AbsentDayConflictError,
+  LockedDayError,
+  ReportNotFoundError,
+  InvalidTransitionError,
+} from "../domain/errors.js";
 import type { DailyReportStatus, PrismaClient } from "../generated/prisma/client.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
+import { lockStudentDay } from "./day-lock.js";
+
+// Mirrors REPORT_STATUS_TO_API in ../routes/me-days.ts. Duplicated rather
+// than imported: db/ is a lower layer than routes/, and entry-repo.ts is
+// itself pulled in (type-only, today) by routes/entries.ts, which
+// routes/me-days.ts also imports -- reaching from here into routes/ would
+// invert that layering even though no runtime cycle exists yet. A three-line
+// map is cheaper than depending on that staying true.
+const TRANSITION_STATUS_TO_API: Record<DailyReportStatus, "Submitted" | "InReview" | "Evaluated"> = {
+  SUBMITTED: "Submitted",
+  IN_REVIEW: "InReview",
+  EVALUATED: "Evaluated",
+};
 
 export interface EntryRecord {
   id: string;
@@ -30,6 +48,13 @@ export interface EntryRepo {
   }): Promise<EntryRecord>;
   listEntries(studentId: string, from: CivilDate, to: CivilDate): Promise<EntryRecord[]>;
   getReport(studentId: string, date: CivilDate): Promise<DailyReportRecord | null>;
+  listReports(studentId: string, from: CivilDate, to: CivilDate): Promise<DailyReportRecord[]>;
+  transition(
+    reportId: string,
+    to: "IN_REVIEW" | "EVALUATED",
+    mentorId: string,
+    now: Date,
+  ): Promise<DailyReportRecord>;
 }
 
 interface DbEntry {
@@ -60,6 +85,7 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
       const dbDate = toDbDate(input.entryDate);
 
       return prisma.$transaction(async (tx) => {
+        await lockStudentDay(tx, input.studentId, input.entryDate);
         const report = await tx.dailyReport.findUnique({
           where: { studentId_reportDate: { studentId: input.studentId, reportDate: dbDate } },
         });
@@ -107,6 +133,44 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
         where: { studentId_reportDate: { studentId, reportDate: toDbDate(date) } },
       });
       if (!r) return null;
+      return { id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status };
+    },
+
+    async listReports(studentId, from, to) {
+      const rows = await prisma.dailyReport.findMany({
+        where: { studentId, reportDate: { gte: toDbDate(from), lte: toDbDate(to) } },
+        orderBy: { reportDate: "asc" },
+      });
+      return rows.map((r) => ({
+        id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status,
+      }));
+    },
+
+    // updateMany with the expected current status in the `where` is the
+    // concurrency guard: two mentors racing the same step both attempt the
+    // same conditional update, and exactly one sees count === 1.
+    async transition(reportId, to, mentorId, now) {
+      const expected = to === "IN_REVIEW" ? "SUBMITTED" : "IN_REVIEW";
+      const data =
+        to === "IN_REVIEW"
+          ? { status: to, reviewedById: mentorId, inReviewAt: now }
+          : { status: to, reviewedById: mentorId, evaluatedAt: now };
+      const { count } = await prisma.dailyReport.updateMany({
+        where: { id: reportId, status: expected },
+        data,
+      });
+      if (count === 0) {
+        const current = await prisma.dailyReport.findUnique({ where: { id: reportId } });
+        if (!current) throw new ReportNotFoundError(reportId);
+        // current.status/to are DB enum casing (SUBMITTED/IN_REVIEW/EVALUATED)
+        // -- InvalidTransitionError's message is API-facing, so both are
+        // mapped to API vocabulary before it ever sees them.
+        throw new InvalidTransitionError(
+          TRANSITION_STATUS_TO_API[current.status],
+          TRANSITION_STATUS_TO_API[to],
+        );
+      }
+      const r = await prisma.dailyReport.findUniqueOrThrow({ where: { id: reportId } });
       return { id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status };
     },
   };
