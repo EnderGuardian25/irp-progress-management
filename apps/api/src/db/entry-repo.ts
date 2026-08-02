@@ -1,7 +1,7 @@
 import type { CivilDate } from "@irp/core";
 import { decideEntryFlags } from "../domain/entry-flags.js";
 import { AbsentDayConflictError, LockedDayError } from "../domain/errors.js";
-import type { PrismaClient } from "../generated/prisma/client.js";
+import type { DailyReportStatus, PrismaClient } from "../generated/prisma/client.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
 
 export interface EntryRecord {
@@ -18,7 +18,7 @@ export interface DailyReportRecord {
   id: string;
   studentId: string;
   reportDate: CivilDate;
-  status: "SUBMITTED" | "IN_REVIEW" | "EVALUATED";
+  status: DailyReportStatus;
 }
 
 export interface EntryRepo {

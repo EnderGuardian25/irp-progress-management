@@ -36,4 +36,20 @@ describe("decideEntryFlags", () => {
     expect(() => decideEntryFlags(civilDate("2026-08-04"), new Date("2026-08-03T11:30:00Z")))
       .toThrow(SubmissionWindowClosedError);
   });
+
+  // Boundary instants. Monday 2026-08-03 ends at 18:29:59.999Z (23:59:59.999
+  // Colombo); its grace closes at the same wall-clock instant on Tuesday.
+  it("the last millisecond of the target day is on time; the next is late", () => {
+    expect(decideEntryFlags(civilDate("2026-08-03"), new Date("2026-08-03T18:29:59.999Z")))
+      .toEqual({ isLate: false, isExtra: false });
+    expect(decideEntryFlags(civilDate("2026-08-03"), new Date("2026-08-03T18:30:00.000Z")))
+      .toEqual({ isLate: true, isExtra: false });
+  });
+
+  it("the exact grace-deadline instant is accepted (late); one ms later throws", () => {
+    expect(decideEntryFlags(civilDate("2026-08-03"), new Date("2026-08-04T18:29:59.999Z")))
+      .toEqual({ isLate: true, isExtra: false });
+    expect(() => decideEntryFlags(civilDate("2026-08-03"), new Date("2026-08-04T18:30:00.000Z")))
+      .toThrow(SubmissionWindowClosedError);
+  });
 });

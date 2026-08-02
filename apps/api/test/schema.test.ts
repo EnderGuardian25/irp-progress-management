@@ -15,7 +15,9 @@ describe.skipIf(!dbUrl)("slice 2 schema", () => {
     });
   }
 
-  it("round-trips the whole object graph", async () => {
+  // The whole object graph — one row in every table. Shared by the
+  // round-trip test and the resetDb test so "cleared" means every table.
+  async function createFullGraph() {
     const s = await student("g-1");
     const mentor = await prisma.user.create({
       data: { externalId: "g-m", email: "g-m@dev.local", displayName: "M", role: "ADMIN" },
@@ -35,7 +37,6 @@ describe.skipIf(!dbUrl)("slice 2 schema", () => {
     const report = await prisma.dailyReport.create({
       data: { studentId: s.id, reportDate: new Date("2026-05-11") },
     });
-    expect(report.status).toBe("SUBMITTED");
     await prisma.mentorDayRecord.create({
       data: {
         studentId: s.id, date: new Date("2026-05-11"),
@@ -65,6 +66,12 @@ describe.skipIf(!dbUrl)("slice 2 schema", () => {
     await prisma.award.create({
       data: { cycleId: cycle.id, evaluationId: evaluation.id, justification: "top of batch" },
     });
+    return report;
+  }
+
+  it("round-trips the whole object graph", async () => {
+    const report = await createFullGraph();
+    expect(report.status).toBe("SUBMITTED");
     expect(await prisma.award.count()).toBe(1);
   });
 
@@ -92,10 +99,16 @@ describe.skipIf(!dbUrl)("slice 2 schema", () => {
   });
 
   it("resetDb clears the whole graph", async () => {
-    await prisma.batch.create({
-      data: { name: "Gone", startDate: new Date("2026-05-10"), endDate: new Date("2026-11-09") },
-    });
+    await createFullGraph();
     await resetDb(prisma);
-    expect(await prisma.batch.count()).toBe(0);
+    // Every table, not just the TRUNCATE roots — the CASCADE claim in
+    // resetDb's comment is what this asserts.
+    const counts = await Promise.all([
+      prisma.user.count(), prisma.batch.count(), prisma.enrolment.count(),
+      prisma.entry.count(), prisma.dailyReport.count(), prisma.mentorDayRecord.count(),
+      prisma.absenceRecord.count(), prisma.cycle.count(), prisma.evaluation.count(),
+      prisma.override.count(), prisma.award.count(),
+    ]);
+    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
 });

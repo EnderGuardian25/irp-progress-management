@@ -28,4 +28,22 @@ describe("civil-date-map", () => {
     expect(colomboInstant(civilDate("2026-08-03"), "03:00").toISOString())
       .toBe("2026-08-02T21:30:00.000Z");
   });
+
+  it("colomboInstant handles both edges of the Colombo day", () => {
+    // Colombo midnight is 18:30Z the previous day.
+    expect(colomboInstant(civilDate("2026-08-03"), "00:00").toISOString())
+      .toBe("2026-08-02T18:30:00.000Z");
+    // 23:59 Colombo is the last accepted minute; still 18:29Z same rule.
+    expect(colomboInstant(civilDate("2026-08-03"), "23:59").toISOString())
+      .toBe("2026-08-03T18:29:00.000Z");
+  });
+
+  it("colomboInstant rejects anything that is not strict HH:MM", () => {
+    const bad = ["24:00", "12:60", "9:30", "09:5", "0930", "", "09:30:00", "aa:bb"];
+    for (const time of bad) {
+      expect(() => colomboInstant(civilDate("2026-08-03"), time)).toThrow(
+        `colomboInstant: bad time "${time}" — expected HH:MM`,
+      );
+    }
+  });
 });
