@@ -491,6 +491,15 @@ export function createDayService(deps: {
   ): DayView[] {
     const entriesByDate = new Map<CivilDate, EntryRecord[]>();
     for (const e of entries) {
+      // An entry whose submittedAt is still in the future relative to `now`
+      // has not happened yet as of this view. Only reachable when a caller
+      // evaluates an instant earlier than a stored submission — production
+      // always passes `now = new Date()`, so a real submission is never
+      // ahead of it. Without the guard a not-yet-submitted entry reads as
+      // onTime/late, which is exactly what `future` protects against
+      // further up. (Corrected 2026-08-03: the original Step 9 text omitted
+      // this and Task 2's own service test caught it.)
+      if (e.submittedAt.getTime() > now.getTime()) continue;
       const bucket = entriesByDate.get(e.entryDate) ?? [];
       bucket.push(e);
       entriesByDate.set(e.entryDate, bucket);
