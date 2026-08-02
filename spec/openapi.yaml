@@ -253,6 +253,67 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/me/dashboard:
+    get:
+      operationId: getMyDashboard
+      summary: The caller's own month
+      description: |
+        FR-29: the signed-in student's programme position ("Month N of 6"),
+        their current cycle's day-by-day classification, and that cycle's
+        compliance figures.
+
+        FR-30 by construction: the endpoint takes no student identifier and
+        reads only the caller's own id from the validated token, so no
+        parameter exists that could name another student. It returns no score
+        and no rank. A mentor calling it sees a cycle with no required days
+        of their own — mentors hold no enrolment.
+      tags: [Dashboards]
+      responses:
+        '200':
+          description: The caller's current-cycle dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentDashboard'
+              examples:
+                monthThree:
+                  summary: Month 3 of 6, one worked weekend, no evaluation yet
+                  value:
+                    today: '2026-08-11'
+                    programmeMonths: 6
+                    firstEvaluatedCycleStart: '2026-06-10'
+                    cycle:
+                      seq: 3
+                      startDate: '2026-08-10'
+                      endDate: '2026-09-09'
+                      requiredDayCount: 22
+                    days:
+                      - date: '2026-08-10'
+                        status: onTime
+                      - date: '2026-08-11'
+                        status: late
+                    extraAfter:
+                      - '2026-07-31'
+                    summary:
+                      requiredDays: 22
+                      settledDays: 17
+                      onTime: 13
+                      late: 2
+                      absent: 1
+                      missed: 1
+                      pending: 1
+                      extra: 2
+                      complianceRate: 0.9412
+                    strengthsAndWeaknesses: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/absences:
     post:
       operationId: createAbsence
@@ -1991,6 +2052,82 @@ components:
           description: One row per student enrolled at any point in the cycle, ordered by display name.
           items:
             $ref: '#/components/schemas/StudentCycleSummary'
+
+    StudentDay:
+      type: object
+      title: StudentDay
+      description: One required day in the student's own month view. Weekends never appear — worked weekends are reported through `extraAfter` instead (FR-33).
+      required: [date, status]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The required day (Asia/Colombo).
+          examples:
+            - '2026-08-03'
+        status:
+          $ref: '#/components/schemas/DayStatus'
+
+    StudentDashboard:
+      type: object
+      title: StudentDashboard
+      description: |
+        The caller's own month (FR-29). Carries no score, no rank, and no other
+        student's data anywhere (FR-30) — and takes no student identifier, so
+        there is no parameter to tamper with.
+
+        `strengthsAndWeaknesses` is null until an evaluation exists for the
+        student. None do in this release: O-5 blocks the AI provider decision,
+        so the interface renders a designed empty state rather than an
+        apologetic blank.
+      required: [today, programmeMonths, firstEvaluatedCycleStart, cycle, days, extraAfter, summary, strengthsAndWeaknesses]
+      additionalProperties: false
+      properties:
+        today:
+          type: string
+          format: date
+          description: The server's current civil date in Asia/Colombo. Supplied so the interface can ring today on the ribbon without deriving a timezone-sensitive date in the browser — a browser in another zone would ring the wrong bar.
+          examples:
+            - '2026-08-03'
+        programmeMonths:
+          type: integer
+          minimum: 1
+          description: Programme length in evaluation cycles — the "of 6" in "Month N of 6".
+          examples:
+            - 6
+        firstEvaluatedCycleStart:
+          oneOf:
+            - type: string
+              format: date
+            - type: 'null'
+          description: The first cycle the student is evaluated for, from their earliest enrolment (FR-27). Null when the caller has never been enrolled.
+          examples:
+            - '2026-06-10'
+        cycle:
+          $ref: '#/components/schemas/CycleView'
+        days:
+          type: array
+          description: Every required day in the current cycle, earliest first, with the student's own classification.
+          items:
+            $ref: '#/components/schemas/StudentDay'
+        extraAfter:
+          type: array
+          description: Required days immediately preceding a weekend this student worked (FR-33).
+          items:
+            type: string
+            format: date
+          examples:
+            - ['2026-07-31']
+        summary:
+          $ref: '#/components/schemas/CycleCounts'
+        strengthsAndWeaknesses:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: The latest evaluation's prose summary. Null until the student's first cycle has been evaluated.
+          examples:
+            - null
 
     TransitionRequest:
       type: object

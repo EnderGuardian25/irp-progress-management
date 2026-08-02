@@ -5,6 +5,14 @@ import { workingDaysBetween } from "./weekday.js";
 const CYCLE_START_DAY = 10;
 const CYCLE_END_DAY = 9;
 
+/**
+ * The programme's length in evaluation cycles — the "of 6" in FR-29's
+ * "Month N of 6". Lives with the cycle arithmetic because it is the same
+ * domain fact, and both the API payload and any future evaluation code need
+ * one source for it.
+ */
+export const PROGRAMME_MONTHS = 6;
+
 export interface CycleBounds {
   readonly start: CivilDate;
   readonly end: CivilDate;
