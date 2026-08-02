@@ -113,7 +113,7 @@ the Cycles view, and FR-29/FR-30's student My month.
 |---|---|---|
 | N of M submitted, per batch | Both mentors' view of Batch Aurora and Batch Basalt | The must-ship figure renders for every batch, and N never exceeds M |
 | M matches the Roster's row count | Batch Aurora's active students | The dashboard's denominator and the Roster agree for the *same day* |
-| Ribbon length matches the cycle it names | Batch Aurora | The figcaption's "Day x of y" and the ribbon's own required-day count cannot drift |
+| Ribbon length matches the cycle it names | Batch Aurora | The figcaption's "Day x of y" and the ribbon's rendered day count agree — see the caveat below |
 | Cycles lists every active Aurora student, never a score | All Batch A personas; the archived one (Tharindu) | FR-5 — an archived student leaves active views; and no score exists to leak |
 | Month N of 6, own pills, empty S&W | `dev-student-1` (fully compliant) | FR-29's three elements render together |
 | No score, rank, or peer name | `dev-student-1` vs every other persona | FR-30, asserted against the whole `<main>` text |
@@ -145,3 +145,21 @@ against the Roster's default would pass Monday to Friday and fail every
 Saturday. The row-count test therefore addresses the Roster explicitly by the
 ISO date the dashboard exposes on `data-date`, alongside the batch id in its
 `data-testid` — neither value hard-coded, and no weekday assumption.
+
+### What the ribbon-length check does and does not prove
+
+Both figures it compares — the figcaption's "Day x of **y**" and the ribbon's
+`required-day-count` — derive from the **same** `cycleWorkingDays(bounds)`
+array, computed once per request. So the check catches a rendering bug (the UI
+reading the wrong field, or the two elements falling out of step), but it
+cannot catch a backend miscalculation of `requiredDayCount` itself: both
+numbers would then be wrong identically and still agree. The unit tests in
+`apps/api/test/dashboard-service.test.ts` are what cover that.
+
+### A note for whoever ships the evaluation UI
+
+The FR-30 leak test asserts the rendered text matches none of
+`/rank|leaderboard|performance index/i`. Today no code path on `/my-month`
+renders a score at all — the evaluation UI is blocked on O-5 — so that
+assertion cannot currently fail. When scores land, revisit the forbidden-word
+list: a leak worded differently would pass this test unchanged.
