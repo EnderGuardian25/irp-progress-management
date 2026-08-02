@@ -48,6 +48,7 @@ const STUDENT_USER = {
 };
 
 const BATCH = { id: "b1", name: "Batch Aurora", startDate: "2026-05-10", endDate: "2026-11-09" };
+const BATCH_2 = { id: "b2", name: "Batch Cinder", startDate: "2026-06-10", endDate: "2026-12-09" };
 
 describe("RosterPage", () => {
   it("redirects a Student caller to / rather than rendering the roster", async () => {
@@ -124,6 +125,66 @@ describe("RosterPage", () => {
     expect(screen.getByText("On time")).toBeInTheDocument();
     expect(screen.getByText("+2 extra")).toBeInTheDocument();
     expect(screen.getByText("✓ recorded")).toBeInTheDocument();
+  });
+
+  it("carries the current date forward on batch-switch links -- switching batch must not silently reset to today", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH, BATCH_2] });
+    getBatchRoster.mockResolvedValue({ data: [], error: undefined });
+
+    render(
+      await RosterPage({
+        searchParams: Promise.resolve({ batchId: "b1", date: "2026-07-31" }),
+      }),
+    );
+
+    const otherBatchLink = screen.getByRole("link", { name: BATCH_2.name });
+    expect(otherBatchLink).toHaveAttribute("href", "/roster?batchId=b2&date=2026-07-31");
+  });
+
+  it("omits the date param on batch-switch links when no date is selected -- nothing to carry forward", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH, BATCH_2] });
+    getBatchRoster.mockResolvedValue({ data: [], error: undefined });
+
+    render(await RosterPage({ searchParams: Promise.resolve({ batchId: "b1" }) }));
+
+    const otherBatchLink = screen.getByRole("link", { name: BATCH_2.name });
+    expect(otherBatchLink).toHaveAttribute("href", "/roster?batchId=b2");
+  });
+
+  it("renders no StatusPill for a day with status \"none\" -- Task 12's suppressed-on-none convention extended to the table", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH] });
+    getBatchRoster.mockResolvedValue({
+      data: [
+        {
+          student: { id: "s2", displayName: "Kavindu Silva", email: "k.silva@bistecglobal.com" },
+          day: {
+            date: "2026-07-31",
+            status: "none",
+            reportStatus: null,
+            reportId: null,
+            absenceReason: null,
+            entries: [],
+          },
+          hasMentorRecord: false,
+          extraCountThisCycle: 0,
+        },
+      ],
+      error: undefined,
+    });
+
+    render(await RosterPage({ searchParams: Promise.resolve({ batchId: "b1" }) }));
+
+    expect(screen.getByText("Kavindu Silva")).toBeInTheDocument();
+    // StatusPill always renders data-status on its wrapping span (see
+    // status-pill.tsx); a "none" row must render plain muted text instead --
+    // no such element should exist anywhere in this single-row table.
+    expect(document.querySelector("[data-status]")).not.toBeInTheDocument();
   });
 
   it("renders the problem detail in a Panel when the SDK call errors", async () => {

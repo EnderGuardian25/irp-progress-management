@@ -71,7 +71,10 @@ export default async function RosterPage({
               return (
                 <Link
                   key={b.id}
-                  href={{ pathname: "/roster", query: { batchId: b.id } }}
+                  href={{
+                    pathname: "/roster",
+                    query: date === undefined ? { batchId: b.id } : { batchId: b.id, date },
+                  }}
                   aria-current={isSelected ? "page" : undefined}
                   className="rounded-[var(--radius-control)] border px-3 py-1.5 text-sm"
                   style={{
