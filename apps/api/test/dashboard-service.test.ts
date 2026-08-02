@@ -7,7 +7,7 @@ import { createBatchRepo } from "../src/db/batch-repo.js";
 import { colomboInstant } from "../src/db/civil-date-map.js";
 import { createDayService } from "../src/services/day-service.js";
 import { createDashboardService } from "../src/services/dashboard-service.js";
-import { BatchNotFoundError } from "../src/domain/errors.js";
+import { BatchNotFoundError, InvalidCycleError } from "../src/domain/errors.js";
 import { resetDb } from "./helpers/db.js";
 import { dbUrl } from "./helpers/require-db.js";
 
@@ -217,6 +217,129 @@ describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
 
   it("throws BatchNotFoundError for an unknown batch id", async () => {
     await expect(dashboards.batchToday("00000000-0000-0000-0000-000000000000", NOW))
+      .rejects.toBeInstanceOf(BatchNotFoundError);
+  });
+});
+
+describe.skipIf(!dbUrl)("createDashboardService — batchSummary", () => {
+  const prisma = createPrismaClient(dbUrl!);
+  const entryRepo = createEntryRepo(prisma);
+  const absenceRepo = createAbsenceRepo(prisma);
+  const batchRepo = createBatchRepo(prisma);
+  const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
+  const dashboards = createDashboardService({ batchRepo, dayService });
+
+  beforeEach(async () => {
+    await resetDb(prisma);
+  });
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
+
+  it("splits one student's cycle into settled outcomes and rates them, excluding pending and future", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Summary", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "sum-1", email: "sum-1@dev.local", displayName: "Sum One", role: "STUDENT" },
+    });
+    await batchRepo.enrol(s.id, batch.id, CYCLE_START);
+
+    // 2026-07-13 Mon on time · 07-14 Tue late · 07-15 Wed absent · 07-16 Thu missed.
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: civilDate("2026-07-13"), body: "On time.",
+      submittedAt: colomboInstant(civilDate("2026-07-13"), "17:00"),
+    });
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: civilDate("2026-07-14"), body: "Late but inside grace.",
+      submittedAt: colomboInstant(civilDate("2026-07-15"), "09:40"),
+    });
+    await absenceRepo.create({ studentId: s.id, date: civilDate("2026-07-15"), reason: "University exam" });
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: SAT, body: "Weekend polish.",
+      submittedAt: colomboInstant(SAT, "11:00"),
+    });
+
+    const view = await dashboards.batchSummary(batch.id, undefined, NOW);
+    const row = view.students.find((r) => r.student.id === s.id)!;
+
+    expect(view.cycle.startDate).toBe(CYCLE_START);
+    expect(row.counts.onTime).toBe(1);
+    expect(row.counts.late).toBe(1);
+    expect(row.counts.absent).toBe(1);
+    expect(row.counts.extra).toBe(1);
+    // Every required day up to and including 2026-08-04 has settled by NOW
+    // (2026-08-05 10:00 Colombo); later days are future and in neither side.
+    expect(row.counts.settledDays).toBe(row.counts.onTime + row.counts.late + row.counts.absent + row.counts.missed);
+    expect(row.counts.requiredDays).toBeGreaterThan(row.counts.settledDays);
+    expect(row.counts.complianceRate).toBeCloseTo(
+      (row.counts.onTime + row.counts.late + row.counts.absent) / row.counts.settledDays, 4,
+    );
+  });
+
+  it("reports complianceRate null, not zero, when no day has settled", async () => {
+    // A batch whose cycle has not started: every required day is future.
+    const batch = await batchRepo.create({
+      name: "Batch Fresh", startDate: civilDate("2026-11-10"), endDate: civilDate("2027-05-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "sum-fresh", email: "sum-fresh@dev.local", displayName: "Fresh", role: "STUDENT" },
+    });
+    await batchRepo.enrol(s.id, batch.id, civilDate("2026-11-10"));
+
+    const view = await dashboards.batchSummary(batch.id, undefined, colomboInstant(civilDate("2026-11-10"), "09:00"));
+
+    expect(view.students[0]!.counts.settledDays).toBe(0);
+    expect(view.students[0]!.counts.complianceRate).toBeNull();
+  });
+
+  it("counts review progress by daily-report state", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Review", startDate: CYCLE_START, endDate: civilDate("2027-01-09"),
+    });
+    const s = await prisma.user.create({
+      data: { externalId: "sum-review", email: "sum-review@dev.local", displayName: "Review", role: "STUDENT" },
+    });
+    await batchRepo.enrol(s.id, batch.id, CYCLE_START);
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: civilDate("2026-07-13"), body: "Report one.",
+      submittedAt: colomboInstant(civilDate("2026-07-13"), "17:00"),
+    });
+    await entryRepo.addEntry({
+      studentId: s.id, entryDate: civilDate("2026-07-14"), body: "Report two.",
+      submittedAt: colomboInstant(civilDate("2026-07-14"), "17:00"),
+    });
+    const first = await entryRepo.getReport(s.id, civilDate("2026-07-13"));
+    await entryRepo.transition(first!.id, "IN_REVIEW", s.id, NOW);
+
+    const view = await dashboards.batchSummary(batch.id, undefined, NOW);
+    const row = view.students.find((r) => r.student.id === s.id)!;
+
+    expect(row.reviewProgress.inReview).toBe(1);
+    expect(row.reviewProgress.submitted).toBe(1);
+    expect(row.reviewProgress.evaluated).toBe(0);
+  });
+
+  it("resolves an explicit cycle sequence to that cycle's bounds", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Seq Pick", startDate: civilDate("2026-05-10"), endDate: civilDate("2027-01-09"),
+    });
+    const view = await dashboards.batchSummary(batch.id, 1, NOW);
+    expect(view.cycle.seq).toBe(1);
+    expect(view.cycle.startDate).toBe(civilDate("2026-05-10"));
+    expect(view.cycle.endDate).toBe(civilDate("2026-06-09"));
+  });
+
+  it("rejects a cycle beyond the current one with InvalidCycleError", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Seq Future", startDate: civilDate("2026-05-10"), endDate: civilDate("2027-01-09"),
+    });
+    // The current cycle for NOW (2026-08-05) is the batch's 4th; 5 has not happened.
+    await expect(dashboards.batchSummary(batch.id, 99, NOW)).rejects.toBeInstanceOf(InvalidCycleError);
+  });
+
+  it("throws BatchNotFoundError for an unknown batch id", async () => {
+    await expect(dashboards.batchSummary("00000000-0000-0000-0000-000000000000", undefined, NOW))
       .rejects.toBeInstanceOf(BatchNotFoundError);
   });
 });

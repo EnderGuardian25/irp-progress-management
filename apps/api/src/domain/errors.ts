@@ -211,3 +211,12 @@ export class UserNotFoundError extends DomainError {
     super(`No user exists with id ${id}.`);
   }
 }
+
+export class InvalidCycleError extends DomainError {
+  readonly code = "invalid-cycle";
+  readonly status = 400;
+  readonly title = "Invalid cycle";
+  constructor(detail: string) {
+    super(detail);
+  }
+}

@@ -562,6 +562,88 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/batches/{id}/dashboard/summary:
+    get:
+      operationId: getBatchDashboardSummary
+      summary: Per-student compliance for one cycle
+      description: |
+        One row per student enrolled in the batch at any point during the
+        cycle, with required-day outcomes, weekend Extra, and review progress.
+        Defaults to the current cycle.
+
+        Cycles are addressed by their 1-based sequence within the batch,
+        computed by the domain engine rather than read from the materialised
+        `Cycle` table (ADR-0019). A sequence beyond the current cycle is
+        rejected — a cycle that has not happened has nothing to summarise.
+        No scores: none exist in this slice. Mentor only.
+      tags: [Dashboards]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The batch id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        - name: cycle
+          in: query
+          required: false
+          description: The cycle's 1-based sequence within the batch. Defaults to the current cycle.
+          schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 2
+      responses:
+        '200':
+          description: The batch's per-student figures for the requested cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchCycleSummary'
+              examples:
+                oneStudent:
+                  summary: A single student, mostly compliant
+                  value:
+                    batchId: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                    batchName: Batch Aurora
+                    cycle:
+                      seq: 2
+                      startDate: '2026-06-10'
+                      endDate: '2026-07-09'
+                      requiredDayCount: 22
+                    students:
+                      - student:
+                          id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                          displayName: Amaya Wickramasinghe
+                          email: amaya@dev.local
+                        counts:
+                          requiredDays: 22
+                          settledDays: 17
+                          onTime: 13
+                          late: 2
+                          absent: 1
+                          missed: 1
+                          pending: 1
+                          extra: 2
+                          complianceRate: 0.9412
+                        reviewProgress:
+                          submitted: 4
+                          inReview: 3
+                          evaluated: 10
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/students/{id}/transfer:
     post:
       operationId: transferStudent
@@ -1742,6 +1824,173 @@ components:
             format: date
           examples:
             - ['2026-07-31']
+
+    CycleCounts:
+      type: object
+      title: CycleCounts
+      description: |
+        One student's required-day outcomes over one cycle. Denominators count
+        required days only (FR-12); `extra` is weekend entries and is reported
+        beside them, never inside them (FR-33).
+
+        `complianceRate` divides accounted-for days (on time + late + absent)
+        by SETTLED days — those whose outcome is final. Days still inside the
+        grace window and days not yet reached are in neither side, so the rate
+        does not dip merely because the afternoon is young. Absence counts as
+        accounted-for: it is recorded with a reason and carries no penalty
+        (assumption O-7).
+      required: [requiredDays, settledDays, onTime, late, absent, missed, pending, extra, complianceRate]
+      additionalProperties: false
+      properties:
+        requiredDays:
+          type: integer
+          minimum: 0
+          description: Weekdays in the cycle the student was enrolled for. Fewer than the cycle's total for a mid-cycle joiner or a transfer (FR-27).
+          examples:
+            - 22
+        settledDays:
+          type: integer
+          minimum: 0
+          description: Required days whose outcome is final — on time, late, absent or missed.
+          examples:
+            - 17
+        onTime:
+          type: integer
+          minimum: 0
+          description: Required days submitted before the day ended.
+          examples:
+            - 13
+        late:
+          type: integer
+          minimum: 0
+          description: Required days submitted after the day ended but inside grace (FR-13).
+          examples:
+            - 2
+        absent:
+          type: integer
+          minimum: 0
+          description: Weekdays explicitly marked absent with a reason (FR-16).
+          examples:
+            - 1
+        missed:
+          type: integer
+          minimum: 0
+          description: Weekdays with no entry and no absence, past grace (FR-14).
+          examples:
+            - 1
+        pending:
+          type: integer
+          minimum: 0
+          description: Required days with nothing recorded whose grace window is still open.
+          examples:
+            - 1
+        extra:
+          type: integer
+          minimum: 0
+          description: Weekend entries in the cycle (FR-33). Never required, never penalised by its absence, never in a denominator.
+          examples:
+            - 2
+        complianceRate:
+          oneOf:
+            - type: number
+              minimum: 0
+              maximum: 1
+            - type: 'null'
+          description: Accounted-for settled days as a fraction, rounded to four decimals. Null when no day has settled yet — render a dash, not a zero.
+          examples:
+            - 0.9412
+
+    ReviewProgress:
+      type: object
+      title: ReviewProgress
+      description: The student's daily reports in this cycle by review state (FR-18). Forward-only; there is no Rejected state.
+      required: [submitted, inReview, evaluated]
+      additionalProperties: false
+      properties:
+        submitted:
+          type: integer
+          minimum: 0
+          description: Reports awaiting a mentor's first look.
+          examples:
+            - 4
+        inReview:
+          type: integer
+          minimum: 0
+          description: Reports a mentor has opened but not finished.
+          examples:
+            - 3
+        evaluated:
+          type: integer
+          minimum: 0
+          description: Reports finished and locked for the student (FR-20).
+          examples:
+            - 10
+
+    StudentCycleSummary:
+      type: object
+      title: StudentCycleSummary
+      description: |
+        One enrolled student's cycle at a glance, for the mentor's Cycles view.
+        Carries no score and no rank — no evaluation exists in this slice
+        (O-5 blocks the AI provider decision), so the interface renders an
+        "awaiting evaluation" state rather than the API returning an always-null
+        field.
+      required: [student, counts, reviewProgress]
+      additionalProperties: false
+      properties:
+        student:
+          type: object
+          description: The enrolled student.
+          required: [id, displayName, email]
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: User id.
+              examples:
+                - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+            displayName:
+              type: string
+              description: Name as shown in the interface.
+              examples:
+                - Amaya Wickramasinghe
+            email:
+              type: string
+              format: email
+              description: Bistec account email.
+              examples:
+                - amaya@dev.local
+        counts:
+          $ref: '#/components/schemas/CycleCounts'
+        reviewProgress:
+          $ref: '#/components/schemas/ReviewProgress'
+
+    BatchCycleSummary:
+      type: object
+      title: BatchCycleSummary
+      description: Every student enrolled in a batch during one cycle, with that cycle's compliance figures.
+      required: [batchId, batchName, cycle, students]
+      additionalProperties: false
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          description: The batch summarised.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        batchName:
+          type: string
+          description: The batch's display name.
+          examples:
+            - Batch Aurora
+        cycle:
+          $ref: '#/components/schemas/CycleView'
+        students:
+          type: array
+          description: One row per student enrolled at any point in the cycle, ordered by display name.
+          items:
+            $ref: '#/components/schemas/StudentCycleSummary'
 
     TransitionRequest:
       type: object

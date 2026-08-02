@@ -1,10 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { components } from "@irp/types";
 import type {
-  BatchTodayView, CycleView, DayCompliance, DashboardService,
+  BatchTodayView, CycleView, CycleCounts, DayCompliance, DashboardService,
 } from "../services/dashboard-service.js";
 import { requireAdmin } from "../plugins/roles.js";
-import { UUID_PARAM } from "./schemas.js";
+import { CYCLE_QUERY, UUID_PARAM } from "./schemas.js";
 
 type ApiBatchToday = components["schemas"]["BatchTodayDashboard"];
 
@@ -22,6 +22,14 @@ function toApiDayCompliance(d: DayCompliance): components["schemas"]["DayComplia
   return {
     date: d.date, enrolled: d.enrolled, submitted: d.submitted,
     late: d.late, absent: d.absent, missed: d.missed, pending: d.pending,
+  };
+}
+
+function toApiCycleCounts(c: CycleCounts): components["schemas"]["CycleCounts"] {
+  return {
+    requiredDays: c.requiredDays, settledDays: c.settledDays, onTime: c.onTime,
+    late: c.late, absent: c.absent, missed: c.missed, pending: c.pending,
+    extra: c.extra, complianceRate: c.complianceRate,
   };
 }
 
@@ -50,6 +58,25 @@ export const dashboardRoutes: FastifyPluginAsync<{
     async (req): Promise<ApiBatchToday> => {
       requireAdmin(req);
       return toApiBatchToday(await opts.dashboardService.batchToday(req.params.id, new Date()));
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { cycle?: number } }>(
+    "/api/v1/batches/:id/dashboard/summary",
+    { schema: { params: UUID_PARAM, querystring: CYCLE_QUERY }, preHandler: [app.authenticate] },
+    async (req): Promise<components["schemas"]["BatchCycleSummary"]> => {
+      requireAdmin(req);
+      const view = await opts.dashboardService.batchSummary(req.params.id, req.query.cycle, new Date());
+      return {
+        batchId: view.batch.id,
+        batchName: view.batch.name,
+        cycle: toApiCycle(view.cycle),
+        students: view.students.map((s) => ({
+          student: s.student,
+          counts: toApiCycleCounts(s.counts),
+          reviewProgress: { ...s.reviewProgress },
+        })),
+      };
     },
   );
 };

@@ -111,4 +111,51 @@ describe.skipIf(!dbUrl)("Dashboards: GET /api/v1/batches/{id}/dashboard/today", 
     expect(body.counts.enrolled).toBe(1);
     expect(body.days[body.dayNumber - 1]!.date).toBe(body.date);
   });
+
+  it("rejects a student token on the summary endpoint with 403 admin-only", async () => {
+    await student("dash-sum-student");
+    const b = await batch("Batch Sum 403");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/batches/${b.id}/dashboard/summary`,
+      headers: bearer(await signToken({ oid: "dash-sum-student" })),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects cycle=0 with 400 validation-failed — the schema's minimum, before the service is reached", async () => {
+    await mentor("dash-sum-mentor-0");
+    const b = await batch("Batch Sum Zero");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/batches/${b.id}/dashboard/summary?cycle=0`,
+      headers: bearer(await signToken({ oid: "dash-sum-mentor-0" })),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<ProblemLike>().type).toBe("https://irp.bistec.example/problems/validation-failed");
+  });
+
+  it("rejects a future cycle with 400 invalid-cycle", async () => {
+    await mentor("dash-sum-mentor-future");
+    const b = await batch("Batch Sum Future");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/batches/${b.id}/dashboard/summary?cycle=99`,
+      headers: bearer(await signToken({ oid: "dash-sum-mentor-future" })),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<ProblemLike>().type).toBe("https://irp.bistec.example/problems/invalid-cycle");
+  });
+
+  it("coerces the cycle querystring to an integer and returns that cycle", async () => {
+    await mentor("dash-sum-mentor-ok");
+    const b = await batch("Batch Sum OK");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/batches/${b.id}/dashboard/summary?cycle=1`,
+      headers: bearer(await signToken({ oid: "dash-sum-mentor-ok" })),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ cycle: { seq: number } }>().cycle.seq).toBe(1);
+  });
 });

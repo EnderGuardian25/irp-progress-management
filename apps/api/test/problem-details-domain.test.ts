@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { createTracerProvider, tracingPlugin } from "../src/telemetry.js";
 import { problemDetailsPlugin } from "../src/plugins/problem-details.js";
-import { LockedDayError } from "../src/domain/errors.js";
+import { LockedDayError, InvalidCycleError } from "../src/domain/errors.js";
 import { buildAjv } from "../src/validation.js";
 import { problemSchema } from "./helpers/problem-schema.js";
 
@@ -34,6 +34,25 @@ describe("problem-details handler — DomainError (ADR-0015)", () => {
     expect(body.type).toBe("https://irp.bistec.example/problems/day-locked");
     expect(body.title).toBe("Day is locked");
     expect(body.status).toBe(409);
+    expect(body.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(validate(body)).toBe(true);
+    await app.close();
+  });
+
+  it("maps an InvalidCycleError to a 400 Problem body with the domain-specific type", async () => {
+    const provider = createTracerProvider(new InMemorySpanExporter());
+    const app = Fastify();
+    await app.register(tracingPlugin, { tracerProvider: provider });
+    await app.register(problemDetailsPlugin);
+    app.get("/boom", () => { throw new InvalidCycleError("Cycle 99 has not started."); });
+
+    const res = await app.inject({ method: "GET", url: "/boom" });
+    expect(res.statusCode).toBe(400);
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    const body = res.json<ProblemLike>();
+    expect(body.type).toBe("https://irp.bistec.example/problems/invalid-cycle");
+    expect(body.title).toBe("Invalid cycle");
+    expect(body.status).toBe(400);
     expect(body.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(validate(body)).toBe(true);
     await app.close();

@@ -1,11 +1,11 @@
 import {
   compareDates, cycleContaining, cycleFor, cycleWorkingDays,
-  isWeekday, previousWeekday, toProgrammeDate,
+  firstEvaluatedCycleStart, isWeekday, previousWeekday, shiftCycle, toProgrammeDate,
   type CivilDate, type CycleBounds, type DayStatus,
 } from "@irp/core";
 import type { BatchRecord, BatchRepo, RosterEnrolment } from "../db/batch-repo.js";
 import type { DayService, DayView } from "./day-service.js";
-import { BatchNotFoundError } from "../domain/errors.js";
+import { BatchNotFoundError, InvalidCycleError } from "../domain/errors.js";
 
 export interface CycleView {
   seq: number | null;
@@ -36,8 +36,39 @@ export interface BatchTodayView {
   extraAfter: CivilDate[];
 }
 
+export interface CycleCounts {
+  requiredDays: number;
+  settledDays: number;
+  onTime: number;
+  late: number;
+  absent: number;
+  missed: number;
+  pending: number;
+  extra: number;
+  complianceRate: number | null;
+}
+
+export interface ReviewProgress {
+  submitted: number;
+  inReview: number;
+  evaluated: number;
+}
+
+export interface StudentSummaryView {
+  student: { id: string; displayName: string; email: string };
+  counts: CycleCounts;
+  reviewProgress: ReviewProgress;
+}
+
+export interface BatchSummaryView {
+  batch: BatchRecord;
+  cycle: CycleView;
+  students: StudentSummaryView[];
+}
+
 export interface DashboardService {
   batchToday(batchId: string, now: Date): Promise<BatchTodayView>;
+  batchSummary(batchId: string, cycleSeq: number | undefined, now: Date): Promise<BatchSummaryView>;
 }
 
 /** Whether an enrolment interval covers `d` (open-ended when endDate is null). */
@@ -64,6 +95,62 @@ export function reportedDay(requiredDays: CivilDate[], today: CivilDate): CivilD
     if (compareDates(d, today) <= 0) chosen = d;
   }
   return chosen;
+}
+
+/** Four decimals — enough to distinguish 21/22 from 20/21, short enough to compare exactly in a test. */
+function round4(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
+}
+
+/**
+ * One student's cycle, counted from their already-classified days.
+ *
+ * `requiredDays` is enrolment-clipped: a weekday the student was not enrolled
+ * for classifies as `none` and is not their obligation (FR-27). `extra` counts
+ * weekend ENTRIES, matching RosterRow.extraCountThisCycle, not weekend days.
+ *
+ * // ASSUMPTION: O-7 — absence counts as accounted-for. O-7 is still open on
+ * whether lateness or absence carries an automatic penalty; the PRD's stated
+ * assumption is that it does not, and this is the one place that shows.
+ */
+export function countCycle(days: DayView[]): CycleCounts {
+  const counts: CycleCounts = {
+    requiredDays: 0, settledDays: 0, onTime: 0, late: 0,
+    absent: 0, missed: 0, pending: 0, extra: 0, complianceRate: null,
+  };
+  for (const day of days) {
+    if (!isWeekday(day.date)) {
+      counts.extra += day.entries.filter((e) => e.isExtra).length;
+      continue;
+    }
+    if (day.status === "none") continue; // not enrolled: no obligation
+    counts.requiredDays += 1;
+    switch (day.status) {
+      case "onTime": counts.onTime += 1; counts.settledDays += 1; break;
+      case "late": counts.late += 1; counts.settledDays += 1; break;
+      case "absent": counts.absent += 1; counts.settledDays += 1; break;
+      case "missed": counts.missed += 1; counts.settledDays += 1; break;
+      case "pending": counts.pending += 1; break;
+      default: break; // future — reached by nobody yet
+    }
+  }
+  if (counts.settledDays > 0) {
+    counts.complianceRate = round4(
+      (counts.onTime + counts.late + counts.absent) / counts.settledDays,
+    );
+  }
+  return counts;
+}
+
+/** Daily reports in the window, by review state. A weekend entry creates a report too, so this is not weekday-clipped. */
+export function countReviewProgress(days: DayView[]): ReviewProgress {
+  const progress: ReviewProgress = { submitted: 0, inReview: 0, evaluated: 0 };
+  for (const day of days) {
+    if (day.reportStatus === "SUBMITTED") progress.submitted += 1;
+    if (day.reportStatus === "IN_REVIEW") progress.inReview += 1;
+    if (day.reportStatus === "EVALUATED") progress.evaluated += 1;
+  }
+  return progress;
 }
 
 export function createDashboardService(deps: {
@@ -150,6 +237,56 @@ export function createDashboardService(deps: {
         extraCount,
         days,
         extraAfter: [...extraAfter].sort(),
+      };
+    },
+
+    async batchSummary(batchId, cycleSeq, now) {
+      const batch = await deps.batchRepo.getBatch(batchId);
+      if (!batch) throw new BatchNotFoundError(batchId);
+
+      const today = toProgrammeDate(now);
+      const first = firstEvaluatedCycleStart(batch.startDate);
+      // The batch's own numbering for today. Null before its first evaluated
+      // cycle opens, in which case cycle 1 is the only one worth naming and
+      // it is still in the future — reported, with everything future.
+      const currentSeq = cycleFor(today, batch.startDate)?.index ?? null;
+      const seq = cycleSeq ?? currentSeq ?? 1;
+      if (!Number.isInteger(seq) || seq < 1) {
+        throw new InvalidCycleError(`Cycle ${String(seq)} is not a valid 1-based cycle sequence.`);
+      }
+      if (currentSeq !== null && seq > currentSeq) {
+        throw new InvalidCycleError(
+          `Cycle ${String(seq)} has not started — this batch is on cycle ${String(currentSeq)}.`,
+        );
+      }
+      if (currentSeq === null && seq > 1) {
+        throw new InvalidCycleError(`Cycle ${String(seq)} has not started — this batch has no evaluated cycle yet.`);
+      }
+
+      const bounds = cycleContaining(shiftCycle(first, seq - 1));
+      const enrolments = await deps.batchRepo.enrolmentsInRange(batchId, bounds.start, bounds.end);
+      const studentIds = [...new Set(enrolments.map((e) => e.studentId))];
+      const byStudent = await deps.dayService.listDaysForStudents(
+        studentIds, bounds.start, bounds.end, now,
+      );
+
+      // enrolmentsInRange is ordered by displayName, so first-seen order is
+      // already the response order; the Map dedupes a student holding two
+      // intervals in this cycle (a transfer into and out of the same batch).
+      const seen = new Map<string, RosterEnrolment>();
+      for (const e of enrolments) if (!seen.has(e.studentId)) seen.set(e.studentId, e);
+
+      return {
+        batch,
+        cycle: { ...cycleView(bounds, batch), seq },
+        students: [...seen.values()].map((e) => {
+          const days = byStudent.get(e.studentId) ?? [];
+          return {
+            student: { id: e.studentId, displayName: e.displayName, email: e.email },
+            counts: countCycle(days),
+            reviewProgress: countReviewProgress(days),
+          };
+        }),
       };
     },
   };
