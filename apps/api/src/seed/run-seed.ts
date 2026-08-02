@@ -96,7 +96,23 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     prisma.dailyReport.deleteMany({ where: { studentId: { in: ids } } }),
     prisma.mentorDayRecord.deleteMany({ where: { studentId: { in: ids } } }),
     prisma.absenceRecord.deleteMany({ where: { studentId: { in: ids } } }),
-    prisma.enrolment.deleteMany({ where: { studentId: { in: ids } } }),
+    // OR'd with "enrolled in a seed-owned batch", not just "studentId in
+    // ids": the seed owns Batch Aurora/Basalt by NAME (the cycle deleteMany
+    // right below already reflects that), and the batch deleteMany two
+    // lines down 400s on a foreign-key violation if ANY enrolment still
+    // references one of those batch ids -- including a non-seed student's.
+    // Task 16's e2e Students-page registration test proved this: a
+    // throwaway student registered into Batch Basalt and then archived
+    // (soft-deleted, externalId never in SEED_EXTERNAL_IDS) left its
+    // Enrolment row behind, and the NEXT db:seed run failed
+    // Enrolment_batchId_fkey trying to delete Batch Basalt out from under
+    // it. Archiving a user only soft-deletes the User row; it was never
+    // going to clear their Enrolment too.
+    prisma.enrolment.deleteMany({
+      where: {
+        OR: [{ studentId: { in: ids } }, { batch: { name: { in: Object.values(SEED_BATCH_NAMES) } } }],
+      },
+    }),
     prisma.cycle.deleteMany({ where: { batch: { name: { in: Object.values(SEED_BATCH_NAMES) } } } }),
     prisma.batch.deleteMany({ where: { name: { in: Object.values(SEED_BATCH_NAMES) } } }),
     prisma.user.deleteMany({ where: { id: { in: ids } } }),

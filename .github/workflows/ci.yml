@@ -163,20 +163,21 @@ jobs:
       - name: Test
         run: pnpm -r test
 
-      # The four e2e steps below run on the UTC leg ONLY.
+      # The four e2e steps below used to run on the UTC leg ONLY, when the e2e
+      # spec was signin.spec.ts alone: it asserts sign-in identity and
+      # rendering and contains no date or timezone assertion at all, so
+      # running it three times bought no extra coverage while paying three
+      # browser installs and three full app builds against the under-8-minute
+      # deploy target (NFR-5).
       #
-      # The timezone matrix exists to catch reliance on server local time
-      # (NFR-12), and that risk is fully covered by the unit suites, which DO
-      # run on all three legs — @irp/core's 112 date-engine tests are the ones
-      # that matter there. The e2e spec asserts sign-in identity and rendering
-      # and contains no date or timezone assertion at all, so running it three
-      # times buys no extra coverage while paying three browser installs and
-      # three full app builds against the under-8-minute deploy target (NFR-5).
-      #
-      # If an e2e spec ever gains a date-sensitive assertion, drop this
-      # condition — do not work around it.
+      # Plan 6 Task 16 added student-flows.spec.ts and mentor-flows.spec.ts,
+      # and BOTH gain date-sensitive assertions -- the submission window's
+      # size, the weekend persona's cycle-relative Extra badge, and the
+      # seed's 14-day EVALUATED cutoff all read `new Date()` under
+      # Asia/Colombo. That is exactly the condition the comment this replaced
+      # named as the trigger to drop the UTC-only restriction, not work around
+      # it -- so all three legs now run the full e2e suite.
       - name: Install the Playwright browser
-        if: matrix.timezone == 'UTC'
         run: pnpm --filter @irp/web exec playwright install --with-deps chromium
 
       # Must run AFTER `pnpm -r test`, never before: apps/api's suites
@@ -184,7 +185,6 @@ jobs:
       # this step runs. The unit suite itself must never depend on this seed
       # (Task 10) — that is why it is not seeded any earlier in the job.
       - name: Seed the demo data the e2e suite expects
-        if: matrix.timezone == 'UTC'
         run: |
           pnpm --filter @irp/api db:seed
 
@@ -200,8 +200,7 @@ jobs:
       # same contract rather than a stale or contradictory one, and so they
       # take effect immediately if that config ever changes to read from
       # process.env the way its DATABASE_URL and AUTH_SECRET already do.
-      - name: End-to-end smoke test
-        if: matrix.timezone == 'UTC'
+      - name: End-to-end suite
         env:
           AUTH_DEV_BYPASS: "true"
           JWKS_URI: http://127.0.0.1:3000/api/dev-jwks
@@ -218,14 +217,14 @@ jobs:
       # actually useful artifact for debugging a CI-only failure.
       #
       # Deliberately NOT setting if-no-files-found: error. This step's `if`
-      # also fires when some OTHER step on the UTC leg failed before
-      # Playwright ever ran (e.g. Lint, or the DB migration step) — in that
-      # case both directories legitimately don't exist, and hardening this
-      # into a hard failure would turn an unrelated failure into a second,
-      # misleading one. Leave the default (`warn`) so that scenario stays a
-      # warning, not a red X.
+      # also fires when some OTHER step on this leg failed before Playwright
+      # ever ran (e.g. Lint, or the DB migration step) — in that case both
+      # directories legitimately don't exist, and hardening this into a hard
+      # failure would turn an unrelated failure into a second, misleading
+      # one. Leave the default (`warn`) so that scenario stays a warning, not
+      # a red X.
       - name: Upload the Playwright report on failure
-        if: failure() && matrix.timezone == 'UTC'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.timezone }}

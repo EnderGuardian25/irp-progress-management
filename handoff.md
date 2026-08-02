@@ -138,7 +138,30 @@ eslint.config.mjs        type-aware, generated dirs ignored
                          Playwright on the UTC leg, and a dormant real-token job
 ```
 
-Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwright.**
+Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwright.** (Plan 5
+figures; Plan 6, below, adds substantially to all four and is not yet reconciled into this line —
+see the branch's own gate output for current counts.)
+
+**Plan 6 surface, in progress on `feat/plan-6-submission-and-review`.** Not yet merged (§2a's row
+stays "In progress" until the PR lands), but the following exists on the branch as of Task 16:
+
+- **15 `apps/api` endpoints** across `spec/openapi.yaml`'s Plan 6 paths — entries (`POST
+  /api/v1/entries`), the student's own day view (`GET /api/v1/me/days`), absences (`POST
+  /api/v1/absences`, `DELETE /api/v1/absences/{date}`), batches + roster (`GET`/`POST
+  /api/v1/batches`, `GET /api/v1/batches/{id}/roster`), review transitions and mentor day records
+  (`POST /api/v1/daily-reports/{id}/transition`, `/api/v1/students/{id}/day-records[/{date}]`), a
+  student's own cycle of days for the mentor (`GET /api/v1/students/{id}/days`), user
+  administration (`GET`/`POST /api/v1/users`, `PATCH /api/v1/users/{id}`), and transfer + archive
+  (`POST /api/v1/students/{id}/transfer`).
+- **Five `apps/web` (app) pages**: UI primitives + sign-out (Task 11), the student Today page with
+  its composer and absence toggle (Task 12), the mentor Roster (Task 13), the mentor Review flow —
+  attendance/tasks record, forward-only Submitted → In Review → Evaluated transitions, FR-20's lock
+  (Task 14), and the mentor Students directory — register, create batch, transfer, archive (Task
+  15).
+- **`apps/web/e2e/student-flows.spec.ts` and `mentor-flows.spec.ts`** (Task 16), covering both
+  roles' Plan 6 screens over the seeded personas from `@irp/fixtures`, alongside the existing
+  `signin.spec.ts`. See `apps/web/e2e/README.md` for the persona-to-flow map and the re-seed
+  instruction the suite depends on.
 
 ### Not started
 
