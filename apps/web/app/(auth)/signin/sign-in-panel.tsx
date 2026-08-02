@@ -1,4 +1,6 @@
 import { DevIdentityPicker } from "./dev-identity-picker";
+import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
 
 export interface SignInPanelProps {
   /** AUTH_DEV_BYPASS === "true". Impossible in production — see ADR-0012. */
@@ -38,21 +40,13 @@ export function SignInPanel({
   if (entraConfigured) {
     return (
       <form action={signInAction}>
-        <button
-          type="submit"
-          className="cursor-pointer rounded-[var(--radius-control)] bg-primary px-4 py-2 font-semibold text-white transition duration-150 ease-out-quart hover:brightness-110 active:brightness-95 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0"
-        >
-          Sign in with Microsoft
-        </button>
+        <Button type="submit" variant="primary">Sign in with Microsoft</Button>
       </form>
     );
   }
 
   return (
-    <div
-      className="rounded-[var(--radius-control)] border p-4"
-      style={{ borderColor: "var(--line)", background: "var(--surface)" }}
-    >
+    <Panel>
       <p className="mb-2 text-sm font-semibold" style={{ color: "var(--ink)" }}>
         Sign-in is not configured in this environment.
       </p>
@@ -62,6 +56,6 @@ export function SignInPanel({
         enable Microsoft sign-in, or <code>AUTH_DEV_BYPASS=true</code> for local
         development.
       </p>
-    </div>
+    </Panel>
   );
 }

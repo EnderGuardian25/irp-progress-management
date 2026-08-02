@@ -19,6 +19,7 @@
   --st-late: #9f5c0c;
   --st-absent: #6d717e;
   --st-missed: #be2132;
+  --st-review: var(--primary);
 
   --radius-panel: 12px;
   --radius-control: 8px;
@@ -44,6 +45,7 @@
     --st-late: #eeac53;
     --st-absent: #9a9eaa;
     --st-missed: #ed7473;
+    --st-review: var(--primary);
   }
 }
 
@@ -91,4 +93,30 @@ h1, h2, h3 {
 :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+/* §9 button vocabulary — all seven states. 150ms ease-out-quart (§10). */
+.btn {
+  border-radius: var(--radius-control);
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1),
+    color 150ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn[aria-busy="true"] { opacity: 0.7; cursor: progress; }
+.btn-primary { background: var(--primary); color: var(--surface); border: 1px solid var(--primary); }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-primary:active:not(:disabled) { filter: brightness(0.92); }
+.btn-quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn-quiet:hover:not(:disabled) { background: var(--primary-weak); }
+.btn-quiet:active:not(:disabled) { border-color: var(--line-strong); }
+.btn-danger { background: transparent; color: var(--st-missed); border: 1px solid var(--st-missed); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--st-missed) 12%, transparent); }
+.btn-danger:active:not(:disabled) { filter: brightness(0.92); }
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
 }

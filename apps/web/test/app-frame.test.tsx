@@ -1,7 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Topbar } from "@/components/app-frame/topbar";
 import { Sidebar } from "@/components/app-frame/sidebar";
+
+// Topbar now imports signOut from @/auth for its sign-out form. Real
+// next-auth (pulled in transitively via @/auth) needs `next/server`, which
+// isn't resolvable under Vitest's environment — mock the app's thin wrapper,
+// same as signin.test.tsx does for NotRegisteredPage. The inline `"use
+// server"` action is asserted by presence, never invoked.
+vi.mock("@/auth", () => ({
+  signOut: vi.fn(),
+}));
 
 describe("Topbar", () => {
   it("shows the signed-in user's name", () => {
@@ -19,6 +28,11 @@ describe("Topbar", () => {
   it("is a banner landmark 56px tall", () => {
     render(<Topbar userName="A" />);
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
+  });
+
+  it("offers a sign-out control", () => {
+    render(<Topbar userName="A" />);
+    expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
   });
 });
 

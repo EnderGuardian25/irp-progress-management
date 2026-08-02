@@ -1,7 +1,13 @@
+import { signOut } from "@/auth";
+import { Button } from "@/components/ui/button";
+
 /**
  * The app frame's topbar. Semantic `banner` landmark, 56px tall, on
  * `--surface` — docs/design-system.md §6. Desktop only (NFR-13); no mobile
  * treatment is provided.
+ *
+ * Server Component (no "use client"), so the inline `"use server"` sign-out
+ * action below is valid here without any extra wiring.
  */
 export function Topbar({
   userName,
@@ -32,6 +38,14 @@ export function Topbar({
           </span>
         )}
         <span style={{ color: "var(--ink)" }}>{userName}</span>
+        <form
+          action={async () => {
+            "use server";
+            await signOut({ redirectTo: "/signin" });
+          }}
+        >
+          <Button type="submit" variant="quiet">Sign out</Button>
+        </form>
       </div>
     </header>
   );
