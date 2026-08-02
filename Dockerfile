@@ -27,11 +27,12 @@ WORKDIR /repo
 # every edit and put NFR-5's 8-minute budget at risk.
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY apps/api/package.json        ./apps/api/package.json
-COPY apps/web/package.json        ./apps/web/package.json
-COPY packages/core/package.json   ./packages/core/package.json
-COPY packages/types/package.json  ./packages/types/package.json
-COPY packages/client/package.json ./packages/client/package.json
+COPY apps/api/package.json           ./apps/api/package.json
+COPY apps/web/package.json           ./apps/web/package.json
+COPY packages/core/package.json      ./packages/core/package.json
+COPY packages/fixtures/package.json  ./packages/fixtures/package.json
+COPY packages/types/package.json     ./packages/types/package.json
+COPY packages/client/package.json    ./packages/client/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
@@ -128,6 +129,9 @@ RUN { find apps/api/src/generated -type f -exec sha256sum {} + | sort; \
     } > /tmp/generated-src.before
 
 COPY packages/core/ ./packages/core/
+# Raw-TS workspace package (like packages/client): apps/web bundles it at
+# build time, so its SOURCE must be present before the web build below.
+COPY packages/fixtures/ ./packages/fixtures/
 COPY apps/api/ ./apps/api/
 COPY apps/web/ ./apps/web/
 
@@ -162,7 +166,7 @@ RUN pnpm --filter @irp/web build
 # api image never carries devDependencies — image size is cold-start time under
 # ADR-0009 D5's scale-to-zero.
 #
-# All five manifests are still copied — pnpm --frozen-lockfile checks the
+# All six manifests are still copied — pnpm --frozen-lockfile checks the
 # whole workspace against pnpm-lock.yaml and complains about missing
 # manifests otherwise — but apps/web/package.json is copied for LOCKFILE
 # COMPLETENESS only, not because the api image needs anything web resolves.
@@ -175,11 +179,12 @@ RUN pnpm --filter @irp/web build
 # pnpm symlinks (see the comment on that COPY in the `api` stage).
 FROM base AS prod-deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY apps/api/package.json        ./apps/api/package.json
-COPY apps/web/package.json        ./apps/web/package.json
-COPY packages/core/package.json   ./packages/core/package.json
-COPY packages/types/package.json  ./packages/types/package.json
-COPY packages/client/package.json ./packages/client/package.json
+COPY apps/api/package.json           ./apps/api/package.json
+COPY apps/web/package.json           ./apps/web/package.json
+COPY packages/core/package.json      ./packages/core/package.json
+COPY packages/fixtures/package.json  ./packages/fixtures/package.json
+COPY packages/types/package.json     ./packages/types/package.json
+COPY packages/client/package.json    ./packages/client/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --filter @irp/api...
 

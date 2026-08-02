@@ -14,34 +14,19 @@ cookie → decrypt → `@irp/client` → `apps/api` → Postgres → rendered us
    pnpm --filter @irp/api exec prisma migrate deploy
    ```
 
-2. The two registered dev users. `dev-unknown-1` is deliberately absent —
+2. The seeded demo data. `dev-unknown-1` is deliberately absent —
    the test asserts it produces a 403.
 
    **Re-seed before every Playwright run.** `apps/api`'s own test suites
-   `TRUNCATE` the `User` table, so a `pnpm --filter @irp/api test` run wipes
-   these rows out again even if you seeded them earlier in the session.
-
-   ```sql
-   INSERT INTO "User" ("id", "externalId", "email", "displayName", "role", "createdAt", "updatedAt")
-   VALUES
-     (gen_random_uuid(), 'dev-admin-1',   'mentor@dev.local',  'Dev Mentor',  'ADMIN',   now(), now()),
-     (gen_random_uuid(), 'dev-student-1', 'student@dev.local', 'Dev Student', 'STUDENT', now(), now())
-   ON CONFLICT ("externalId") DO NOTHING;
-   ```
-
-   Via `docker compose exec`. **Pipe the SQL in on stdin — do not pass it with
-   `-c`.** Windows PowerShell 5.1 does not preserve the `\"` escapes needed to
-   quote Postgres's case-sensitive identifiers through a native command's
-   argument list: it re-splits the string, and `psql` receives
-   `INSERT INTO " User\` plus a pile of "extra command-line argument ignored"
-   warnings. Save the block above as `seed.sql` and:
+   `TRUNCATE` the database, so a `pnpm --filter @irp/api test` run wipes
+   the demo rows even if you seeded earlier in the session.
 
    ```powershell
-   Get-Content seed.sql -Raw | docker compose -f apps/api/docker-compose.yml exec -T db psql -U irp -d irp -v ON_ERROR_STOP=1
+   pnpm --filter @irp/api db:seed
    ```
 
-   On bash, `-c` with the SQL inline works fine — this is a PowerShell quoting
-   limitation, not a Postgres or Docker one.
+   The seed is idempotent and covers far more than the two users the old
+   manual INSERT created — see `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` §6.
 
 3. `apps/api/.env` and `apps/web/.env.local` from their `.env.example` files,
    with `AUTH_DEV_BYPASS=true` and the API pointed at the dev JWKS:

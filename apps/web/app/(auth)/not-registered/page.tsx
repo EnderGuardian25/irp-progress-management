@@ -27,8 +27,7 @@ export default function NotRegisteredPage() {
         >
           <button
             type="submit"
-            className="rounded-[var(--radius-control)] border px-4 py-2"
-            style={{ borderColor: "var(--line-strong)", color: "var(--ink)" }}
+            className="cursor-pointer rounded-[var(--radius-control)] border border-line-strong px-4 py-2 text-ink transition duration-150 ease-out-quart hover:border-primary hover:bg-primary-weak active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0"
           >
             Sign out
           </button>

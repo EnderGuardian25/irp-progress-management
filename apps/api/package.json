@@ -11,7 +11,8 @@
     "test": "vitest run",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:migrate:dev": "prisma migrate dev"
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@azure/monitor-opentelemetry-exporter": "1.0.0-beta.43",
@@ -29,6 +30,7 @@
     "jose": "6.2.4"
   },
   "devDependencies": {
+    "@irp/fixtures": "workspace:*",
     "@irp/types": "workspace:*",
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "prisma": "7.9.1",

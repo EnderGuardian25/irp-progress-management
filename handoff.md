@@ -201,8 +201,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 2B · Service + persistence | T-05 (User only), T-10 (thin) | D2 | ✅ **Merged, PR #5** |
 | | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
 | | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **Merged, PR #8** |
-| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **This plan.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
-| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | Not started |
+| | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **Merged, PR #9.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
+| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **This plan.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
 | **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
@@ -284,6 +284,13 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 ---
 
 ## 3. Current position
+
+**Plan 5 complete on `feat/plan-5-data-model-and-seed`** — full schema, repositories, cycle
+materialisation, `@irp/fixtures`, and an engine-driven seed replace the Plan 3 two-user manual
+INSERT. CI's e2e data now comes from `db:seed`, not a hand-written SQL block. No API surface
+change: `spec/openapi.yaml` is untouched, so `packages/types` and `packages/client` are unchanged
+too. The branch is not yet merged — everything below this paragraph, up to and including the
+"Azure and Entra" material, predates Plan 5 and describes Plan 4B's state at merge.
 
 **Branch:** `feat/plan-4b-infra-deploy-observability` · **Last merged:** Plan 4A as **PR #8**
 (merge commit `720b387`, 2026-07-30) · **Plan 4B: all ten tasks complete, apply-ready, not yet
