@@ -152,11 +152,11 @@ describe.skipIf(!dbUrl)("createDayService", () => {
     const days = await service.listDays(s.id, MON_ON_TIME, TUE_LATE, NOW);
     expect(days).toHaveLength(2);
     expect(days.every((d) => d.entries.length === 0)).toBe(true);
-    // No enrolment at all: obligation-clipped to nothing, so nothing is ever
-    // "missed" — every day is either "none" (no obligation) or "future"
-    // (hasn't arrived), per the enrolment-clipped correction.
+    // No enrolment at all: every day is always "none", even one that hasn't
+    // arrived yet — outside enrolment, "future" never applies (see spec
+    // DayStatus).
     for (const d of days) {
-      expect(["none", "future"]).toContain(d.status);
+      expect(d.status).toBe("none");
     }
   });
 

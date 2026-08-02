@@ -178,6 +178,8 @@ paths:
         entries for that day, the review status of the day's report, and the
         server-computed classification. Weekends appear with status `extra`
         (work recorded) or `none` (nothing) — never late or missed (FR-33).
+        Days outside the caller's enrolment intervals also report `none` —
+        no enrolment, no obligation — even when such a day is in the future.
 
         Defaults to the current evaluation cycle (the 10th of the month to
         the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.

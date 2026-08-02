@@ -215,11 +215,11 @@ describe.skipIf(!dbUrl)("GET /api/v1/me/days", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<DaySummaryLike[]>();
     expect(body.every((d) => d.entries.length === 0)).toBe(true);
-    // Enrolment-clipped obligation: no enrolment means no obligation, so a
-    // mentor's days are never "missed" — only "none" or (for a range that
-    // reaches into the future) "future".
+    // Enrolment-clipped obligation: with no enrolment at all, every day is
+    // always "none" — even a day that hasn't arrived yet. Outside enrolment,
+    // "future" never applies (see spec DayStatus).
     for (const d of body) {
-      expect(["none", "future"]).toContain(d.status);
+      expect(d.status).toBe("none");
     }
   });
 });
