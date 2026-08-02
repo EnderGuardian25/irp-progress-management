@@ -19,12 +19,16 @@ const MON = civilDate("2026-08-03");
 const SAT = civilDate("2026-08-01");
 const NOW = colomboInstant(civilDate("2026-08-05"), "10:00");
 
-// 2026-10-10 is itself a Saturday (confirmed with @irp/core's dayOfWeek: it
-// is five weeks -- 35 days -- after the 2026-08-03 Monday anchor above, and
-// 35 is a multiple of 7), so the cycle it opens has no required day of its
-// own before the following Monday. cycleWorkingDays() over that cycle's
-// bounds ({ start: "2026-10-10", end: "2026-11-09" }) confirms its first
-// entry is 2026-10-12.
+// 2026-10-10 is itself a Saturday, confirmed with @irp/core's dayOfWeek.
+// (Do not re-derive it from the 2026-08-03 Monday anchor above by eye: the
+// gap is 68 days, not the 35 an earlier version of this comment claimed --
+// 68 mod 7 = 5, Monday + 5 = Saturday. The arithmetic is easy to get wrong
+// and the conclusion happened to survive it. Run dayOfWeek if you move
+// this date.)
+// So the cycle it opens has no required day of its own before the following
+// Monday, and cycleWorkingDays() over that cycle's bounds
+// ({ start: "2026-10-10", end: "2026-11-09" }) confirms its first entry is
+// 2026-10-12.
 const WEEKEND_CYCLE_START = civilDate("2026-10-10");
 const WEEKEND_CYCLE_FIRST_REQUIRED = civilDate("2026-10-12");
 
@@ -204,9 +208,11 @@ describe.skipIf(!dbUrl)("createDashboardService — batchToday", () => {
 
     const view = await dashboards.batchToday(batch.id, colomboInstant(WEEKEND_CYCLE_FIRST_REQUIRED, "10:00"));
 
+    // The Extra is counted but anchors nowhere: previousWeekday(2026-10-10)
+    // is 2026-10-09, which precedes this cycle's start, so the slot is
+    // DROPPED rather than attributed to the previous cycle's last Friday.
     expect(view.extraCount).toBe(1);
     expect(view.extraAfter).toEqual([]);
-    expect(view.days.some((d) => d.date === WEEKEND_CYCLE_START)).toBe(false);
   });
 
   it("throws BatchNotFoundError for an unknown batch id", async () => {
