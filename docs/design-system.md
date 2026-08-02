@@ -231,6 +231,13 @@ late/absent/missed counts are computed over required days only (FR-12).
 **Day mark states:** full (all submitted) · partial (proportional fill) · ochre notch (late)
 · slate (absent) · red (missed) · outline (not yet reached) · ringed (today).
 
+**Batch aggregation (Plan 7).** A batch day holds a mix of outcomes and the ribbon draws one
+mark, so precedence is fixed: **missed → late → absent → partial → ok**, with an outline for a
+day nobody has reached. The failure outranks the warning, the warning outranks the excused
+absence, and `partial` sits below all three because pending work is an unfinished afternoon,
+not a problem. Only `partial` is filled proportionally (`submitted / enrolled`). Implemented
+once, in `apps/web/lib/ribbon.ts`; a page that re-derives a mark is a bug.
+
 ---
 
 ## 8. Screens
