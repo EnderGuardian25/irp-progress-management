@@ -20,13 +20,16 @@ import Link from "next/link";
  * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
  * than seeing them disabled. Students get their own two-item list; "My
  * month" stays label-only until Plan 7.
+ *
+ * Task 15 added `apps/web/app/(app)/students/page.tsx`, so Students is now a
+ * real link too. Cycles still has no page (Plan 7) and stays label-only.
  */
 const MENTOR_DESTINATIONS = [
   { label: "Today", href: "/" },
   { label: "Roster", href: "/roster" },
   { label: "Review", href: "/review" },
   { label: "Cycles" },
-  { label: "Students" },
+  { label: "Students", href: "/students" },
 ] as const;
 
 const STUDENT_DESTINATIONS = [

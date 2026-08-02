@@ -54,12 +54,12 @@ describe("Sidebar", () => {
     }
   });
 
-  it("mentor (Admin) role: Roster and Review are real links; Cycles, Students stay non-interactive", () => {
-    // Task 13 added apps/web/app/(app)/roster/page.tsx and Task 14 added
-    // apps/web/app/(app)/review/page.tsx, so both are now real links.
-    // Students lands in Task 15, Cycles in Plan 7 -- typedRoutes rejects a
-    // Link to either, so they stay non-interactive until their own task
-    // lands.
+  it("mentor (Admin) role: Roster, Review, and Students are real links; Cycles stays non-interactive", () => {
+    // Task 13 added apps/web/app/(app)/roster/page.tsx, Task 14 added
+    // apps/web/app/(app)/review/page.tsx, and Task 15 added
+    // apps/web/app/(app)/students/page.tsx, so all three are now real links.
+    // Cycles lands in Plan 7 -- typedRoutes rejects a Link to it, so it stays
+    // non-interactive until its own task lands.
     render(<Sidebar role="Admin" />);
 
     const roster = screen.getByRole("link", { name: /Roster/ });
@@ -70,11 +70,13 @@ describe("Sidebar", () => {
     expect(review).toHaveAttribute("href", "/review");
     expect(review).not.toHaveAttribute("aria-disabled");
 
-    for (const item of ["Cycles", "Students"]) {
-      expect(screen.queryByRole("link", { name: new RegExp(item) })).not.toBeInTheDocument();
-      const el = screen.getByText(new RegExp(item));
-      expect(el).toHaveAttribute("aria-disabled", "true");
-    }
+    const students = screen.getByRole("link", { name: /Students/ });
+    expect(students).toHaveAttribute("href", "/students");
+    expect(students).not.toHaveAttribute("aria-disabled");
+
+    expect(screen.queryByRole("link", { name: /Cycles/ })).not.toBeInTheDocument();
+    const cycles = screen.getByText(/Cycles/);
+    expect(cycles).toHaveAttribute("aria-disabled", "true");
   });
 
   it("Student role: sees only Today and My month -- no mentor-only destinations at all", () => {
