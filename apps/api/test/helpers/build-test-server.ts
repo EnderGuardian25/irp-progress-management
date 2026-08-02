@@ -8,6 +8,7 @@ import { createBatchRepo } from "../../src/db/batch-repo.js";
 import { createMentorRecordRepo } from "../../src/db/mentor-record-repo.js";
 import { createDayService } from "../../src/services/day-service.js";
 import { createRosterService } from "../../src/services/roster-service.js";
+import { createDashboardService } from "../../src/services/dashboard-service.js";
 import { createTracerProvider } from "../../src/telemetry.js";
 import { buildServer } from "../../src/server.js";
 import { getLocalKeySet, testIssuer, testAudience } from "./keys.js";
@@ -24,6 +25,7 @@ export async function buildTestServer(databaseUrl: string): Promise<{
   const batchRepo = createBatchRepo(prisma);
   const mentorRecordRepo = createMentorRecordRepo(prisma);
   const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
+  const dashboardService = createDashboardService({ batchRepo, dayService });
   const app = await buildServer({
     config: {
       port: 3001, databaseUrl, jwksUri: "unused",
@@ -36,6 +38,7 @@ export async function buildTestServer(databaseUrl: string): Promise<{
     mentorRecordRepo,
     dayService,
     rosterService: createRosterService({ batchRepo, dayService, mentorRecordRepo }),
+    dashboardService,
     getKey: await getLocalKeySet(),
     tracerProvider: createTracerProvider(exporter),
     prisma,

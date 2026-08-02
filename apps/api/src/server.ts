@@ -22,8 +22,10 @@ import { batchRoutes } from "./routes/batches.js";
 import { reviewRoutes } from "./routes/reviews.js";
 import { userRoutes } from "./routes/users.js";
 import { adminActionRoutes } from "./routes/admin-actions.js";
+import { dashboardRoutes } from "./routes/dashboards.js";
 import type { DayService } from "./services/day-service.js";
 import type { RosterService } from "./services/roster-service.js";
+import type { DashboardService } from "./services/dashboard-service.js";
 
 export interface ServerDeps {
   config: AppConfig;
@@ -34,6 +36,7 @@ export interface ServerDeps {
   mentorRecordRepo: MentorRecordRepo;
   dayService: DayService;
   rosterService: RosterService;
+  dashboardService: DashboardService;
   getKey: JWTVerifyGetKey;
   tracerProvider: NodeTracerProvider;
   // Handed to userRoutes for exactly one call site — see the comment there.
@@ -72,6 +75,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(absenceRoutes, { absenceRepo: deps.absenceRepo });
   await app.register(meDaysRoutes, { dayService: deps.dayService });
   await app.register(batchRoutes, { batchRepo: deps.batchRepo, rosterService: deps.rosterService });
+  await app.register(dashboardRoutes, { dashboardService: deps.dashboardService });
   await app.register(reviewRoutes, {
     entryRepo: deps.entryRepo,
     userRepo: deps.userRepo,

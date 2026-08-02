@@ -76,6 +76,15 @@ export function createDayService(deps: {
   ): DayView[] {
     const entriesByDate = new Map<CivilDate, EntryRecord[]>();
     for (const e of entries) {
+      // An entry whose submittedAt is still in the future relative to `now`
+      // has not happened yet as of this view — this only arises when a
+      // caller evaluates an instant earlier than a stored submission (a
+      // dashboard viewed "as of" a past moment; production always calls with
+      // `now = new Date()`, so a real submission is never ahead of it).
+      // Without this guard a not-yet-submitted entry would already read as
+      // onTime/late, which is exactly the classification `future` days are
+      // being protected from further up.
+      if (e.submittedAt.getTime() > now.getTime()) continue;
       const bucket = entriesByDate.get(e.entryDate) ?? [];
       bucket.push(e);
       entriesByDate.set(e.entryDate, bucket);

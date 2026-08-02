@@ -43,6 +43,8 @@ tags:
     description: Registration and the user directory. Mentor (Admin) access only; there is no self-registration.
   - name: Reviews
     description: Mentor review of daily reports — forward-only state, attendance records, and the per-student day view.
+  - name: Dashboards
+    description: Derived, read-only summaries — the mentor's batch view (FR-28) and the student's own month (FR-29). Every figure is computed per request; nothing here is stored.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -473,6 +475,82 @@ paths:
                             isExtra: false
                       hasMentorRecord: false
                       extraCountThisCycle: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches/{id}/dashboard/today:
+    get:
+      operationId: getBatchDashboardToday
+      summary: Today's submission figures for a batch
+      description: |
+        FR-28, the must-ship mentor figure: "N of M submitted" for the batch's
+        current required day, with late, absent and missed counts, plus the
+        per-day series the cycle ribbon renders over the whole current cycle.
+
+        Weekends carry no obligation, so on a Saturday or Sunday the endpoint
+        reports the most recent required day in the cycle and sets
+        `isFallbackDay`. Every figure is derived per request from the same
+        classification the student's own day view uses; nothing is stored.
+        Mentor only.
+      tags: [Dashboards]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The batch id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+      responses:
+        '200':
+          description: The batch's current-cycle dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchTodayDashboard'
+              examples:
+                midCycle:
+                  summary: Day 17 of a 22-day cycle, one weekend worked
+                  value:
+                    batchId: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                    batchName: Batch Aurora
+                    date: '2026-08-03'
+                    isFallbackDay: false
+                    dayNumber: 17
+                    cycle:
+                      seq: 3
+                      startDate: '2026-07-10'
+                      endDate: '2026-08-09'
+                      requiredDayCount: 22
+                    counts:
+                      date: '2026-08-03'
+                      enrolled: 10
+                      submitted: 8
+                      late: 2
+                      absent: 1
+                      missed: 0
+                      pending: 1
+                    extraCount: 3
+                    days:
+                      - date: '2026-08-03'
+                        enrolled: 10
+                        submitted: 8
+                        late: 2
+                        absent: 1
+                        missed: 0
+                        pending: 1
+                    extraAfter:
+                      - '2026-07-31'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1508,6 +1586,162 @@ components:
           description: Weekend Extra entries inside the cycle containing the roster date. A count, not a status — Extra is not a compliance state.
           examples:
             - 2
+
+    CycleView:
+      type: object
+      title: CycleView
+      description: |
+        Which evaluation cycle a dashboard describes. Bounds are the fixed
+        10th-to-9th calendar window (FR-9); `seq` is the batch's own 1-based
+        numbering, anchored on its first evaluated cycle (ADR-0019).
+      required: [seq, startDate, endDate, requiredDayCount]
+      additionalProperties: false
+      properties:
+        seq:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: The cycle's 1-based position in the batch's programme, or null when the batch's first evaluated cycle has not opened yet (FR-27).
+          examples:
+            - 3
+        startDate:
+          type: string
+          format: date
+          description: First day of the cycle, inclusive — always a 10th.
+          examples:
+            - '2026-07-10'
+        endDate:
+          type: string
+          format: date
+          description: Last day of the cycle, inclusive — always a 9th.
+          examples:
+            - '2026-08-09'
+        requiredDayCount:
+          type: integer
+          minimum: 0
+          description: Weekdays in the cycle. Weekends are excluded — they carry no obligation and never enter a denominator (FR-12).
+          examples:
+            - 22
+
+    DayCompliance:
+      type: object
+      title: DayCompliance
+      description: |
+        One required day, counted across a batch. `submitted` includes late
+        submissions — a late entry is still submitted — and `late` reports how
+        many of them were. Extra (weekend) work never appears here (FR-12/FR-33).
+        Days nobody has reached yet report `enrolled` with every other count at
+        zero.
+      required: [date, enrolled, submitted, late, absent, missed, pending]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The required day (Asia/Colombo).
+          examples:
+            - '2026-08-03'
+        enrolled:
+          type: integer
+          minimum: 0
+          description: Students enrolled in the batch on this day — the "M" in "N of M".
+          examples:
+            - 10
+        submitted:
+          type: integer
+          minimum: 0
+          description: Students with at least one entry for this day, late included — the "N" in "N of M".
+          examples:
+            - 8
+        late:
+          type: integer
+          minimum: 0
+          description: How many of the submissions landed after the day ended but inside grace (FR-13).
+          examples:
+            - 2
+        absent:
+          type: integer
+          minimum: 0
+          description: Students who explicitly recorded an absence with a reason (FR-16).
+          examples:
+            - 1
+        missed:
+          type: integer
+          minimum: 0
+          description: Students with no entry and no absence, past the grace window (FR-14). Final.
+          examples:
+            - 0
+        pending:
+          type: integer
+          minimum: 0
+          description: Students with nothing recorded whose grace window is still open. Not yet a miss.
+          examples:
+            - 1
+
+    BatchTodayDashboard:
+      type: object
+      title: BatchTodayDashboard
+      description: |
+        FR-28's answer for one batch: today's "N of M submitted" with late and
+        absent counts, plus the whole cycle's per-day series that the cycle
+        ribbon renders. `counts` is `days` entry for `date` — repeated at the
+        top level so the required figures are first-class rather than something
+        the client has to find.
+      required: [batchId, batchName, date, isFallbackDay, dayNumber, cycle, counts, extraCount, days, extraAfter]
+      additionalProperties: false
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          description: The batch this dashboard describes.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        batchName:
+          type: string
+          description: The batch's display name.
+          examples:
+            - Batch Aurora
+        date:
+          type: string
+          format: date
+          description: The required day being reported — today when today is a weekday, otherwise the most recent required day in this cycle.
+          examples:
+            - '2026-08-03'
+        isFallbackDay:
+          type: boolean
+          description: True when `date` is not today — a weekend, or a cycle that opened on one. The interface must label the figures as belonging to an earlier day rather than presenting them as today's.
+          examples:
+            - false
+        dayNumber:
+          type: integer
+          minimum: 1
+          description: Position of `date` among the cycle's required days, 1-based — the "Day 12 of 22" figure.
+          examples:
+            - 17
+        cycle:
+          $ref: '#/components/schemas/CycleView'
+        counts:
+          $ref: '#/components/schemas/DayCompliance'
+        extraCount:
+          type: integer
+          minimum: 0
+          description: Weekend Extra entries recorded anywhere in this cycle by this batch (FR-33). A count, never a compliance state.
+          examples:
+            - 3
+        days:
+          type: array
+          description: Every required day in the cycle, earliest first. Weekends are absent by construction.
+          items:
+            $ref: '#/components/schemas/DayCompliance'
+        extraAfter:
+          type: array
+          description: Required days immediately preceding a weekend somebody actually worked. The ribbon draws a half-width Extra slot after each (FR-33).
+          items:
+            type: string
+            format: date
+          examples:
+            - ['2026-07-31']
 
     TransitionRequest:
       type: object
