@@ -202,8 +202,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 3 · Auth + web shell | T-11 | D3 | ✅ **Merged, PR #6** |
 | | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **Merged, PR #8** |
 | | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **Merged, PR #9.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
-| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **This plan.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
-| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | Not started |
+| **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **Merged, PR #10.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
+| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | ⏳ **In progress** — branch `feat/plan-6-submission-and-review`; opens with the repo error contract, the entry-vs-absence race fix, and the transfer-day inclusivity decision deferred from Plan 5's pre-PR pass |
 | | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
 | **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
