@@ -1515,7 +1515,7 @@ Tag `Batches` (`description: Cohorts and their enrolment rosters. Mentor (Admin)
           type: string
           minLength: 1
           maxLength: 120
-          description: Display name, unique in practice but not enforced.
+          description: Display name. Unique — a duplicate is rejected with 409. (Correction 2026-08-02 -- the schema has carried @unique since Plan 5; "not enforced" was wrong, and createBatch's responses gain '409' accordingly.)
           examples:
             - Batch Cinder
         startDate:
