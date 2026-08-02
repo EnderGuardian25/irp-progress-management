@@ -7,14 +7,16 @@ import type { BatchRepo } from "../db/batch-repo.js";
 import { toDbDate } from "../db/civil-date-map.js";
 import { BatchNotFoundError, DuplicateUserError, EnrolmentRequiredError } from "../domain/errors.js";
 import { requireAdmin } from "../plugins/roles.js";
+import { ROLE_TO_API } from "./me.js";
 import { USER_CREATE_BODY, USERS_QUERY } from "./schemas.js";
 
 type ApiUserDetail = components["schemas"]["UserDetail"];
 type ApiRole = components["schemas"]["Role"];
 
-// The inverse of `ROLE_TO_API` (me.ts) — a Record, not a ternary, for the
-// same exhaustiveness reason: widening either union without adding a case
-// here is a type error, not a silent fallthrough.
+// The inverse of `ROLE_TO_API` (me.ts, reused below rather than duplicated) —
+// a Record, not a ternary, for the same exhaustiveness reason: widening
+// either union without adding a case here is a type error, not a silent
+// fallthrough.
 const API_ROLE_TO_DB: Record<ApiRole, UserRecord["role"]> = {
   Admin: "ADMIN",
   Student: "STUDENT",
@@ -25,7 +27,9 @@ function toApiUserDetail(record: UserRecord & { deletedAt: Date | null }): ApiUs
     id: record.id,
     email: record.email,
     displayName: record.displayName,
-    role: record.role === "ADMIN" ? "Admin" : "Student",
+    // Reuses me.ts's DB->API mapping rather than a local ternary — the same
+    // exhaustiveness guarantee `ROLE_TO_API` exists for, not duplicated here.
+    role: ROLE_TO_API[record.role],
     archived: record.deletedAt !== null,
   };
 }
@@ -101,6 +105,12 @@ export const userRoutes: FastifyPluginAsync<{
           deletedAt: created.deletedAt,
         });
       } catch (err) {
+        // Only user.create's externalId/email unique constraints can fire
+        // here in practice: enrolment.create's partial unique index scopes
+        // to *open* enrolments per studentId, and studentId is the id just
+        // minted inside this same transaction — a brand-new id can never
+        // collide with an existing open enrolment. This branch is defensive
+        // for that side, not covered by a test that could reach it.
         if (isUniqueViolation(err)) throw new DuplicateUserError(req.body.email);
         throw err;
       }
