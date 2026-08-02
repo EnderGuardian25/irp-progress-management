@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { civilDate } from "@irp/core";
 import { createPrismaClient } from "../src/db/client.js";
 import { createBatchRepo } from "../src/db/batch-repo.js";
+import { OpenEnrolmentExistsError, NoOpenEnrolmentError } from "../src/domain/errors.js";
 import { resetDb } from "./helpers/db.js";
 import { dbUrl } from "./helpers/require-db.js";
 
@@ -56,5 +57,20 @@ describe.skipIf(!dbUrl)("createBatchRepo", () => {
     const s = await student("t-3");
     const b = await repo.create({ name: "B3", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09") });
     await expect(repo.transfer(s.id, b.id, civilDate("2026-07-10"))).rejects.toThrow(/no open enrolment/i);
+  });
+
+  it("enrol() maps a second open enrolment to OpenEnrolmentExistsError", async () => {
+    const s = await student("t-4");
+    const b = await repo.create({ name: "B4", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09") });
+    await repo.enrol(s.id, b.id, civilDate("2026-06-10"));
+    await expect(repo.enrol(s.id, b.id, civilDate("2026-06-10")))
+      .rejects.toBeInstanceOf(OpenEnrolmentExistsError);
+  });
+
+  it("transfer() without an open enrolment throws NoOpenEnrolmentError", async () => {
+    const freshStudent = await student("t-5");
+    const b = await repo.create({ name: "B5", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09") });
+    await expect(repo.transfer(freshStudent.id, b.id, civilDate("2026-06-10")))
+      .rejects.toBeInstanceOf(NoOpenEnrolmentError);
   });
 });

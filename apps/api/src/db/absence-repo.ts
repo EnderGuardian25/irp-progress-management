@@ -1,7 +1,18 @@
 import { isWeekday, type CivilDate } from "@irp/core";
-import { EntryConflictError, LockedDayError, WeekendAbsenceError } from "../domain/errors.js";
-import type { PrismaClient } from "../generated/prisma/client.js";
+import {
+  AbsenceExistsError,
+  AbsenceNotFoundError,
+  EntryConflictError,
+  LockedDayError,
+  WeekendAbsenceError,
+} from "../domain/errors.js";
+import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
+
+// Duplicated from batch-repo.ts: two lines beats a premature shared module.
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
 
 export interface AbsenceRecordShape {
   id: string;
@@ -37,17 +48,23 @@ export function createAbsenceRepo(prisma: PrismaClient): AbsenceRepo {
           where: { studentId: input.studentId, entryDate: toDbDate(input.date) },
         });
         if (entryCount > 0) throw new EntryConflictError(input.date);
-        const row = await tx.absenceRecord.create({
-          data: { studentId: input.studentId, date: toDbDate(input.date), reason: input.reason },
-        });
-        return { id: row.id, studentId: row.studentId, date: fromDbDate(row.date), reason: row.reason };
+        try {
+          const row = await tx.absenceRecord.create({
+            data: { studentId: input.studentId, date: toDbDate(input.date), reason: input.reason },
+          });
+          return { id: row.id, studentId: row.studentId, date: fromDbDate(row.date), reason: row.reason };
+        } catch (err) {
+          if (isUniqueViolation(err)) throw new AbsenceExistsError(input.date);
+          throw err;
+        }
       });
     },
 
     async remove(studentId, date) {
       await prisma.$transaction(async (tx) => {
         await assertNotLocked(tx, studentId, date);
-        await tx.absenceRecord.deleteMany({ where: { studentId, date: toDbDate(date) } });
+        const { count } = await tx.absenceRecord.deleteMany({ where: { studentId, date: toDbDate(date) } });
+        if (count === 0) throw new AbsenceNotFoundError(date);
       });
     },
 

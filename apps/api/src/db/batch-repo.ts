@@ -1,6 +1,11 @@
 import type { CivilDate } from "@irp/core";
-import type { PrismaClient } from "../generated/prisma/client.js";
+import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
+import { NoOpenEnrolmentError, OpenEnrolmentExistsError } from "../domain/errors.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
 
 export interface BatchRecord {
   id: string;
@@ -58,10 +63,15 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
     },
 
     async enrol(studentId, batchId, startDate) {
-      const e = await prisma.enrolment.create({
-        data: { studentId, batchId, startDate: toDbDate(startDate) },
-      });
-      return mapEnrolment(e);
+      try {
+        const e = await prisma.enrolment.create({
+          data: { studentId, batchId, startDate: toDbDate(startDate) },
+        });
+        return mapEnrolment(e);
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new OpenEnrolmentExistsError(studentId);
+        throw err;
+      }
     },
 
     // FR-8 in one transaction: the partial unique index makes "two open
@@ -70,7 +80,7 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
     async transfer(studentId, toBatchId, effectiveDate) {
       return prisma.$transaction(async (tx) => {
         const open = await tx.enrolment.findFirst({ where: { studentId, endDate: null } });
-        if (!open) throw new Error(`transfer: student ${studentId} has no open enrolment`);
+        if (!open) throw new NoOpenEnrolmentError(studentId);
         await tx.enrolment.update({
           where: { id: open.id },
           data: { endDate: toDbDate(effectiveDate) },

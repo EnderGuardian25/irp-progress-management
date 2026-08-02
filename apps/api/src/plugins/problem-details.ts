@@ -1,6 +1,7 @@
 import { STATUS_CODES } from "node:http";
 import fp from "fastify-plugin";
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
+import { DomainError } from "../domain/errors.js";
 import { HttpError } from "../errors.js";
 import { currentTraceId } from "../telemetry.js";
 
@@ -51,6 +52,15 @@ export const problemDetailsPlugin = fp(
       const headers = errorHeaders(err);
       if (headers) reply.headers(headers);
 
+      if (err instanceof DomainError) {
+        return send(reply, req, {
+          type: `https://irp.bistec.example/problems/${err.code}`,
+          title: err.title,
+          status: err.status,
+          detail: err.message,
+          instance: req.url,
+        });
+      }
       if (err instanceof HttpError) {
         return send(reply, req, {
           type: err.problemType,
