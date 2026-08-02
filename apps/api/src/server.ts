@@ -12,11 +12,14 @@ import { requireAuthPlugin } from "./plugins/require-auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { entryRoutes } from "./routes/entries.js";
+import { meDaysRoutes } from "./routes/me-days.js";
+import type { DayService } from "./services/day-service.js";
 
 export interface ServerDeps {
   config: AppConfig;
   userRepo: UserRepo;
   entryRepo: EntryRepo;
+  dayService: DayService;
   getKey: JWTVerifyGetKey;
   tracerProvider: NodeTracerProvider;
 }
@@ -50,6 +53,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(meRoutes);
   await app.register(entryRoutes, { entryRepo: deps.entryRepo });
+  await app.register(meDaysRoutes, { dayService: deps.dayService });
 
   await app.ready();
   return app;

@@ -169,6 +169,78 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/me/days:
+    get:
+      operationId: listMyDays
+      summary: My rolled-up day history
+      description: |
+        One element per calendar day in the range, oldest first: the caller's
+        entries for that day, the review status of the day's report, and the
+        server-computed classification. Weekends appear with status `extra`
+        (work recorded) or `none` (nothing) — never late or missed (FR-33).
+
+        Defaults to the current evaluation cycle (the 10th of the month to
+        the 9th of the next, Asia/Colombo) when `from`/`to` are omitted.
+      tags: [Submissions]
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: First day of the range (inclusive). Defaults to the current cycle's start.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-07-10'
+        - name: to
+          in: query
+          required: false
+          description: Last day of the range (inclusive). Defaults to the current cycle's end. Ranges over 92 days are rejected.
+          schema:
+            type: string
+            format: date
+            examples:
+              - '2026-08-09'
+      responses:
+        '200':
+          description: The day-by-day view, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DaySummary'
+              examples:
+                twoDays:
+                  summary: A submitted weekday and an untouched weekend day
+                  value:
+                    - date: '2026-07-31'
+                      status: onTime
+                      reportStatus: Submitted
+                      reportId: 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+                      absenceReason: null
+                      entries:
+                        - id: 7be9f1d2-3c44-4f8a-9a01-2b3c4d5e6f70
+                          entryDate: '2026-07-31'
+                          body: Wrote the cycle materialisation tests.
+                          submittedAt: '2026-07-31T10:05:00.000Z'
+                          isLate: false
+                          isExtra: false
+                    - date: '2026-08-01'
+                      status: none
+                      reportStatus: null
+                      reportId: null
+                      absenceReason: null
+                      entries: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -353,6 +425,68 @@ components:
           description: True for entries on optional (weekend) days — FR-33.
           examples:
             - false
+
+    DayStatus:
+      type: string
+      title: DayStatus
+      enum: [onTime, late, absent, missed, pending, extra, none, future]
+      description: |
+        Server-computed classification of one day. Required days (weekdays)
+        resolve to onTime/late/absent/missed/pending; optional days
+        (weekends) resolve to extra/none and are never late or missed.
+        `pending` means the grace window is still open; `future` days have
+        not arrived. There is no rejected state.
+      examples:
+        - onTime
+
+    ReportStatus:
+      type: string
+      title: ReportStatus
+      enum: [Submitted, InReview, Evaluated]
+      description: Review state of one day's rolled-up report (FR-18/FR-20). Forward-only; Evaluated locks the day.
+      examples:
+        - Submitted
+
+    DaySummary:
+      type: object
+      title: DaySummary
+      description: Everything on record for one student and one calendar day.
+      required: [date, status, reportStatus, reportId, absenceReason, entries]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The civil date (Asia/Colombo).
+          examples:
+            - '2026-07-31'
+        status:
+          $ref: '#/components/schemas/DayStatus'
+        reportStatus:
+          oneOf:
+            - $ref: '#/components/schemas/ReportStatus'
+            - type: 'null'
+          description: Review state of the day's report, or null when no entry has created one.
+        reportId:
+          oneOf:
+            - type: string
+              format: uuid
+            - type: 'null'
+          description: The DailyReport id, used by mentors to transition review state. Null until a first entry exists.
+          examples:
+            - 5a3c2b1d-0e9f-4a8b-b7c6-d5e4f3a2b1c0
+        absenceReason:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: The recorded absence reason, when the day is marked absent.
+          examples:
+            - medical appointment
+        entries:
+          type: array
+          description: The day's entries, earliest first. Empty when nothing was submitted.
+          items:
+            $ref: '#/components/schemas/Entry'
 
   responses:
     BadRequest:

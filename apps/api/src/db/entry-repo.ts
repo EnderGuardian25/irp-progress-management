@@ -31,6 +31,7 @@ export interface EntryRepo {
   }): Promise<EntryRecord>;
   listEntries(studentId: string, from: CivilDate, to: CivilDate): Promise<EntryRecord[]>;
   getReport(studentId: string, date: CivilDate): Promise<DailyReportRecord | null>;
+  listReports(studentId: string, from: CivilDate, to: CivilDate): Promise<DailyReportRecord[]>;
 }
 
 interface DbEntry {
@@ -110,6 +111,16 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
       });
       if (!r) return null;
       return { id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status };
+    },
+
+    async listReports(studentId, from, to) {
+      const rows = await prisma.dailyReport.findMany({
+        where: { studentId, reportDate: { gte: toDbDate(from), lte: toDbDate(to) } },
+        orderBy: { reportDate: "asc" },
+      });
+      return rows.map((r) => ({
+        id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status,
+      }));
     },
   };
 }

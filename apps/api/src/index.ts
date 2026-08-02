@@ -4,10 +4,12 @@ import { loadConfig } from "./config.js";
 import { createPrismaClient } from "./db/client.js";
 import { createUserRepo } from "./db/user-repo.js";
 import { createEntryRepo } from "./db/entry-repo.js";
+import { createAbsenceRepo } from "./db/absence-repo.js";
 import { selectSpanExporter } from "./exporter.js";
 import { buildServer } from "./server.js";
 import { registerShutdown } from "./shutdown.js";
 import { createTracerProvider } from "./telemetry.js";
+import { createDayService } from "./services/day-service.js";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -22,9 +24,11 @@ await bootstrap({
   start: async () => {
     const userRepo = createUserRepo(prisma);
     const entryRepo = createEntryRepo(prisma);
+    const absenceRepo = createAbsenceRepo(prisma);
+    const dayService = createDayService({ entryRepo, absenceRepo });
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
-    const app = await buildServer({ config, userRepo, entryRepo, getKey, tracerProvider });
+    const app = await buildServer({ config, userRepo, entryRepo, dayService, getKey, tracerProvider });
 
     registerShutdown({
       close: () => app.close(),

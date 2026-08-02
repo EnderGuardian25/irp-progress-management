@@ -14,5 +14,6 @@ export function unusedEntryRepo(): EntryRepo {
     addEntry: unused,
     listEntries: unused,
     getReport: unused,
+    listReports: unused,
   };
 }
