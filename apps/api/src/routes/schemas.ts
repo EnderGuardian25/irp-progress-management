@@ -76,6 +76,38 @@ export const DAY_RECORD_BODY = {
   },
 } as const;
 
+export const USER_CREATE_BODY = {
+  type: "object",
+  required: ["externalId", "email", "displayName", "role"],
+  additionalProperties: false,
+  properties: {
+    externalId: { type: "string", minLength: 1, maxLength: 200 },
+    email: { type: "string", format: "email" },
+    displayName: { type: "string", minLength: 1, maxLength: 200 },
+    role: { type: "string", enum: ["Admin", "Student"] },
+    enrolment: {
+      type: "object",
+      required: ["batchId", "startDate"],
+      additionalProperties: false,
+      properties: {
+        batchId: { type: "string", format: "uuid" },
+        startDate: { type: "string", format: "date" },
+      },
+    },
+  },
+} as const;
+
+export const USERS_QUERY = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    role: { type: "string", enum: ["Admin", "Student"] },
+    // The wire (coercing) ajv instance turns the querystring's "true"/"false"
+    // into a boolean here — see validation.ts.
+    archived: { type: "boolean" },
+  },
+} as const;
+
 export const STUDENT_DATE_PARAM = {
   type: "object",
   required: ["id", "date"],

@@ -12,6 +12,7 @@ import { unusedBatchRepo } from "./helpers/fake-batch-repo.js";
 import { unusedMentorRecordRepo } from "./helpers/fake-mentor-record-repo.js";
 import { unusedDayService } from "./helpers/fake-day-service.js";
 import { unusedRosterService } from "./helpers/fake-roster-service.js";
+import { unusedPrisma } from "./helpers/fake-prisma.js";
 
 // This suite exercises only the auth plugin's key-getter branching — it never
 // reaches `userRepo.findByExternalId` on any of the 503/401 paths below, so it
@@ -42,6 +43,7 @@ describe("when the JWKS endpoint is unreachable", () => {
         throw new Error("ECONNREFUSED: the JWKS endpoint is unreachable");
       },
       tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+      prisma: unusedPrisma(),
     });
   });
 
@@ -103,6 +105,7 @@ describe("when a token's kid matches no published key", () => {
       // presented a token signed with an unpublished or rotated-out key.
       getKey: await getLocalKeySet(),
       tracerProvider: createTracerProvider(new InMemorySpanExporter()),
+      prisma: unusedPrisma(),
     });
   });
 

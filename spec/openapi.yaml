@@ -39,6 +39,8 @@ tags:
     description: Explicitly recorded weekday absences. Recorded, not requested — there is no approval workflow.
   - name: Batches
     description: Cohorts and their enrolment rosters. Mentor (Admin) access only.
+  - name: Users
+    description: Registration and the user directory. Mentor (Admin) access only; there is no self-registration.
   - name: Reviews
     description: Mentor review of daily reports — forward-only state, attendance records, and the per-student day view.
 
@@ -482,6 +484,104 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: The user directory
+      description: |
+        Every registered user, active by default, ordered by display name.
+        Mentor only. `archived=true` switches to the FR-5 archive view —
+        soft-deleted users, kept for history but without access.
+      tags: [Users]
+      parameters:
+        - name: role
+          in: query
+          required: false
+          description: Filter by role.
+          schema:
+            $ref: '#/components/schemas/Role'
+        - name: archived
+          in: query
+          required: false
+          description: true lists archived users (the FR-5 archive view); default false.
+          schema:
+            type: boolean
+            examples:
+              - false
+      responses:
+        '200':
+          description: The matching users, ordered by display name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserDetail'
+              examples:
+                twoActive:
+                  summary: Two active users
+                  value:
+                    - id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                      email: a.perera@bistecglobal.com
+                      displayName: Amaya Perera
+                      role: Student
+                      archived: false
+                    - id: 9c8b7a6d-5e4f-4a3b-9182-7c6d5e4f3a2b
+                      email: n.perera@bistecglobal.com
+                      displayName: Nuwan Perera
+                      role: Admin
+                      archived: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createUser
+      summary: Register a mentor or a student
+      description: |
+        Registers a new account (FR-3). Students require an initial
+        enrolment, created atomically with the user record; mentors must not
+        carry one. Mentor only; there is no self-registration.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '200':
+          description: The registered user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+              examples:
+                student:
+                  summary: A newly registered student, enrolled into a batch
+                  value:
+                    id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    email: a.perera@bistecglobal.com
+                    displayName: Amaya Perera
+                    role: Student
+                    archived: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/daily-reports/{id}/transition:
     post:
       operationId: transitionDailyReport
@@ -782,6 +882,89 @@ components:
             - Amaya Perera
         role:
           $ref: '#/components/schemas/Role'
+
+    UserCreate:
+      type: object
+      title: UserCreate
+      description: |
+        Register a mentor or a student (FR-3). Students require an initial
+        enrolment; mentors must not carry one. The externalId is the Entra
+        object id (oid claim) the person will authenticate with.
+      required: [externalId, email, displayName, role]
+      additionalProperties: false
+      properties:
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Entra object id (oid) of the account.
+          examples:
+            - 00000000-aaaa-bbbb-cccc-000000000001
+        email:
+          type: string
+          format: email
+          description: Bistec account email. Unique.
+          examples:
+            - n.perera@bistecglobal.com
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Name as shown in the interface.
+          examples:
+            - Nuwan Perera
+        role:
+          $ref: '#/components/schemas/Role'
+        enrolment:
+          type: object
+          description: Initial enrolment — required for Students, forbidden for Admins.
+          required: [batchId, startDate]
+          additionalProperties: false
+          properties:
+            batchId:
+              type: string
+              format: uuid
+              description: The batch to enrol into.
+              examples:
+                - 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+            startDate:
+              type: string
+              format: date
+              description: Enrolment start (admission) date.
+              examples:
+                - '2026-08-10'
+
+    UserDetail:
+      type: object
+      title: UserDetail
+      description: A directory row — the User shape plus archival state (FR-5).
+      required: [id, email, displayName, role, archived]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable internal identifier.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        email:
+          type: string
+          format: email
+          description: Bistec account email.
+          examples:
+            - a.perera@bistecglobal.com
+        displayName:
+          type: string
+          description: Name as shown in the interface.
+          examples:
+            - Amaya Perera
+        role:
+          $ref: '#/components/schemas/Role'
+        archived:
+          type: boolean
+          description: True when the user has been archived (soft-deleted). Archived users keep history and lose access.
+          examples:
+            - false
 
     HealthStatus:
       type: object

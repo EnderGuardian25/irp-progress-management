@@ -175,3 +175,21 @@ export class StudentNotFoundError extends DomainError {
     super(`No student exists with id ${id}.`);
   }
 }
+
+export class DuplicateUserError extends DomainError {
+  readonly code = "duplicate-user";
+  readonly status = 409;
+  readonly title = "User already exists";
+  constructor(email: string) {
+    super(`A user already exists with this email or external id (${email}).`);
+  }
+}
+
+export class EnrolmentRequiredError extends DomainError {
+  readonly code = "enrolment-required";
+  readonly status = 400;
+  readonly title = "Enrolment mismatch";
+  constructor(detail: string) {
+    super(detail);
+  }
+}

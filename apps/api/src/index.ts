@@ -36,7 +36,7 @@ await bootstrap({
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
     const app = await buildServer({
       config, userRepo, entryRepo, absenceRepo, batchRepo, mentorRecordRepo,
-      dayService, rosterService, getKey, tracerProvider,
+      dayService, rosterService, getKey, tracerProvider, prisma,
     });
 
     registerShutdown({

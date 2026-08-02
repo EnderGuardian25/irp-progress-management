@@ -38,6 +38,7 @@ export async function buildTestServer(databaseUrl: string): Promise<{
     rosterService: createRosterService({ batchRepo, dayService, mentorRecordRepo }),
     getKey: await getLocalKeySet(),
     tracerProvider: createTracerProvider(exporter),
+    prisma,
   });
   return { app, exporter, prisma };
 }

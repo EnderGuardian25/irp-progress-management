@@ -1,4 +1,11 @@
-import type { PrismaClient } from "../generated/prisma/client.js";
+import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
+import { DuplicateUserError } from "../domain/errors.js";
+
+// Same local guard Task 1 established (batch-repo.ts, absence-repo.ts) —
+// not worth a shared helper for a single-line predicate used by three files.
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
 
 export interface UserRecord {
   id: string;
@@ -19,6 +26,17 @@ export interface UserRepo {
   // reject an archived one; FR-5 hiding is a login-time concern, not this
   // lookup's).
   findById(id: string): Promise<(UserRecord & { deletedAt: Date | null }) | null>;
+  // P2002 (externalId or email unique constraint) maps to DuplicateUserError.
+  create(input: {
+    externalId: string;
+    email: string;
+    displayName: string;
+    role: "ADMIN" | "STUDENT";
+  }): Promise<UserRecord>;
+  // `archived: false` -> deletedAt: null (active, the default); `archived:
+  // true` -> deletedAt != null (the FR-5 archive view). `role` narrows
+  // further when supplied.
+  list(filter: { role?: "ADMIN" | "STUDENT"; archived: boolean }): Promise<(UserRecord & { deletedAt: Date | null })[]>;
 }
 
 export function createUserRepo(prisma: PrismaClient): UserRepo {
@@ -48,6 +66,30 @@ export function createUserRepo(prisma: PrismaClient): UserRepo {
         role: u.role,
         deletedAt: u.deletedAt,
       };
+    },
+
+    async create(input) {
+      try {
+        const u = await prisma.user.create({ data: input });
+        return { id: u.id, externalId: u.externalId, email: u.email, displayName: u.displayName, role: u.role };
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new DuplicateUserError(input.email);
+        throw err;
+      }
+    },
+
+    async list(filter) {
+      const rows = await prisma.user.findMany({
+        where: {
+          deletedAt: filter.archived ? { not: null } : null,
+          ...(filter.role === undefined ? {} : { role: filter.role }),
+        },
+        orderBy: { displayName: "asc" },
+      });
+      return rows.map((u) => ({
+        id: u.id, externalId: u.externalId, email: u.email,
+        displayName: u.displayName, role: u.role, deletedAt: u.deletedAt,
+      }));
     },
   };
 }

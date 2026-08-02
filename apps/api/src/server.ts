@@ -7,6 +7,7 @@ import type { EntryRepo } from "./db/entry-repo.js";
 import type { AbsenceRepo } from "./db/absence-repo.js";
 import type { BatchRepo } from "./db/batch-repo.js";
 import type { MentorRecordRepo } from "./db/mentor-record-repo.js";
+import type { PrismaClient } from "./generated/prisma/client.js";
 import { createValidatorCompiler } from "./validation.js";
 import { tracingPlugin } from "./telemetry.js";
 import { problemDetailsPlugin } from "./plugins/problem-details.js";
@@ -19,6 +20,7 @@ import { meDaysRoutes } from "./routes/me-days.js";
 import { absenceRoutes } from "./routes/absences.js";
 import { batchRoutes } from "./routes/batches.js";
 import { reviewRoutes } from "./routes/reviews.js";
+import { userRoutes } from "./routes/users.js";
 import type { DayService } from "./services/day-service.js";
 import type { RosterService } from "./services/roster-service.js";
 
@@ -33,6 +35,8 @@ export interface ServerDeps {
   rosterService: RosterService;
   getKey: JWTVerifyGetKey;
   tracerProvider: NodeTracerProvider;
+  // Handed to userRoutes for exactly one call site — see the comment there.
+  prisma: PrismaClient;
 }
 
 declare module "fastify" {
@@ -72,6 +76,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     userRepo: deps.userRepo,
     mentorRecordRepo: deps.mentorRecordRepo,
     dayService: deps.dayService,
+  });
+  await app.register(userRoutes, {
+    userRepo: deps.userRepo,
+    batchRepo: deps.batchRepo,
+    prisma: deps.prisma,
   });
 
   await app.ready();
