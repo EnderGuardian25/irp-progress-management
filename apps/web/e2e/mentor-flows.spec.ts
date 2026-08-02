@@ -83,12 +83,20 @@ test.describe("mentor flows (dev-admin-1)", () => {
     await expect(dilini).toBeVisible();
     const extraText = ((await dilini.locator("td").nth(3).textContent()) ?? "").trim();
 
-    if (extraText === "—") {
+    // Only skip a zero count when it's actually explained by "this Saturday
+    // is in the cycle's first week" (the seed may not have reached its
+    // 11:00 Colombo entry instant for it yet at seed time). A zero on any
+    // Saturday further into the cycle than that is a real regression in the
+    // extra-count computation, not a timing artefact -- fall through and let
+    // the match below fail, rather than skipping forever on green.
+    const withinFirstWeekOfCycle = compareDates(lastSaturday, addDays(currentCycle.start, 7)) < 0;
+    if (extraText === "—" && withinFirstWeekOfCycle) {
       test.skip(
         true,
-        `Extra count read 0 on ${lastSaturday} -- most likely this is the very first Saturday of ` +
-          "a brand-new cycle and the seed ran before that Saturday's 11:00 Colombo entry instant. " +
-          "No positive count exists yet to assert against.",
+        `Extra count read 0 on ${lastSaturday}, which falls within the first 7 days of the ` +
+          `current cycle (starts ${currentCycle.start}) -- most likely this is that cycle's very ` +
+          "first Saturday and the seed ran before its 11:00 Colombo entry instant. No positive " +
+          "count exists yet to assert against.",
       );
     }
     expect(extraText).toMatch(/^\+\d+ extra$/);

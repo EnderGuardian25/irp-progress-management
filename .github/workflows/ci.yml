@@ -177,6 +177,15 @@ jobs:
       # Asia/Colombo. That is exactly the condition the comment this replaced
       # named as the trigger to drop the UTC-only restriction, not work around
       # it -- so all three legs now run the full e2e suite.
+      #
+      # This does NOT triple the job's wall-clock time against NFR-5: the
+      # matrix's three legs are separate parallel jobs (`strategy.matrix`),
+      # not a sequential loop, so they finish together, not one after
+      # another. And the UTC leg was already the longest-running of the
+      # three even before this change (it alone carried Playwright's browser
+      # install and the e2e suite) -- so it was already the critical path,
+      # and widening the other two legs to match only costs extra
+      # runner-minutes (billing), not extra wall-clock time.
       - name: Install the Playwright browser
         run: pnpm --filter @irp/web exec playwright install --with-deps chromium
 

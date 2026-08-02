@@ -36,26 +36,36 @@ describe.skipIf(!dbUrl)("runSeed", () => {
     // then archive" flow (@irp/fixtures externalId never in
     // SEED_EXTERNAL_IDS) leaves the archived student's Enrolment row behind
     // -- archive only soft-deletes the User, it was never going to touch
-    // their Enrolment too. The NEXT db:seed run used to 500 with
-    // Enrolment_batchId_fkey, because the batch deleteMany only had its
-    // enrolments cleared when the STUDENT was seed-owned, not when the
-    // BATCH was. Batch Aurora/Basalt are owned by the seed by name; a
-    // stray enrolment into either, from any student, must not survive a
-    // reseed.
+    // their Enrolment too. The NEXT db:seed run used to throw a
+    // Prisma P2003 foreign-key violation on Enrolment_batchId_fkey, because
+    // the batch deleteMany only had its enrolments cleared when the STUDENT
+    // was seed-owned, not when the BATCH was. Batch Aurora/Basalt are owned
+    // by the seed by name; a stray enrolment into either, from any student,
+    // must not survive a reseed.
+    const externalId = "not-a-seed-user";
+    // deleteMany, not delete: makes this test's own setup idempotent against
+    // a previous failed run's leftover row, rather than 500ing on a unique
+    // constraint before the actual regression gets exercised.
+    await prisma.user.deleteMany({ where: { externalId } });
+
     const batchA = await prisma.batch.findUniqueOrThrow({ where: { name: SEED_BATCH_NAMES.A } });
     const stray = await prisma.user.create({
       data: {
-        externalId: "not-a-seed-user",
+        externalId,
         email: "stray@dev.local",
         displayName: "Stray Registrant",
         role: "STUDENT",
+        // Archived, matching the scenario this test reproduces: the
+        // Students-page archive flow soft-deletes the User (deletedAt set)
+        // but leaves the Enrolment row it's regressing against untouched.
+        deletedAt: NOW,
       },
     });
     await prisma.enrolment.create({
       data: { studentId: stray.id, batchId: batchA.id, startDate: batchA.startDate },
     });
 
-    await expect(runSeed(prisma, NOW)).resolves.not.toThrow();
+    await runSeed(prisma, NOW);
 
     // The seed only wipes rows it owns (SEED_EXTERNAL_IDS), so the stray
     // user itself survives -- only Batch Aurora, and the dangling

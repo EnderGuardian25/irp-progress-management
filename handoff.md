@@ -129,18 +129,24 @@ apps/web/                Next.js 16 — Auth.js v5, route groups ((auth) bare, (
                          factory, middleware guard. 63 unit tests + 5 Playwright specs
 apps/web/lib/dev-identity.ts     THE DEV BYPASS. server-only. Mints RS256 tokens with a local
                          key. Guarded at three entry points — see ADR-0012
-apps/web/e2e/            Playwright. The only test proving the whole sign-in chain
+apps/web/e2e/            Playwright — signin.spec.ts (the sign-in chain) plus, as of Task 16,
+                         student-flows.spec.ts and mentor-flows.spec.ts (Plan 6's submission and
+                         review screens over the seeded personas)
 packages/client/dist/    GENERATED declarations, git-ignored. Consumers resolve TYPES from here
                          so apps/web keeps full strictness
 redocly.yaml             recommended-strict + a custom four-response assertion
 eslint.config.mjs        type-aware, generated dirs ignored
 .github/workflows/ci.yml 3-timezone matrix + Postgres, generation and tamper gates, next build,
-                         Playwright on the UTC leg, and a dormant real-token job
+                         Playwright on all three legs (Task 16: the suite gained genuine
+                         date/timezone-sensitive assertions, so the earlier UTC-only restriction
+                         no longer applies — its own comment said as much), and a dormant
+                         real-token job
 ```
 
-Test totals: **`@irp/core` 112 · `apps/api` 59 · `apps/web` 63 unit + 5 Playwright.** (Plan 5
-figures; Plan 6, below, adds substantially to all four and is not yet reconciled into this line —
-see the branch's own gate output for current counts.)
+Test totals as of Task 16: **`@irp/core` 112 · `apps/api` 223 · `apps/web` 141 unit + 20
+Playwright.** (`apps/api` and `apps/web`'s unit counts, and the Playwright count, all grew
+substantially over the Plan 5 figures this line used to carry — see the branch's own gate output,
+or the Task 16 report, to reconcile further.)
 
 **Plan 6 surface, in progress on `feat/plan-6-submission-and-review`.** Not yet merged (§2a's row
 stays "In progress" until the PR lands), but the following exists on the branch as of Task 16:

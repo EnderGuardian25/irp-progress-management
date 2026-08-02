@@ -8,7 +8,7 @@ import {
   submissionWindow,
   toProgrammeDate,
 } from "@irp/core";
-import { formatCivilDateLabel, signInAsStudent } from "./helpers";
+import { dayPanelByLabel, formatCivilDateLabel, signInAsStudent } from "./helpers";
 
 /**
  * Student-side flows over the seeded personas (Plan 6 spec §7). Every test
@@ -59,13 +59,18 @@ test.describe("student flows (dev-student-1, compliant, Batch Aurora)", () => {
       );
     }
 
-    const reasonInput = page.getByLabel(`Absence reason for ${today}`);
+    // Scoped to today's own Panel throughout -- the compliant persona's other
+    // visible days never carry an absence, so an unscoped "Remove" would
+    // still be unique today, but scoping it removes that "still" and matches
+    // the reasonInput/Mark-absent scoping just above.
+    const todayPanel = dayPanelByLabel(page, formatCivilDateLabel(today));
+    const reasonInput = todayPanel.getByLabel(`Absence reason for ${today}`);
     await reasonInput.fill("E2E absence round-trip");
-    await reasonInput.locator("xpath=ancestor::form").getByRole("button", { name: "Mark absent" }).click();
+    await todayPanel.getByRole("button", { name: "Mark absent" }).click();
 
-    await expect(page.getByText(/Marked absent — E2E absence round-trip/)).toBeVisible();
+    await expect(todayPanel.getByText(/Marked absent — E2E absence round-trip/)).toBeVisible();
 
-    await page.getByRole("button", { name: "Remove" }).click();
+    await todayPanel.getByRole("button", { name: "Remove" }).click();
     await expect(emptyToday).toBeVisible();
   });
 
@@ -133,7 +138,7 @@ test.describe("student flows (dev-student-1, compliant, Batch Aurora)", () => {
     });
   });
 
-  test("never offers a report the seed already marked Evaluated (FR-20's lock, from the student's own view)", async ({
+  test("the composer never offers a date outside the submission window, even one the seed marked Evaluated", async ({
     page,
   }) => {
     await signInAsStudent(page);
