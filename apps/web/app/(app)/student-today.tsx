@@ -1,4 +1,4 @@
-import { listMyDays } from "@irp/client";
+import { listMyDays, type Role } from "@irp/client";
 import { isWeekday, submissionWindow } from "@irp/core";
 import { apiClient } from "@/lib/api-client";
 import { PageTitle } from "@/components/ui/page-title";
@@ -28,7 +28,7 @@ const ENTRY_TIME_FORMAT = new Intl.DateTimeFormat("en-GB", {
   hour12: true,
 });
 
-export async function StudentToday({ displayName }: { displayName: string }) {
+export async function StudentToday({ displayName, role }: { displayName: string; role: Role }) {
   const client = await apiClient();
   const openWindow = submissionWindow(new Date());
   const oldest = openWindow.targetDates[openWindow.targetDates.length - 1];
@@ -53,12 +53,14 @@ export async function StudentToday({ displayName }: { displayName: string }) {
       <PageTitle>Today</PageTitle>
       {/*
         Playwright's sign-in chain (e2e/signin.spec.ts) asserts
-        data-testid="user-name" on every role after sign-in. The mentor
-        branch of (app)/page.tsx renders its own signed-in card carrying it;
-        this is the Student equivalent. Visually hidden -- this page's job
-        is the composer, not a repeat of what the Topbar already shows.
+        data-testid="user-name" AND data-testid="user-role" on every role
+        after sign-in. The mentor branch of (app)/page.tsx renders its own
+        signed-in card carrying both; these are the Student equivalents.
+        Visually hidden -- this page's job is the composer, not a repeat of
+        what the Topbar already shows.
       */}
       <span className="sr-only" data-testid="user-name">{displayName}</span>
+      <span className="sr-only" data-testid="user-role">{role}</span>
 
       <div className="mb-8">
         <EntryComposer targetDates={openWindow.targetDates} />
