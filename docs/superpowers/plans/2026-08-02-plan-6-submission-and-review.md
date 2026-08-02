@@ -2907,7 +2907,9 @@ export default async function RosterPage({
     path: { id: selected.id },
     query: date === undefined ? {} : { date },
   });
-  // …render: batch picker as a row of <Link href={{ pathname: "/roster", query: { batchId: b.id } }}>,
+  // …render: batch picker as a row of Links — each carries BOTH batchId and
+  // the currently selected date when one is set (Correction 2026-08-02: a
+  // batch switch must not silently reset the date to today),
   // a date <form method="get"> with <input type="date" name="date" defaultValue={date}> and hidden batchId,
   // then a table: name · StatusPill(status, reportStatus) · entry count · "+N extra" when
   // extraCountThisCycle > 0 · absence reason · record indicator (✓ recorded / — none) ·
