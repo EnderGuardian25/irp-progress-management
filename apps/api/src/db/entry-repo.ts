@@ -49,6 +49,10 @@ export interface EntryRepo {
   listEntries(studentId: string, from: CivilDate, to: CivilDate): Promise<EntryRecord[]>;
   getReport(studentId: string, date: CivilDate): Promise<DailyReportRecord | null>;
   listReports(studentId: string, from: CivilDate, to: CivilDate): Promise<DailyReportRecord[]>;
+  /** Batched sibling of listEntries — same ordering, one query for many students (ADR-0018). */
+  listEntriesForStudents(studentIds: string[], from: CivilDate, to: CivilDate): Promise<EntryRecord[]>;
+  /** Batched sibling of listReports (ADR-0018). */
+  listReportsForStudents(studentIds: string[], from: CivilDate, to: CivilDate): Promise<DailyReportRecord[]>;
   transition(
     reportId: string,
     to: "IN_REVIEW" | "EVALUATED",
@@ -139,6 +143,26 @@ export function createEntryRepo(prisma: PrismaClient): EntryRepo {
     async listReports(studentId, from, to) {
       const rows = await prisma.dailyReport.findMany({
         where: { studentId, reportDate: { gte: toDbDate(from), lte: toDbDate(to) } },
+        orderBy: { reportDate: "asc" },
+      });
+      return rows.map((r) => ({
+        id: r.id, studentId: r.studentId, reportDate: fromDbDate(r.reportDate), status: r.status,
+      }));
+    },
+
+    async listEntriesForStudents(studentIds, from, to) {
+      if (studentIds.length === 0) return [];
+      const rows = await prisma.entry.findMany({
+        where: { studentId: { in: studentIds }, entryDate: { gte: toDbDate(from), lte: toDbDate(to) } },
+        orderBy: [{ entryDate: "asc" }, { submittedAt: "asc" }],
+      });
+      return rows.map(mapEntry);
+    },
+
+    async listReportsForStudents(studentIds, from, to) {
+      if (studentIds.length === 0) return [];
+      const rows = await prisma.dailyReport.findMany({
+        where: { studentId: { in: studentIds }, reportDate: { gte: toDbDate(from), lte: toDbDate(to) } },
         orderBy: { reportDate: "asc" },
       });
       return rows.map((r) => ({
