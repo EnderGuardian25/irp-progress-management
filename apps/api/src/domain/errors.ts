@@ -193,3 +193,21 @@ export class EnrolmentRequiredError extends DomainError {
     super(detail);
   }
 }
+
+export class SelfArchiveError extends DomainError {
+  readonly code = "self-archive";
+  readonly status = 409;
+  readonly title = "Cannot archive yourself";
+  constructor() {
+    super("Archiving your own account would lock you out mid-session.");
+  }
+}
+
+export class UserNotFoundError extends DomainError {
+  readonly code = "user-not-found";
+  readonly status = 404;
+  readonly title = "User not found";
+  constructor(id: string) {
+    super(`No user exists with id ${id}.`);
+  }
+}

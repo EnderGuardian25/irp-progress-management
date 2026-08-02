@@ -484,6 +484,61 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/students/{id}/transfer:
+    post:
+      operationId: transferStudent
+      summary: Transfer a student to another batch
+      description: |
+        Moves a student's open enrolment to a new batch, effective on the
+        given date (FR-8). The old enrolment closes the day before; the new
+        batch owns the effective date onward (ADR-0017) — the two intervals
+        never overlap. Mentor only.
+      tags: [Batches]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The student's user id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: The new open enrolment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Enrolment'
+              examples:
+                transferred:
+                  summary: Moved into Batch Basalt effective 2026-08-10
+                  value:
+                    id: 4c3b2a1f-6e5d-4c3b-8a29-1f0e9d8c7b6a
+                    studentId: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    batchId: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                    startDate: '2026-08-10'
+                    endDate: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/users:
     get:
       operationId: listUsers
@@ -569,6 +624,54 @@ paths:
                     displayName: Amaya Perera
                     role: Student
                     archived: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/users/{id}:
+    delete:
+      operationId: archiveUser
+      summary: Archive a user
+      description: |
+        Soft archive (FR-5): the user leaves active rosters and loses
+        access, history is kept. Idempotent — archiving an archived user is
+        a no-op. Self-archive is rejected (409). Mentor only.
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user id to archive.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+      responses:
+        '200':
+          description: The archived user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+              examples:
+                archived:
+                  summary: A student, archived
+                  value:
+                    id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    email: a.perera@bistecglobal.com
+                    displayName: Amaya Perera
+                    role: Student
+                    archived: true
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1220,6 +1323,69 @@ components:
           description: Programme end. Must be after startDate (400 otherwise).
           examples:
             - '2027-03-09'
+
+    TransferRequest:
+      type: object
+      title: TransferRequest
+      description: Move a student to another batch (FR-8). The new batch owns the effective date; the old enrolment closes the day before (ADR-0017).
+      required: [toBatchId, effectiveDate]
+      additionalProperties: false
+      properties:
+        toBatchId:
+          type: string
+          format: uuid
+          description: The destination batch.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        effectiveDate:
+          type: string
+          format: date
+          description: First day in the new batch. Must be after the open enrolment's start (400 otherwise).
+          examples:
+            - '2026-08-10'
+
+    Enrolment:
+      type: object
+      title: Enrolment
+      description: |
+        One student's enrolment interval in one batch. ADR-0017 guarantees
+        these are disjoint per student — at most one open (endDate null) at
+        a time.
+      required: [id, studentId, batchId, startDate, endDate]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Enrolment identifier.
+          examples:
+            - 4c3b2a1f-6e5d-4c3b-8a29-1f0e9d8c7b6a
+        studentId:
+          type: string
+          format: uuid
+          description: The enrolled student's user id.
+          examples:
+            - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+        batchId:
+          type: string
+          format: uuid
+          description: The batch this interval belongs to.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        startDate:
+          type: string
+          format: date
+          description: First day of this interval, inclusive.
+          examples:
+            - '2026-08-10'
+        endDate:
+          oneOf:
+            - type: string
+              format: date
+            - type: 'null'
+          description: Last day of this interval, inclusive, or null while the enrolment is still open.
+          examples:
+            - null
 
     RosterRow:
       type: object

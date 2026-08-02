@@ -108,6 +108,16 @@ export const USERS_QUERY = {
   },
 } as const;
 
+export const TRANSFER_BODY = {
+  type: "object",
+  required: ["toBatchId", "effectiveDate"],
+  additionalProperties: false,
+  properties: {
+    toBatchId: { type: "string", format: "uuid" },
+    effectiveDate: { type: "string", format: "date" },
+  },
+} as const;
+
 export const STUDENT_DATE_PARAM = {
   type: "object",
   required: ["id", "date"],

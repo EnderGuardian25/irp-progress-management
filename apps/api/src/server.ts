@@ -21,6 +21,7 @@ import { absenceRoutes } from "./routes/absences.js";
 import { batchRoutes } from "./routes/batches.js";
 import { reviewRoutes } from "./routes/reviews.js";
 import { userRoutes } from "./routes/users.js";
+import { adminActionRoutes } from "./routes/admin-actions.js";
 import type { DayService } from "./services/day-service.js";
 import type { RosterService } from "./services/roster-service.js";
 
@@ -81,6 +82,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     userRepo: deps.userRepo,
     batchRepo: deps.batchRepo,
     prisma: deps.prisma,
+  });
+  await app.register(adminActionRoutes, {
+    userRepo: deps.userRepo,
+    batchRepo: deps.batchRepo,
   });
 
   await app.ready();

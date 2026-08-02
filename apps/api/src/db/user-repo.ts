@@ -37,6 +37,10 @@ export interface UserRepo {
   // true` -> deletedAt != null (the FR-5 archive view). `role` narrows
   // further when supplied.
   list(filter: { role?: "ADMIN" | "STUDENT"; archived: boolean }): Promise<(UserRecord & { deletedAt: Date | null })[]>;
+  // FR-5: soft archive. Idempotent by construction — the `updateMany` only
+  // matches a row still `deletedAt: null`, so a repeat call touches zero
+  // rows and still resolves successfully rather than erroring.
+  archive(id: string, now: Date): Promise<void>;
 }
 
 export function createUserRepo(prisma: PrismaClient): UserRepo {
@@ -90,6 +94,14 @@ export function createUserRepo(prisma: PrismaClient): UserRepo {
         id: u.id, externalId: u.externalId, email: u.email,
         displayName: u.displayName, role: u.role, deletedAt: u.deletedAt,
       }));
+    },
+
+    async archive(id, now) {
+      // Idempotent: only stamps when not already archived.
+      await prisma.user.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt: now },
+      });
     },
   };
 }

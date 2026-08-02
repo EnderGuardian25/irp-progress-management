@@ -44,8 +44,12 @@ function toApiDayRecord(r: MentorDayRecordShape): ApiDayRecord {
  * deletedAt (an archived student's history is still reviewable), but the
  * role must be STUDENT — a mentor id in the same path shape is treated as
  * "no such student" (404), not answered.
+ *
+ * Exported for reuse by admin-actions.ts's transferStudent handler, which
+ * needs the identical "exists and is a STUDENT" check before handing off to
+ * BatchRepo.transfer.
  */
-async function resolveStudent(userRepo: UserRepo, id: string) {
+export async function resolveStudent(userRepo: UserRepo, id: string) {
   const user = await userRepo.findById(id);
   if (user?.role !== "STUDENT") throw new StudentNotFoundError(id);
   return user;
