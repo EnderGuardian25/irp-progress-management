@@ -6,6 +6,7 @@ import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Table, Th, Td } from "@/components/ui/table";
 import { formatCivilDateLabel } from "../format-civil-date";
 
 /**
@@ -146,61 +147,66 @@ export default async function CyclesPage({
               hint="Enrol students from the Students page."
             />
           ) : (
-            <table className="w-full text-[13px]" style={{ color: "var(--ink)" }}>
+            <Table>
               <thead>
-                <tr style={{ color: "var(--ink-muted)" }}>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Student</th>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Required</th>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Outcomes</th>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Extra</th>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Compliance</th>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Review</th>
-                  <th scope="col" className="px-2 py-2 text-left font-normal">Evaluation</th>
+                <tr>
+                  <Th>Student</Th>
+                  <Th numeric>Required</Th>
+                  <Th>Outcomes</Th>
+                  <Th>Extra</Th>
+                  <Th numeric>Compliance</Th>
+                  <Th>Review</Th>
+                  <Th>Evaluation</Th>
                 </tr>
               </thead>
               <tbody>
                 {data.students.map(({ student, counts, reviewProgress }) => (
                   <tr key={student.id} style={{ borderTop: "1px solid var(--line)" }}>
-                    <td className="px-2 py-2">
+                    <Td>
                       <div>{student.displayName}</div>
                       <div className="text-xs" style={{ color: "var(--ink-muted)" }}>{student.email}</div>
-                    </td>
-                    <td className="tabular px-2 py-2">{counts.requiredDays}</td>
+                    </Td>
+                    <Td numeric>{counts.requiredDays}</Td>
                     {/* One cell, four figures: the outcomes only mean anything
                         read together, and four columns of mostly-zero would
-                        cost the width the Review and Evaluation columns need. */}
-                    <td className="tabular px-2 py-2" data-testid={`counts-${student.id}`}>
-                      <span style={{ color: "var(--st-ok)" }}>{counts.onTime} on time</span>
+                        cost the width the Review and Evaluation columns need.
+                        Mixed text-and-figure content, so the cell itself stays
+                        left-aligned (Td, not Td numeric) while each figure
+                        keeps tabular-nums via its own span. */}
+                    <Td data-testid={`counts-${student.id}`}>
+                      <span className="tabular" style={{ color: "var(--st-ok)" }}>{counts.onTime} on time</span>
                       {" · "}
-                      <span style={{ color: "var(--st-late)" }}>{counts.late} late</span>
+                      <span className="tabular" style={{ color: "var(--st-late)" }}>{counts.late} late</span>
                       {" · "}
-                      <span style={{ color: "var(--st-absent)" }}>{counts.absent} absent</span>
+                      <span className="tabular" style={{ color: "var(--st-absent)" }}>{counts.absent} absent</span>
                       {" · "}
-                      <span style={{ color: "var(--st-missed)" }}>{counts.missed} missed</span>
-                    </td>
+                      <span className="tabular" style={{ color: "var(--st-missed)" }}>{counts.missed} missed</span>
+                    </Td>
                     {/* Extra is muted, never a status colour — design-system
                         §3.2, "distinguished by form, not colour". */}
-                    <td className="tabular px-2 py-2" data-testid={`extra-${student.id}`} style={{ color: "var(--ink-muted)" }}>
-                      {counts.extra > 0 ? `+${String(counts.extra)} extra` : "—"}
-                    </td>
+                    <Td data-testid={`extra-${student.id}`} style={{ color: "var(--ink-muted)" }}>
+                      <span className="tabular">{counts.extra > 0 ? `+${String(counts.extra)} extra` : "—"}</span>
+                    </Td>
                     {/* A dash, not 0%: no settled day means no rate exists,
                         and a zero would read as total failure. */}
-                    <td className="tabular px-2 py-2" data-testid={`compliance-${student.id}`}>
+                    <Td numeric data-testid={`compliance-${student.id}`}>
                       {counts.complianceRate === null
                         ? "—"
                         : `${String(Math.round(counts.complianceRate * 100))}%`}
-                    </td>
-                    <td className="tabular px-2 py-2" style={{ color: "var(--ink-muted)" }}>
-                      {reviewProgress.evaluated} evaluated · {reviewProgress.inReview} in review ·{" "}
-                      {reviewProgress.submitted} to do
-                    </td>
-                    <td className="px-2 py-2" data-testid={`evaluation-${student.id}`} style={{ color: "var(--ink-muted)" }}>
+                    </Td>
+                    <Td style={{ color: "var(--ink-muted)" }}>
+                      <span className="tabular">
+                        {reviewProgress.evaluated} evaluated · {reviewProgress.inReview} in review ·{" "}
+                        {reviewProgress.submitted} to do
+                      </span>
+                    </Td>
+                    <Td data-testid={`evaluation-${student.id}`} style={{ color: "var(--ink-muted)" }}>
                       Awaiting evaluation
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
         </Panel>
       )}

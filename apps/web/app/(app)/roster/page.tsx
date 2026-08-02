@@ -8,6 +8,8 @@ import { SectionLabel } from "@/components/ui/section-label";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Button } from "@/components/ui/button";
+import { FieldLabel } from "@/components/ui/field-label";
+import { Table, Th, Td } from "@/components/ui/table";
 import { formatCivilDateLabel } from "../format-civil-date";
 
 /**
@@ -111,9 +113,7 @@ export default async function RosterPage({
         <form method="get" className="flex items-end gap-2">
           <input type="hidden" name="batchId" value={selected.id} />
           <div>
-            <label htmlFor="roster-date" className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--ink-muted)" }}>
-              Date
-            </label>
+            <FieldLabel htmlFor="roster-date">Date</FieldLabel>
             <input
               id="roster-date"
               type="date"
@@ -153,36 +153,36 @@ export default async function RosterPage({
               <SectionLabel>{formatCivilDateLabel(effectiveDate)}</SectionLabel>
             </div>
           )}
-          <table className="w-full text-[13px]" style={{ color: "var(--ink)" }}>
+          <Table>
             <thead>
-              <tr style={{ color: "var(--ink-muted)" }}>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Student</th>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Status</th>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Entries</th>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Extra</th>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Absence reason</th>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Recorded</th>
-                <th scope="col" className="px-2 py-2 text-left font-normal">Review</th>
+              <tr>
+                <Th>Student</Th>
+                <Th>Status</Th>
+                <Th>Entries</Th>
+                <Th>Extra</Th>
+                <Th>Absence reason</Th>
+                <Th>Recorded</Th>
+                <Th>Review</Th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.student.id} style={{ borderTop: "1px solid var(--line)" }}>
-                  <td className="px-2 py-2">
+                  <Td>
                     <div>{row.student.displayName}</div>
                     <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
                       {row.student.email}
                     </div>
-                  </td>
-                  <td className="px-2 py-2">
+                  </Td>
+                  <Td>
                     {row.day.status === "none" ? (
                       <span style={{ color: "var(--ink-muted)" }}>—</span>
                     ) : (
                       <StatusPill status={row.day.status} reportStatus={row.day.reportStatus} />
                     )}
-                  </td>
-                  <td className="tabular px-2 py-2">{row.day.entries.length}</td>
-                  <td className="px-2 py-2">
+                  </Td>
+                  <Td numeric>{row.day.entries.length}</Td>
+                  <Td>
                     {row.extraCountThisCycle > 0 ? (
                       <span className="tabular" style={{ color: "var(--ink-muted)" }}>
                         +{row.extraCountThisCycle} extra
@@ -190,25 +190,25 @@ export default async function RosterPage({
                     ) : (
                       <span style={{ color: "var(--ink-muted)" }}>—</span>
                     )}
-                  </td>
-                  <td className="px-2 py-2" style={{ color: "var(--ink-muted)" }}>
+                  </Td>
+                  <Td style={{ color: "var(--ink-muted)" }}>
                     {row.day.absenceReason ?? "—"}
-                  </td>
-                  <td className="px-2 py-2">
+                  </Td>
+                  <Td>
                     {row.hasMentorRecord ? "✓ recorded" : "— none"}
-                  </td>
-                  <td className="px-2 py-2">
+                  </Td>
+                  <Td>
                     <Link
                       href={`/review/${row.student.id}`}
                       style={{ color: "var(--ink)", textDecoration: "underline" }}
                     >
                       Review
                     </Link>
-                  </td>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Panel>
       )}
     </div>

@@ -3,6 +3,8 @@ import { render, screen } from "@testing-library/react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FieldLabel } from "@/components/ui/field-label";
+import { Table, Th, Td } from "@/components/ui/table";
 
 describe("Button", () => {
   it("renders the primary variant", () => {
@@ -96,5 +98,47 @@ describe("EmptyState", () => {
     expect(screen.getByText("Submit today's update.")).toBeInTheDocument();
     rerender(<EmptyState title="No entries yet" />);
     expect(screen.queryByText("Submit today's update.")).not.toBeInTheDocument();
+  });
+});
+
+describe("FieldLabel", () => {
+  it("renders a <label> bound to its control", () => {
+    render(
+      <>
+        <FieldLabel htmlFor="roster-date">Date</FieldLabel>
+        <input id="roster-date" />
+      </>,
+    );
+    expect(screen.getByLabelText("Date")).toBeInTheDocument();
+  });
+
+  it("carries the 12px uppercase tracked treatment, so no page has to restate it", () => {
+    render(<FieldLabel htmlFor="x">Batch</FieldLabel>);
+    const label = screen.getByText("Batch");
+    expect(label.className).toContain("uppercase");
+    expect(label.className).toContain("text-xs");
+  });
+});
+
+describe("Table", () => {
+  it("renders a real table with scoped column headers", () => {
+    render(
+      <Table>
+        <thead>
+          <tr><Th>Student</Th><Th>Status</Th></tr>
+        </thead>
+        <tbody>
+          <tr><Td>Amaya</Td><Td>On time</Td></tr>
+        </tbody>
+      </Table>,
+    );
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Student" })).toHaveAttribute("scope", "col");
+    expect(screen.getAllByRole("cell")).toHaveLength(2);
+  });
+
+  it("right-aligns and tabular-figures a numeric cell on request", () => {
+    render(<Table><tbody><tr><Td numeric>22</Td></tr></tbody></Table>);
+    expect(screen.getByRole("cell").className).toContain("tabular");
   });
 });
