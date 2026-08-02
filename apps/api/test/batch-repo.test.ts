@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { civilDate } from "@irp/core";
 import { createPrismaClient } from "../src/db/client.js";
+import { fromDbDate } from "../src/db/civil-date-map.js";
 import { createBatchRepo } from "../src/db/batch-repo.js";
-import { OpenEnrolmentExistsError, NoOpenEnrolmentError } from "../src/domain/errors.js";
+import { OpenEnrolmentExistsError, NoOpenEnrolmentError, InvalidTransferDateError } from "../src/domain/errors.js";
 import { resetDb } from "./helpers/db.js";
 import { dbUrl } from "./helpers/require-db.js";
 
@@ -72,5 +73,27 @@ describe.skipIf(!dbUrl)("createBatchRepo", () => {
     const b = await repo.create({ name: "B5", startDate: civilDate("2026-07-10"), endDate: civilDate("2027-01-09") });
     await expect(repo.transfer(freshStudent.id, b.id, civilDate("2026-06-10")))
       .rejects.toBeInstanceOf(NoOpenEnrolmentError);
+  });
+
+  it("transfer closes the old enrolment the day BEFORE the effective date (ADR-0017)", async () => {
+    const s = await student("t-6");
+    const a = await repo.create({ name: "A6", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09") });
+    const b = await repo.create({ name: "B6", startDate: civilDate("2026-06-10"), endDate: civilDate("2026-12-09") });
+    await repo.enrol(s.id, a.id, civilDate("2026-05-10"));
+
+    const next = await repo.transfer(s.id, b.id, civilDate("2026-06-15"));
+    const rows = await prisma.enrolment.findMany({
+      where: { studentId: s.id }, orderBy: { startDate: "asc" },
+    });
+    expect(fromDbDate(rows[0]!.endDate!)).toBe("2026-06-14");
+    expect(next.startDate).toBe("2026-06-15");
+  });
+
+  it("transfer on/before the open enrolment's start is rejected", async () => {
+    const s2 = await student("t-7");
+    const b = await repo.create({ name: "B7", startDate: civilDate("2026-06-10"), endDate: civilDate("2026-12-09") });
+    await repo.enrol(s2.id, b.id, civilDate("2026-05-10"));
+    await expect(repo.transfer(s2.id, b.id, civilDate("2026-05-10")))
+      .rejects.toBeInstanceOf(InvalidTransferDateError);
   });
 });

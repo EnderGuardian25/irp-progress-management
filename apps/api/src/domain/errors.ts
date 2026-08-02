@@ -86,6 +86,15 @@ export class AbsenceExistsError extends DomainError {
   }
 }
 
+export class InvalidTransferDateError extends DomainError {
+  readonly code = "invalid-transfer-date";
+  readonly status = 400;
+  readonly title = "Invalid transfer date";
+  constructor(effectiveDate: string) {
+    super(`Transfer effective ${effectiveDate} would not leave the previous enrolment a single day.`);
+  }
+}
+
 export class AbsenceNotFoundError extends DomainError {
   readonly code = "absence-not-found";
   readonly status = 404;

@@ -1,6 +1,6 @@
-import type { CivilDate } from "@irp/core";
+import { addDays, compareDates, type CivilDate } from "@irp/core";
 import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
-import { NoOpenEnrolmentError, OpenEnrolmentExistsError } from "../domain/errors.js";
+import { InvalidTransferDateError, NoOpenEnrolmentError, OpenEnrolmentExistsError } from "../domain/errors.js";
 import { fromDbDate, toDbDate } from "./civil-date-map.js";
 
 function isUniqueViolation(err: unknown): boolean {
@@ -81,9 +81,13 @@ export function createBatchRepo(prisma: PrismaClient): BatchRepo {
       return prisma.$transaction(async (tx) => {
         const open = await tx.enrolment.findFirst({ where: { studentId, endDate: null } });
         if (!open) throw new NoOpenEnrolmentError(studentId);
+        if (compareDates(effectiveDate, fromDbDate(open.startDate)) <= 0) {
+          throw new InvalidTransferDateError(effectiveDate);
+        }
         await tx.enrolment.update({
           where: { id: open.id },
-          data: { endDate: toDbDate(effectiveDate) },
+          // ADR-0017: the new batch owns the effective date.
+          data: { endDate: toDbDate(addDays(effectiveDate, -1)) },
         });
         const next = await tx.enrolment.create({
           data: { studentId, batchId: toBatchId, startDate: toDbDate(effectiveDate) },
