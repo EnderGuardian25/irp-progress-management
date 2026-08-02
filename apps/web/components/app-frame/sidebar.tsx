@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 
 /**
  * The app frame's primary navigation. `navigation` landmark, 216px wide, on
@@ -20,21 +21,41 @@ import Link from "next/link";
  *
  * Navigation is role-gated, not just link-gated: a Student never sees
  * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
- * than seeing them disabled. Students get their own two-item list; "My
- * month" stays label-only until Task 8.
+ * than seeing them disabled. Students get their own two-item list.
+ *
+ * Every destination on both lists is now a real link — Task 8 added
+ * `apps/web/app/(app)/my-month/page.tsx`, so "My month" joined the others.
+ * The label-only branch below is kept regardless: it is what lets a future
+ * destination be added to either list before its page exists, without an
+ * `as Route` cast.
+ *
+ * `Destination` is a real union, not inferred from the array literals: once
+ * every entry on both lists carries an `href`, inference alone would narrow
+ * `"href" in d ? ... : ...`'s else branch to `never` and the label-only
+ * rendering path would fail to typecheck even though it must stay reachable
+ * for a future label-only entry.
  */
-const MENTOR_DESTINATIONS = [
+interface LinkedDestination {
+  readonly label: string;
+  readonly href: Route;
+}
+interface LabelOnlyDestination {
+  readonly label: string;
+}
+type Destination = LinkedDestination | LabelOnlyDestination;
+
+const MENTOR_DESTINATIONS: readonly Destination[] = [
   { label: "Today", href: "/" },
   { label: "Roster", href: "/roster" },
   { label: "Review", href: "/review" },
   { label: "Cycles", href: "/cycles" },
   { label: "Students", href: "/students" },
-] as const;
+];
 
-const STUDENT_DESTINATIONS = [
+const STUDENT_DESTINATIONS: readonly Destination[] = [
   { label: "Today", href: "/" },
-  { label: "My month" },
-] as const;
+  { label: "My month", href: "/my-month" },
+];
 
 export function Sidebar({
   role,

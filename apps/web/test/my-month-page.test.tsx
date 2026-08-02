@@ -1,0 +1,158 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import MyMonthPage from "@/app/(app)/my-month/page";
+
+const { getCurrentUserOrRedirect, apiClient } = vi.hoisted(() => ({
+  getCurrentUserOrRedirect: vi.fn(),
+  apiClient: vi.fn(),
+}));
+vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
+
+const { getMyDashboard, listMyDays } = vi.hoisted(() => ({
+  getMyDashboard: vi.fn(),
+  listMyDays: vi.fn(),
+}));
+vi.mock("@irp/client", () => ({ getMyDashboard, listMyDays }));
+
+const STUDENT = { id: "s1", email: "s@bistec.test", displayName: "Dev Student", role: "Student" as const };
+
+const dash = (over: Record<string, unknown> = {}) => ({
+  today: "2026-08-03",
+  programmeMonths: 6,
+  firstEvaluatedCycleStart: "2026-06-10",
+  cycle: { seq: 3, startDate: "2026-07-10", endDate: "2026-08-09", requiredDayCount: 22 },
+  days: [
+    { date: "2026-07-31", status: "onTime" },
+    { date: "2026-08-03", status: "late" },
+  ],
+  extraAfter: ["2026-07-31"],
+  summary: {
+    requiredDays: 22, settledDays: 17, onTime: 13, late: 2, absent: 1,
+    missed: 1, pending: 1, extra: 2, complianceRate: 0.9412,
+  },
+  strengthsAndWeaknesses: null,
+  ...over,
+});
+
+describe("MyMonthPage", () => {
+  it("shows Month N of 6 and the student's own ribbon", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText(/Month 3 of 6/)).toBeInTheDocument();
+    expect(screen.getByRole("figure")).toBeInTheDocument();
+    expect(screen.getByTestId("required-day-count")).toHaveTextContent("2 required days in this cycle");
+    // The ring comes from the server's Asia/Colombo date, not the browser's.
+    expect(screen.getByLabelText("2026-08-03: late, today")).toBeInTheDocument();
+  });
+
+  it("renders the designed strengths-and-weaknesses empty state, never a blank panel", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText(/No evaluation yet/)).toBeInTheDocument();
+    expect(screen.getByText(/after your cycle closes/)).toBeInTheDocument();
+  });
+
+  it("shows no score, no rank, and no other student anywhere (FR-30)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    const { container } = render(await MyMonthPage());
+
+    expect(container.textContent).not.toMatch(/rank|score|index|leaderboard/i);
+  });
+
+  it("tells a mid-cycle joiner when their first evaluated cycle opens, instead of Month null of 6", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({
+      data: dash({
+        cycle: { seq: null, startDate: "2026-07-10", endDate: "2026-08-09", requiredDayCount: 22 },
+        firstEvaluatedCycleStart: "2026-08-10",
+      }),
+      error: undefined,
+    });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText(/first evaluated month starts/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Month null/)).not.toBeInTheDocument();
+  });
+
+  it("lists the cycle's days newest first, with a status pill and the entry text", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({
+      data: [
+        {
+          date: "2026-07-31", status: "onTime", reportStatus: "Evaluated", reportId: "r1",
+          absenceReason: null,
+          entries: [{
+            id: "e1", entryDate: "2026-07-31", body: "Older entry.",
+            submittedAt: "2026-07-31T11:30:00.000Z", isLate: false, isExtra: false,
+          }],
+        },
+        {
+          date: "2026-08-03", status: "late", reportStatus: "Submitted", reportId: "r2",
+          absenceReason: null,
+          entries: [{
+            id: "e2", entryDate: "2026-08-03", body: "Newer entry.",
+            submittedAt: "2026-08-04T04:10:00.000Z", isLate: true, isExtra: false,
+          }],
+        },
+      ],
+      error: undefined,
+    });
+
+    render(await MyMonthPage());
+
+    const bodies = screen.getAllByTestId("day-entry-body").map((n) => n.textContent);
+    expect(bodies).toEqual(["Newer entry.", "Older entry."]);
+    expect(screen.getByText("Late")).toBeInTheDocument();
+    expect(screen.getByText(/Evaluated \(locked\)/)).toBeInTheDocument();
+  });
+
+  it("shows the absence reason on an absent day", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
+    listMyDays.mockResolvedValue({
+      data: [{
+        date: "2026-08-03", status: "absent", reportStatus: null, reportId: null,
+        absenceReason: "Medical appointment", entries: [],
+      }],
+      error: undefined,
+    });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByText("Medical appointment")).toBeInTheDocument();
+  });
+
+  it("renders the problem detail when the dashboard call errors", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
+    apiClient.mockResolvedValue({});
+    getMyDashboard.mockResolvedValue({
+      data: undefined,
+      error: { type: "about:blank", title: "Internal Server Error", status: 500, detail: "Your month could not be loaded." },
+    });
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+
+    render(await MyMonthPage());
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Your month could not be loaded.");
+  });
+});
