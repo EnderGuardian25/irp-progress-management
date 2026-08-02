@@ -118,6 +118,16 @@ function round4(value: number): number {
  * the batch actually being summarised. `extra` counts weekend ENTRIES,
  * matching RosterRow.extraCountThisCycle, not weekend days.
  *
+ * KNOWN GAP, deliberately shipped: `extra` is NOT batch-clipped. The weekend
+ * branch runs before the `covers` check, so a weekend entry made while the
+ * student was transferred away counts toward BOTH batches' tallies when
+ * their cycle windows overlap. It is pre-existing and systemic — roster
+ * service's `extraCountThisCycle` has the identical unclipped shape — and it
+ * never reaches a compliance denominator, so the score of record is
+ * unaffected. It does reach the mentor's screen and, later, the AI summary's
+ * positive context. Close it in both places at once or not at all; fixing
+ * only this one re-introduces the disagreement it would be fixing.
+ *
  * // ASSUMPTION: O-7 — absence counts as accounted-for. O-7 is still open on
  * whether lateness or absence carries an automatic penalty; the PRD's stated
  * assumption is that it does not, and this is the one place that shows.
@@ -306,7 +316,10 @@ export function createDashboardService(deps: {
         cycle: { ...cycleView(bounds, batch), seq },
         students: [...seen.values()].map((e) => {
           const days = byStudent.get(e.studentId) ?? [];
-          const studentEnrolments = byStudentEnrolments.get(e.studentId) ?? [e];
+          // Non-null by construction: `seen` and `byStudentEnrolments` are
+          // populated from the same loop over `enrolments`, so every key in
+          // one is a key in the other.
+          const studentEnrolments = byStudentEnrolments.get(e.studentId)!;
           return {
             student: { id: e.studentId, displayName: e.displayName, email: e.email },
             counts: countCycle(days, studentEnrolments),

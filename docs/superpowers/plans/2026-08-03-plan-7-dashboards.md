@@ -2607,7 +2607,7 @@ export interface StudentDashboardView {
 }
 ```
 
-`DashboardService` gains `studentDashboard(studentId: string, now: Date): Promise<StudentDashboardView>;`, and the factory's deps widen to `batchRepo: Pick<BatchRepo, "getBatch" | "enrolmentsInRange" | "firstEnrolmentStart">`. The method:
+`DashboardService` gains `studentDashboard(studentId: string, now: Date): Promise<StudentDashboardView>;`, and the factory's deps widen to `batchRepo: Pick<BatchRepo, "getBatch" | "enrolmentsInRange" | "firstEnrolmentStart" | "listEnrolments">`. The method:
 
 ```ts
     async studentDashboard(studentId, now) {
@@ -2636,7 +2636,16 @@ export interface StudentDashboardView {
           .filter((d) => isWeekday(d.date))
           .map((d) => ({ date: d.date, status: d.status })),
         extraAfter,
-        summary: countCycle(days),
+        // Corrected 2026-08-03: countCycle's signature changed in Task 3's fix
+        // wave to `countCycle(days, enrolments)`, because a batch summary must
+        // clip each student's obligation to THAT batch's intervals. A
+        // student's own month is the opposite case — the obligation follows
+        // the student, not a batch — so pass their full enrolment list. Widen
+        // `countCycle`/`covers` to accept a structural
+        // `{ startDate: CivilDate; endDate: CivilDate | null }` so both
+        // `RosterEnrolment` and `EnrolmentRecord` satisfy it; do not duplicate
+        // the counter.
+        summary: countCycle(days, await deps.batchRepo.listEnrolments(studentId)),
         strengthsAndWeaknesses: null,
       };
     },
