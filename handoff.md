@@ -64,7 +64,7 @@ on this machine, version 2.88.0 — see `docs/manual-setup-steps.md` §1.2's cur
 - **Stakeholder interview** — `docs/stakeholder-interview.md`.
 - **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-13.
 - **`docs/design-system.md`** — visual system. Palette verified by script: 35 pairs across light and dark pass WCAG AA, all tokens in sRGB gamut.
-- **Twelve ADRs** — `docs/adr/0001`–`0012`. Each names at least two rejected alternatives.
+- **Nineteen ADRs** — `docs/adr/0001`–`0019`. Each names at least two rejected alternatives.
   **0010** Auth.js v5 over MSAL — records that `next-auth` is pinned to `5.0.0-beta.32`, a beta,
   because `latest` is `4.24.15`, an *older* major with no App Router support;
   **0011** Microsoft Graph Bicep extension over a committed bootstrap script — supersedes slice-1
@@ -76,7 +76,13 @@ on this machine, version 2.88.0 — see `docs/manual-setup-steps.md` §1.2's cur
   third-party proxy they would transit, the same concern class as O-5;
   **0009** hosting topology (2026-07-29) — GHCR over ACR, public-with-firewall Postgres over a
   VNet private endpoint, migrations as a Container Apps Job, Southeast Asia, and scale-to-zero
-  with the API's replica floor raised only for the k6 run.
+  with the API's replica floor raised only for the k6 run;
+  **0018** dashboard aggregates read a whole batch-cycle in one batched pass (five queries) rather
+  than the roster's per-student fan-out (forty) — `listDays` now delegates to
+  `listDaysForStudents`, so `classifyDay` stays the single classification path (Plan 7 Task 1);
+  **0019** dashboard cycles are addressed by engine-computed 1-based sequence, never by a
+  materialised `Cycle` row id (a GET must not materialise rows) and never by an arbitrary date
+  range (Plan 7 Task 2).
 - **`docs/manual-setup-steps.md`** — everything needing a human. **Start here if you are Damian.**
 
 **Code — merged to `main`**
@@ -113,28 +119,38 @@ exporter and nothing else changes.
 **What exists now**
 
 ```
-spec/openapi.yaml        OpenAPI 3.1, 17 operations across 15 paths, lints clean under
-                         recommended-strict (two of those operations predate Plan 6)
-packages/core/           the cycle/date engine. Builds to dist/. 112 tests
+spec/openapi.yaml        OpenAPI 3.1, 20 operations across 18 paths, lints clean under
+                         recommended-strict (two of those operations predate Plan 6, most of
+                         the rest predate Plan 7 — only the three dashboard operations are new
+                         to this branch)
+packages/core/           the cycle/date engine. Builds to dist/. 113 tests
 packages/types/          GENERATED, git-ignored, never committed
 packages/client/         GENERATED, git-ignored, never committed
 apps/api/                Fastify service — config, ajv 2020-12 validator compiler, hand-written
                          tracing plugin, RFC 7807 handler, Prisma + user repo, JWT auth plugin,
-                         routes, server composition, entrypoint. 223 tests
-apps/api/prisma/         schema.prisma (User + Role) + committed migration
+                         routes, server composition, entrypoint, and (Plan 7) a dashboard
+                         service reading a whole batch-cycle in one batched pass rather than the
+                         roster's per-student fan-out (ADR-0018) behind three dashboard routes.
+                         262 tests
+apps/api/prisma/         schema.prisma (nine tables, Plan 5's full data model) + committed
+                         migrations
 apps/api/prisma.config.ts    Prisma 7 CLI datasource config (the schema block cannot hold `url`)
 apps/api/src/generated/prisma/   GENERATED, git-ignored — a THIRD generated package
 apps/api/docker-compose.yml  local Postgres 16, host port ${IRP_DB_PORT:-5432}
 apps/web/                Next.js 16 — Auth.js v5, route groups ((auth) bare, (app) framed),
                          verified design tokens, app frame, CycleRibbon, server-only API client
-                         factory, proxy guard. 141 unit tests + 15 Playwright tests
+                         factory, proxy guard, the full Plan 6 flow pages, and (Plan 7) mentor
+                         Today (replacing the placeholder) and Cycles, student My month,
+                         `lib/ribbon.ts`, and the `FieldLabel`/`Table` primitives. Every sidebar
+                         destination — mentor and student — is now a real link. 184 unit tests
 apps/web/lib/dev-identity.ts     THE DEV BYPASS. server-only. Mints RS256 tokens with a local
                          key. FOUR entry points need the guard, covered by THREE call sites —
                          the counts differ, which is exactly why "it's the same call" kept
                          being wrong. See CLAUDE.md and ADR-0012 before touching it
-apps/web/e2e/            Playwright — signin.spec.ts (the sign-in chain) plus, as of Task 16,
-                         student-flows.spec.ts and mentor-flows.spec.ts (Plan 6's submission and
-                         review screens over the seeded personas)
+apps/web/e2e/            Playwright — signin.spec.ts (the sign-in chain), student-flows.spec.ts
+                         and mentor-flows.spec.ts (Plan 6's submission and review screens over
+                         the seeded personas), and (Plan 7) dashboard-flows.spec.ts, seven tests
+                         over the same seeded personas
 packages/client/dist/    GENERATED declarations, git-ignored. Consumers resolve TYPES from here
                          so apps/web keeps full strictness
 redocly.yaml             recommended-strict + a custom four-response assertion
@@ -146,13 +162,10 @@ eslint.config.mjs        type-aware, generated dirs ignored
                          real-token job
 ```
 
-Test totals as of Task 16: **`@irp/core` 112 · `apps/api` 223 · `apps/web` 141 unit + 15
-Playwright.** (`apps/api` and `apps/web`'s unit counts, and the Playwright count, all grew
-substantially over the Plan 5 figures this line used to carry — see the branch's own gate output,
-or the Task 16 report, to reconcile further.)
+Test totals as of Plan 7 (Task 12), taken from actual runs, not arithmetic on the old figures:
+**`@irp/core` 113 · `apps/api` 262 · `apps/web` 184 unit + 22 Playwright.**
 
-**Plan 6 surface, in progress on `feat/plan-6-submission-and-review`.** Not yet merged (§2a's row
-stays "In progress" until the PR lands), but the following exists on the branch as of Task 16:
+**Plan 6 surface, merged as PR #11** (merge commit `c968eae`). The following landed:
 
 - **15 `apps/api` endpoints** across `spec/openapi.yaml`'s Plan 6 paths — entries (`POST
   /api/v1/entries`), the student's own day view (`GET /api/v1/me/days`), absences (`POST
@@ -171,6 +184,47 @@ stays "In progress" until the PR lands), but the following exists on the branch 
   roles' Plan 6 screens over the seeded personas from `@irp/fixtures`, alongside the existing
   `signin.spec.ts`. See `apps/web/e2e/README.md` for the persona-to-flow map and the re-seed
   instruction the suite depends on.
+
+**Plan 7 surface, complete on `feat/plan-7-dashboards`, not yet merged** — the PR is not open yet;
+§2a's row stays as written above until it lands:
+
+- **Three `apps/api` dashboard endpoints**: `GET /api/v1/batches/{id}/dashboard/today` (FR-28's "N
+  of M submitted", late/absent counts), `GET /api/v1/batches/{id}/dashboard/summary?cycle=` (FR-28,
+  per-student cycle compliance for the Cycles page), and `GET /api/v1/me/dashboard` (FR-29/FR-30,
+  "Month N of 6" plus the current-cycle summary). All three read through the ADR-0018 batched pass
+  and address cycles by the ADR-0019 engine-computed sequence, never a `Cycle` row id.
+- **Four `apps/web` pages/modules**: mentor Today (`(app)/mentor-today.tsx`, replacing the
+  placeholder), mentor Cycles (`(app)/cycles/page.tsx`), student My month (`(app)/my-month/page.tsx`),
+  and `lib/ribbon.ts` plus the new `FieldLabel` and `Table`/`Th`/`Td` UI primitives. Every sidebar
+  destination, mentor and student, is now a real link — the typography migration (D8) also brought
+  every existing page onto the shared primitives, so no page carries page-local `style={{...}}`
+  typography.
+- **`apps/web/e2e/dashboard-flows.spec.ts`**, seven tests over the same seeded personas.
+- **`docs/walkthrough.md`** — a persona-by-persona demo script written from the running app, not
+  from the code; doubles as the SC-3 legibility check.
+
+**A real scoring defect surfaced and was fixed during Task 3's review.** `countCycle` had used
+`day.status !== "none"` as its obligation test — that test is student-scoped across every batch a
+student has ever held, not this batch alone. A student who transferred out of batch A and back
+inflated A's `requiredDays`/`settledDays`/`complianceRate` with days actually spent in batch B: one
+measured case went 21→16 required days, 17→12 settled, compliance 0.1176→0.1667.
+`countCycle` now clips against the student's enrolment interval(s) **in that batch**, not their
+whole history. See `apps/api/src/services/dashboard-service.ts`'s docstring on `countCycle`.
+
+**A known gap ships deliberately, and is documented at the site rather than silently left.**
+Weekend `extra` is **not** batch-clipped: a weekend entry made while a student was transferred away
+counts toward both batches' tallies when their cycle windows overlap. It never reaches a compliance
+denominator, so no score is affected, but it does reach the mentor's screen and will later feed the
+AI summary's positive context. This is pre-existing and systemic — the roster's
+`extraCountThisCycle` has the identical unclipped shape — so `countCycle`'s docstring records that
+it must be fixed in both places at once or not at all.
+
+**`pnpm generate` does not rebuild `packages/client/dist`, and neither `pnpm typecheck` nor Vitest
+catch it.** The package points `types` at `./dist` but `default` at `./src`, so bundler consumers
+(Vitest, `tsc`) see fresh source while only `next build` type-checks against `dist`. Three
+spec-changing Plan 7 tasks landed before this surfaced. `pnpm --filter @irp/client build` is
+required locally after any spec change — CI is unaffected, since it already runs that build before
+`next build`.
 
 ### Not started
 
@@ -235,8 +289,8 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 4A · Containerisation + runtime hardening | T-21 (partial) | — | ✅ **Merged, PR #8** |
 | | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **Merged, PR #9.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **Merged, PR #10.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
-| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | ⏳ **In progress** — branch `feat/plan-6-submission-and-review`; opens with the repo error contract, the entry-vs-absence race fix, and the transfer-day inclusivity decision deferred from Plan 5's pre-PR pass |
-| | 7 · Dashboards | T-14, T-15 | SC-4 | Not started |
+| | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | ✅ **Merged, PR #11.** Plan: `docs/superpowers/plans/2026-08-02-plan-6-submission-and-review.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md`. Opened with the repo error contract, the entry-vs-absence race fix, and the transfer-day inclusivity decision deferred from Plan 5's pre-PR pass |
+| | 7 · Dashboards | T-14, T-15 | SC-4 | ⏳ **Complete on branch, PR not yet opened** — branch `feat/plan-7-dashboards`; three dashboard endpoints, mentor Today + Cycles, student My month, the typography migration audit, `dashboard-flows.spec.ts`, and `docs/walkthrough.md`. Plan: `docs/superpowers/plans/2026-08-03-plan-7-dashboards.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
 | **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
 | | 10 · Winner + PDF | T-18 | — | Not started |
@@ -317,12 +371,31 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Plan 5 complete on `feat/plan-5-data-model-and-seed`** — full schema, repositories, cycle
-materialisation, `@irp/fixtures`, and an engine-driven seed replace the Plan 3 two-user manual
-INSERT. CI's e2e data now comes from `db:seed`, not a hand-written SQL block. No API surface
-change: `spec/openapi.yaml` is untouched, so `packages/types` and `packages/client` are unchanged
-too. The branch is not yet merged — everything below this paragraph, up to and including the
-"Azure and Entra" material, predates Plan 5 and describes Plan 4B's state at merge.
+**Plan 7 complete on `feat/plan-7-dashboards`** — three dashboard endpoints (`GET
+/api/v1/batches/{id}/dashboard/today`, `GET /api/v1/batches/{id}/dashboard/summary`, `GET
+/api/v1/me/dashboard`), mentor Today and Cycles, student My month, the typography migration audit
+across every page, `dashboard-flows.spec.ts`, and `docs/walkthrough.md`. Task 3's review also found
+and fixed a real scoring defect in `countCycle` (see §1's "What exists now"). The branch is not yet
+merged — Task 12, this documentation sweep, is the last task before the whole-branch review and PR.
+Everything below this paragraph, up to and including the "Azure and Entra" material, predates
+Plans 5, 6 and 7 and describes Plan 4B's state at merge; read it as history, not current status.
+
+**Slice 2 ("The product") now contains everything it was ever scoped to cover, and nothing more.**
+Plan 5 built the full data model and seed; Plan 6 shipped submission and review (merged, PR #11);
+Plan 7 shipped both dashboards (this branch). What slice 2 does **not** contain, by the spec's own
+D2/D3 decisions: no AI evaluation (Plan 9, blocked on O-5), no notifications (Plan 8), no winner
+computation or PDF (Plan 10). The `Evaluation`/`Override`/`Award` tables exist as schema only —
+zero rows in the seed — and the student My month page renders the designed empty state ("No
+evaluation yet — your first summary appears after your cycle closes") rather than any fabricated
+score. There is still no reject state, no configurable rubric, and no student-visible score or
+rank; nothing in Plan 7 touches those non-goals.
+
+**Deliverable 3's status is unchanged by Plan 7 — still apply-ready, not applied.** Plan 7 touched
+only `apps/api` and `apps/web`; it made no infra, deploy, or observability change. The
+apply-ready-versus-applied distinction the Plan 4B paragraph below establishes — the Bicep gate
+being green and the files existing is not the same as the resource providers being registered or
+anything actually running in Azure — still holds verbatim. Do not infer from "dashboards shipped"
+that anything is deployed.
 
 **Branch:** `feat/plan-4b-infra-deploy-observability` · **Last merged:** Plan 4A as **PR #8**
 (merge commit `720b387`, 2026-07-30) · **Plan 4B: all ten tasks complete, apply-ready, not yet
