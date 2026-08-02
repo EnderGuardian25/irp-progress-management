@@ -46,6 +46,12 @@ export function studentDayMark(status: DayStatus): DayMark {
  * renders proportionally (see its MARK_COLOR comment).
  */
 export function batchDayMark(day: Omit<DayComplianceLike, "date">): { mark: DayMark; fill?: number } {
+  // `late` is deliberately absent from this sum: the API's `submitted`
+  // ALREADY includes late submissions (a late entry is still submitted), and
+  // `late` only reports how many of them were. Adding it would double-count
+  // and make a fully-late day read as over-subscribed. If `DayCompliance`
+  // ever makes `late` a disjoint bucket instead, this line breaks silently —
+  // no current test pairs a nonzero `late` with a nonzero `pending`.
   const reached = day.submitted + day.absent + day.missed + day.pending;
   if (day.enrolled === 0 || reached === 0) return { mark: "future" };
   if (day.missed > 0) return { mark: "missed" };
