@@ -88,17 +88,59 @@ test.describe("mentor Today (FR-28)", () => {
   });
 });
 
+test.describe("student home (FR-29, FR-30, design-system §8.2)", () => {
+  test("leads with the student's own ribbon above the composer, and the designed empty evaluation state", async ({
+    page,
+  }) => {
+    // §8.2: "Same ribbon, personal marks. The submission box is the primary
+    // action and sits immediately below it." Both the ribbon and the strengths
+    // prose used to live only on My month, so this is the assertion that keeps
+    // them on the page the student actually lands on.
+    await signInAsStudent(page);
+
+    await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+    const figure = page.getByRole("figure");
+    await expect(figure).toBeVisible();
+    await expect(figure.locator("figcaption")).toHaveText(/Month \d of 6/);
+    await expect(page.getByText(/No evaluation yet/)).toBeVisible();
+    await expect(page.getByLabel("Entry text")).toBeVisible();
+
+    // Ordering is the actual §8.2 requirement, not merely co-presence: the
+    // ribbon has to sit ABOVE the composer. DOCUMENT_POSITION_FOLLOWING means
+    // the composer comes after the ribbon in document order.
+    const ribbonPrecedesComposer = await page.evaluate(() => {
+      const fig = document.querySelector("figure");
+      const composer = document.querySelector('textarea[name="body"]');
+      if (!fig || !composer) return false;
+      return (
+        (fig.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+      );
+    });
+    expect(ribbonPrecedesComposer).toBe(true);
+  });
+});
+
 test.describe("student My month (FR-29, FR-30)", () => {
-  test("shows Month N of 6, the student's own pills, and the designed empty evaluation state", async ({ page }) => {
+  test("shows which month the history covers and the student's own pills", async ({ page }) => {
     await signInAsStudent(page);
     await page.getByRole("link", { name: "My month" }).click();
 
     await expect(page.getByRole("heading", { name: "My month" })).toBeVisible();
     await expect(page.getByText(/Month \d of 6/)).toBeVisible();
-    await expect(page.getByRole("figure")).toBeVisible();
-    await expect(page.getByText(/No evaluation yet/)).toBeVisible();
+    await expect(page.getByText(/\d+% compliance/)).toBeVisible();
     // dev-student-1 is the fully compliant persona, so at least one on-time day.
     await expect(page.locator('[data-status="onTime"]').first()).toBeVisible();
+  });
+
+  test("leaves the ribbon and the strengths prose to the home page (§8.2)", async ({ page }) => {
+    // The restructure's other half. Without this, the two surfaces could drift
+    // back into being near-duplicates and nothing would catch it.
+    await signInAsStudent(page);
+    await page.getByRole("link", { name: "My month" }).click();
+    await expect(page.getByRole("heading", { name: "My month" })).toBeVisible();
+
+    await expect(page.getByRole("figure")).toHaveCount(0);
+    await expect(page.getByText("Strengths and areas to develop")).toHaveCount(0);
   });
 
   test("shows no score, rank or other student's name anywhere on the page (FR-30)", async ({ page }) => {
