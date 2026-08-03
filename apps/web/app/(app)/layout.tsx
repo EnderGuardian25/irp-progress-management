@@ -14,12 +14,34 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUserOrRedirect();
 
   return (
-    <div className="flex flex-col" style={{ minHeight: "100dvh" }}>
+    // The frame is exactly one viewport tall and does not scroll; the content
+    // column does. `h-[100dvh]` rather than `minHeight`, because a min-height
+    // lets the whole document grow and take the topbar and sidebar with it.
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
       <Topbar userName={user.displayName} />
-      <div className="flex flex-1">
+      {/*
+        `min-h-0` is load-bearing and easy to drop. A flex item defaults to
+        `min-height: auto`, which refuses to shrink below its content — so
+        without it this row grows to fit the whole page and `overflow-y-auto`
+        on <main> never has anything to clip.
+      */}
+      <div className="flex min-h-0 flex-1">
         <Sidebar role={user.role} />
-        <main className="flex-1 p-8" style={{ background: "var(--bg)" }}>
-          {children}
+        {/*
+          NFR-13 sets a 1280px floor, not a ceiling, and nothing capped the
+          content width — so on a wide monitor the composer textarea and the
+          summary prose ran the full bleed. §4's "prose caps at 70ch, tables
+          may run to full width" splits the difference: the cap here is
+          generous enough that a table still gets its width, and prose blocks
+          carry their own 70ch limit on top of it.
+        */}
+        {/* The one scroll container on the page. `min-w-0` lets a wide table
+            clip and scroll here instead of pushing the frame sideways. */}
+        <main
+          className="min-w-0 flex-1 overflow-auto p-8"
+          style={{ background: "var(--bg)" }}
+        >
+          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>
       </div>
     </div>

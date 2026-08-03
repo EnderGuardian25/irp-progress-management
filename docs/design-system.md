@@ -367,6 +367,7 @@ Non-negotiable, verified rather than assumed.
 | # | Item | Effect |
 |---|---|---|
 | — | **Bistec brand colour** | `--primary` is a placeholder. One-token swap; see §3.4 for hue constraints. |
+| — | **§6's topbar batch switcher is not built** | `Batch 12 ▾` in the §6 frame has no data behind it: `User` in `spec/openapi.yaml` carries no batch, and a mentor holds several, so one name in a global slot would be wrong for the primary audience. Batch selection is per-page instead, via the Roster and Cycles chips. Revisit only if a global batch context is ever genuinely needed; it would need a spec change first. |
 | O-6 | Rubric criteria wording | Blocks the evaluation surface layout — five criteria need real labels before that screen is designed. |
 | O-7 | Absence/lateness penalty | `--st-absent` is neutral on the stated assumption. If leadership rules that absence penalises the score, this token and its copy change. |
 | O-5 | AI provider | Blocks every evaluation-output surface. Nothing here depends on it yet. |

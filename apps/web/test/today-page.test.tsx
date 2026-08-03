@@ -24,13 +24,22 @@ vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
 // (transitively, via entry-actions.ts <- entry-composer.tsx/absence-toggle.tsx)
 // by the tree StudentToday renders -- an honest mock declares them too, even
 // though this test never submits a form and so never calls them.
-const { listMyDays, createEntry, createAbsence, deleteAbsence } = vi.hoisted(() => ({
-  listMyDays: vi.fn(),
-  createEntry: vi.fn(),
-  createAbsence: vi.fn(),
-  deleteAbsence: vi.fn(),
+const { getMyDashboard, listMyDays, createEntry, createAbsence, deleteAbsence } = vi.hoisted(
+  () => ({
+    getMyDashboard: vi.fn(),
+    listMyDays: vi.fn(),
+    createEntry: vi.fn(),
+    createAbsence: vi.fn(),
+    deleteAbsence: vi.fn(),
+  }),
+);
+vi.mock("@irp/client", () => ({
+  getMyDashboard,
+  listMyDays,
+  createEntry,
+  createAbsence,
+  deleteAbsence,
 }));
-vi.mock("@irp/client", () => ({ listMyDays, createEntry, createAbsence, deleteAbsence }));
 
 const ADMIN_USER = {
   id: "1",
@@ -82,11 +91,67 @@ describe("TodayPage role branches", () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT_USER);
     apiClient.mockResolvedValue({});
     listMyDays.mockResolvedValue({ data: [], error: undefined });
+    getMyDashboard.mockResolvedValue({ data: undefined, error: undefined });
 
     const element = await TodayPage();
     render(await StudentToday(element.props as ComponentProps<typeof StudentToday>));
 
     expect(screen.getByTestId("user-name")).toHaveTextContent("Dev Student");
     expect(screen.getByTestId("user-role")).toHaveTextContent("Student");
+  });
+
+  it("puts the ribbon and the strengths prose on the student's home, above the composer (§8.2)", async () => {
+    // The §8.2 restructure: "Same ribbon, personal marks. The submission box is
+    // the primary action and sits immediately below it." Both used to exist
+    // only on My month, so the student's home opened with a bare <select>.
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT_USER);
+    apiClient.mockResolvedValue({});
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+    getMyDashboard.mockResolvedValue({
+      data: {
+        today: "2026-08-03",
+        programmeMonths: 6,
+        firstEvaluatedCycleStart: "2026-06-10",
+        cycle: { seq: 3, startDate: "2026-07-10", endDate: "2026-08-09", requiredDayCount: 22 },
+        days: [{ date: "2026-07-31", status: "onTime" }],
+        extraAfter: [],
+        summary: {
+          requiredDays: 22, settledDays: 17, onTime: 13, late: 2, absent: 1,
+          missed: 1, pending: 1, extra: 2, complianceRate: 0.9412,
+        },
+        strengthsAndWeaknesses: null,
+      },
+      error: undefined,
+    });
+
+    const element = await TodayPage();
+    render(await StudentToday(element.props as ComponentProps<typeof StudentToday>));
+
+    expect(screen.getByRole("figure")).toBeInTheDocument();
+    expect(screen.getByText(/Month 3 of 6/)).toBeInTheDocument();
+    expect(screen.getByText("Strengths and areas to develop")).toBeInTheDocument();
+    // FR-30: no score reaches this surface, and the compliance PERCENTAGE
+    // lives on My month — home carries the outcome counts only.
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it("still renders the composer when the dashboard call fails", async () => {
+    // Submitting is the one thing this page exists for. A dashboard 500 costs
+    // the ribbon, never the composer.
+    getCurrentUserOrRedirect.mockResolvedValue(STUDENT_USER);
+    apiClient.mockResolvedValue({});
+    listMyDays.mockResolvedValue({ data: [], error: undefined });
+    getMyDashboard.mockResolvedValue({
+      data: undefined,
+      error: { title: "Internal Server Error", detail: "Your month could not be loaded." },
+    });
+
+    const element = await TodayPage();
+    render(await StudentToday(element.props as ComponentProps<typeof StudentToday>));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Your month could not be loaded.");
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Entry text")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Submit update/ })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { toBatchRibbonDays } from "@/lib/ribbon";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
+import { CountsRow } from "@/components/ui/counts-row";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatCivilDateLabel } from "./format-civil-date";
 
@@ -73,9 +74,8 @@ export async function MentorToday({ displayName, role }: { displayName: string; 
         {dashboards.map(({ batch, result }) => {
           if (result.data === undefined) {
             return (
-              <Panel key={batch.id}>
-                <SectionLabel>{batch.name}</SectionLabel>
-                <p role="alert" className="mt-2" style={{ color: "var(--st-missed)" }}>
+              <Panel key={batch.id} title={batch.name}>
+                <p role="alert" style={{ color: "var(--st-missed)" }}>
                   {result.error?.detail ?? result.error?.title ?? "This batch's figures could not be loaded."}
                 </p>
               </Panel>
@@ -96,24 +96,23 @@ export async function MentorToday({ displayName, role }: { displayName: string; 
                 label={label}
               />
 
-              <div className="mt-3 flex flex-wrap items-baseline gap-6 text-sm">
-                <span className="tabular font-semibold" data-testid={`submitted-count-${batch.id}`} style={{ color: "var(--ink)" }}>
-                  {d.counts.submitted} of {d.counts.enrolled} submitted
-                </span>
-                <span className="tabular" data-testid={`late-count-${batch.id}`} style={{ color: "var(--st-late)" }}>
-                  {d.counts.late} late
-                </span>
-                <span className="tabular" data-testid={`absent-count-${batch.id}`} style={{ color: "var(--st-absent)" }}>
-                  {d.counts.absent} absent
-                </span>
-                <span className="tabular" data-testid={`missed-count-${batch.id}`} style={{ color: "var(--st-missed)" }}>
-                  {d.counts.missed} missed
-                </span>
-                {d.extraCount > 0 && (
-                  <span className="tabular" style={{ color: "var(--ink-muted)" }}>
-                    +{d.extraCount} extra this cycle
-                  </span>
-                )}
+              <div className="mt-3">
+                <CountsRow
+                  items={[
+                    {
+                      tone: "ink",
+                      strong: true,
+                      text: `${String(d.counts.submitted)} of ${String(d.counts.enrolled)} submitted`,
+                      testId: `submitted-count-${batch.id}`,
+                    },
+                    { tone: "late", text: `${String(d.counts.late)} late`, testId: `late-count-${batch.id}` },
+                    { tone: "absent", text: `${String(d.counts.absent)} absent`, testId: `absent-count-${batch.id}` },
+                    { tone: "missed", text: `${String(d.counts.missed)} missed`, testId: `missed-count-${batch.id}` },
+                    ...(d.extraCount > 0
+                      ? [{ tone: "muted" as const, text: `+${String(d.extraCount)} extra this cycle` }]
+                      : []),
+                  ]}
+                />
               </div>
 
               {/*

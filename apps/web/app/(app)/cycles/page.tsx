@@ -5,6 +5,7 @@ import { getCurrentUserOrRedirect, apiClient } from "@/lib/api-client";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
+import { CountsRow } from "@/components/ui/counts-row";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, Th, Td } from "@/components/ui/table";
 import { formatCivilDateLabel } from "../format-civil-date";
@@ -84,12 +85,7 @@ export default async function CyclesPage({
                 key={b.id}
                 href={{ pathname: "/cycles", query: { batchId: b.id } }}
                 aria-current={b.id === selected.id ? "page" : undefined}
-                className="rounded-[var(--radius-control)] border px-3 py-1.5 text-sm"
-                style={{
-                  borderColor: "var(--line)",
-                  color: b.id === selected.id ? "var(--ink)" : "var(--ink-muted)",
-                  background: b.id === selected.id ? "var(--surface-sunk)" : "transparent",
-                }}
+                className="chip"
               >
                 {b.name}
               </Link>
@@ -117,12 +113,7 @@ export default async function CyclesPage({
                   key={n}
                   href={{ pathname: "/cycles", query: { batchId: selected.id, cycle: n } }}
                   aria-current={n === data.cycle.seq ? "page" : undefined}
-                  className="tabular rounded-[var(--radius-control)] border px-3 py-1.5 text-sm"
-                  style={{
-                    borderColor: "var(--line)",
-                    color: n === data.cycle.seq ? "var(--ink)" : "var(--ink-muted)",
-                    background: n === data.cycle.seq ? "var(--surface-sunk)" : "transparent",
-                  }}
+                  className="chip tabular"
                 >
                   Cycle {n}
                 </Link>
@@ -141,14 +132,14 @@ export default async function CyclesPage({
       )}
 
       {data !== undefined && (
-        <Panel sunk>
-          <div className="mb-3">
-            <SectionLabel>
-              {data.cycle.seq === null
-                ? `First evaluated cycle opens ${formatCivilDateLabel(data.cycle.startDate)}`
-                : `Cycle ${String(data.cycle.seq)} · ${formatCivilDateLabel(data.cycle.startDate)} – ${formatCivilDateLabel(data.cycle.endDate)}`}
-            </SectionLabel>
-          </div>
+        <Panel
+          sunk
+          title={
+            data.cycle.seq === null
+              ? `First evaluated cycle opens ${formatCivilDateLabel(data.cycle.startDate)}`
+              : `Cycle ${String(data.cycle.seq)} · ${formatCivilDateLabel(data.cycle.startDate)} – ${formatCivilDateLabel(data.cycle.endDate)}`
+          }
+        >
           {data.students.length === 0 ? (
             <EmptyState
               title="Nobody was enrolled in this cycle."
@@ -181,14 +172,17 @@ export default async function CyclesPage({
                         Mixed text-and-figure content, so the cell itself stays
                         left-aligned (Td, not Td numeric) while each figure
                         keeps tabular-nums via its own span. */}
-                    <Td data-testid={`counts-${student.id}`}>
-                      <span className="tabular" style={{ color: "var(--st-ok)" }}>{counts.onTime} on time</span>
-                      {" · "}
-                      <span className="tabular" style={{ color: "var(--st-late)" }}>{counts.late} late</span>
-                      {" · "}
-                      <span className="tabular" style={{ color: "var(--st-absent)" }}>{counts.absent} absent</span>
-                      {" · "}
-                      <span className="tabular" style={{ color: "var(--st-missed)" }}>{counts.missed} missed</span>
+                    <Td>
+                      <CountsRow
+                        inline
+                        testId={`counts-${student.id}`}
+                        items={[
+                          { tone: "ok", text: `${String(counts.onTime)} on time` },
+                          { tone: "late", text: `${String(counts.late)} late` },
+                          { tone: "absent", text: `${String(counts.absent)} absent` },
+                          { tone: "missed", text: `${String(counts.missed)} missed` },
+                        ]}
+                      />
                     </Td>
                     {/* Extra is muted, never a status colour — design-system
                         §3.2, "distinguished by form, not colour". */}

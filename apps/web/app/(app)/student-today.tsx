@@ -1,13 +1,17 @@
-import { listMyDays, type Role } from "@irp/client";
+import { getMyDashboard, listMyDays, type Role } from "@irp/client";
 import { graceDeadlineFor, isWeekday, submissionWindow } from "@irp/core";
 import { apiClient } from "@/lib/api-client";
+import { CycleRibbon } from "@/components/cycle-ribbon/cycle-ribbon";
+import { toStudentRibbonDays } from "@/lib/ribbon";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
+import { CountsRow } from "@/components/ui/counts-row";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EntryComposer } from "./entry-composer";
 import { AbsenceToggle } from "./absence-toggle";
+import { cycleHeading } from "./cycle-heading";
 import { formatCivilDateLabel, formatWeekdayName } from "./format-civil-date";
 
 // §11's deadline copy ("You can still submit for {date} until …") is always
@@ -21,6 +25,16 @@ const DEADLINE_FORMAT = new Intl.DateTimeFormat("en-GB", {
   hour12: true,
 });
 
+// The grace window's closing DAY, for §11's missed copy ("the grace window
+// closed on 22 July"). No time of day: the sentence is about a window that is
+// already shut, and a to-the-minute timestamp would imply a precision the
+// student can no longer act on.
+const GRACE_CLOSED_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Colombo",
+  day: "numeric",
+  month: "long",
+});
+
 const ENTRY_TIME_FORMAT = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Colombo",
   hour: "numeric",
@@ -28,6 +42,25 @@ const ENTRY_TIME_FORMAT = new Intl.DateTimeFormat("en-GB", {
   hour12: true,
 });
 
+/**
+ * The student's home — docs/design-system.md §8.2.
+ *
+ * "Same ribbon, personal marks. The submission box is the primary action and
+ * sits immediately below it." The ribbon and the cycle summary used to live
+ * only on My month, so the mentor's home opened with the system's signature
+ * element while the student's opened with a bare <select>. §8.2's order is
+ * followed here: cycle position, ribbon, composer, then the strengths prose.
+ * My month keeps the day-by-day history — the one thing this page does not
+ * show, since it lists only the open submission window.
+ *
+ * No score, no rank, no other student anywhere on this surface (FR-30).
+ *
+ * Two calls, deliberately: getMyDashboard is the aggregate behind the ribbon
+ * and the counts, listMyDays carries the entry bodies for the window panels.
+ * A dashboard failure must not take the composer down with it — submitting is
+ * the one thing this page exists for — so the ribbon degrades to an inline
+ * alert and everything below it still renders.
+ */
 export async function StudentToday({ displayName, role }: { displayName: string; role: Role }) {
   const client = await apiClient();
   const openWindow = submissionWindow(new Date());
@@ -44,7 +77,10 @@ export async function StudentToday({ displayName, role }: { displayName: string;
   // maybeUndefined` -- exactOptionalPropertyTypes forbids assigning
   // `undefined` to an optional property that isn't itself typed `| undefined`.
   const query = oldest !== undefined && newest !== undefined ? { from: oldest, to: newest } : undefined;
-  const { data, error } = await listMyDays(query !== undefined ? { client, query } : { client });
+  const [{ data: dashboard, error: dashboardError }, { data, error }] = await Promise.all([
+    getMyDashboard({ client }),
+    listMyDays(query !== undefined ? { client, query } : { client }),
+  ]);
 
   const byDate = new Map((data ?? []).map((day) => [day.date, day]));
   // submissionWindow() always includes today as the most recent target
@@ -66,6 +102,45 @@ export async function StudentToday({ displayName, role }: { displayName: string;
       <span className="sr-only" data-testid="user-name">{displayName}</span>
       <span className="sr-only" data-testid="user-role">{role}</span>
 
+      {dashboardError !== undefined && (
+        <div className="mb-6">
+          <Panel>
+            <p role="alert" style={{ color: "var(--st-missed)" }}>
+              {dashboardError.detail ?? dashboardError.title ?? "Your month could not be loaded."}
+            </p>
+            <p className="mt-1 text-sm" style={{ color: "var(--ink-muted)" }}>
+              You can still submit below.
+            </p>
+          </Panel>
+        </div>
+      )}
+
+      {dashboard !== undefined && (
+        <>
+          <div className="mb-6">
+            <CycleRibbon
+              days={toStudentRibbonDays([...dashboard.days], dashboard.today)}
+              extraAfter={[...dashboard.extraAfter]}
+              label={cycleHeading(dashboard)}
+            />
+          </div>
+
+          <div className="mb-8">
+            <CountsRow
+              items={[
+                { tone: "ok", text: `${String(dashboard.summary.onTime)} on time` },
+                { tone: "late", text: `${String(dashboard.summary.late)} late` },
+                { tone: "absent", text: `${String(dashboard.summary.absent)} absent` },
+                { tone: "missed", text: `${String(dashboard.summary.missed)} missed` },
+                ...(dashboard.summary.extra > 0
+                  ? [{ tone: "muted" as const, text: `+${String(dashboard.summary.extra)} extra` }]
+                  : []),
+              ]}
+            />
+          </div>
+        </>
+      )}
+
       <div className="mb-8">
         <EntryComposer targetDates={openWindow.targetDates} />
       </div>
@@ -77,7 +152,7 @@ export async function StudentToday({ displayName, role }: { displayName: string;
       )}
 
       <SectionLabel>Recent days</SectionLabel>
-      <div className="mt-2 flex flex-col gap-4">
+      <div className="mt-2 mb-8 flex flex-col gap-4">
         {openWindow.targetDates.map((date) => {
           const day = byDate.get(date);
           const entries = day?.entries ?? [];
@@ -92,14 +167,15 @@ export async function StudentToday({ displayName, role }: { displayName: string;
           const deadline = graceDeadlineFor(date);
 
           return (
-            <Panel key={date}>
-              <div className="mb-3 flex items-center justify-between">
-                <SectionLabel>{formatCivilDateLabel(date)}</SectionLabel>
-                {day !== undefined && day.status !== "none" && (
+            <Panel
+              key={date}
+              title={formatCivilDateLabel(date)}
+              aside={
+                day === undefined || day.status === "none" ? undefined : (
                   <StatusPill status={day.status} reportStatus={day.reportStatus} />
-                )}
-              </div>
-
+                )
+              }
+            >
               {noRecord && (
                 <EmptyState
                   title={isToday ? "No entry for today yet." : `No entry for ${formatWeekdayName(date)} yet.`}
@@ -107,9 +183,19 @@ export async function StudentToday({ displayName, role }: { displayName: string;
                 />
               )}
 
+              {/* §11: "Missed — the grace window closed on 22 July", not a bare
+                  "Missed" pill. The date is derivable right here (graceDeadlineFor
+                  is a pure function of the day), so the pill's one-word label
+                  does not have to be the whole story. */}
+              {day?.status === "missed" && (
+                <p className="text-sm" style={{ color: "var(--ink-muted)" }}>
+                  Missed — the grace window closed on {GRACE_CLOSED_FORMAT.format(deadline)}.
+                </p>
+              )}
+
               {entries.map((entry) => (
                 <div key={entry.id} className="mb-3 flex items-start justify-between gap-3">
-                  <p style={{ color: "var(--ink)" }}>{entry.body}</p>
+                  <p className="prose" style={{ color: "var(--ink)" }}>{entry.body}</p>
                   <div
                     className="flex shrink-0 items-center gap-2 text-sm"
                     style={{ color: "var(--ink-muted)" }}
@@ -127,6 +213,25 @@ export async function StudentToday({ displayName, role }: { displayName: string;
           );
         })}
       </div>
+
+      {/* §8.2's third band: "Strengths and areas to develop … current cycle
+          summary, prose, no score". */}
+      {dashboard !== undefined && (
+        <>
+          <SectionLabel>Strengths and areas to develop</SectionLabel>
+          <div className="mt-2">
+            <Panel>
+              {dashboard.strengthsAndWeaknesses === null ? (
+                <EmptyState title="No evaluation yet — your first summary appears after your cycle closes." />
+              ) : (
+                <p className="prose" style={{ color: "var(--ink)" }}>
+                  {dashboard.strengthsAndWeaknesses}
+                </p>
+              )}
+            </Panel>
+          </div>
+        </>
+      )}
     </div>
   );
 }

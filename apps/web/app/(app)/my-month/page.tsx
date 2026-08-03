@@ -1,13 +1,13 @@
 import { redirect } from "next/navigation";
 import { getMyDashboard, listMyDays } from "@irp/client";
 import { getCurrentUserOrRedirect, apiClient } from "@/lib/api-client";
-import { CycleRibbon } from "@/components/cycle-ribbon/cycle-ribbon";
-import { toStudentRibbonDays } from "@/lib/ribbon";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
+import { CountsRow } from "@/components/ui/counts-row";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { cycleHeading } from "../cycle-heading";
 import { formatCivilDateLabel } from "../format-civil-date";
 
 /** Required-day outcomes whose result is final -- FR-29's history list keeps
@@ -20,11 +20,15 @@ const SETTLED_STATUSES = new Set(["onTime", "late", "absent", "missed"]);
  * parameter through which another student's data could arrive. It renders no
  * score, no rank and no peer.
  *
- * Two calls, deliberately: getMyDashboard gives the ribbon, the counts and
- * the programme position; listMyDays gives the entry bodies for the history
- * list below. The dashboard is an aggregate and does not carry entry text —
- * folding the two into one call would make the mentor's identical aggregate
- * path pay for prose no mentor screen renders.
+ * Since the §8.2 restructure this page is the day-by-day history and nothing
+ * else — the ribbon, the outcome counts and the strengths prose live on the
+ * student's home, immediately above the composer, where §8.2 places them.
+ *
+ * Two calls, deliberately: getMyDashboard gives the programme position and the
+ * compliance rate; listMyDays gives the entry bodies for the history list. The
+ * dashboard is an aggregate and does not carry entry text — folding the two
+ * into one call would make the mentor's identical aggregate path pay for prose
+ * no mentor screen renders.
  *
  * A mentor reaching this route is redirected home: it is not a security
  * boundary (the API is), just the wrong screen for them — a mentor holds no
@@ -53,26 +57,7 @@ export default async function MyMonthPage() {
     );
   }
 
-  const {
-    today,
-    programmeMonths,
-    firstEvaluatedCycleStart,
-    cycle,
-    days,
-    extraAfter,
-    summary,
-    strengthsAndWeaknesses,
-  } = dashboard;
-
-  // Never "Month null of N" — a mid-cycle joiner has no seq until their first
-  // evaluated cycle opens (FR-27), and a caller with no enrolment at all has
-  // neither a seq nor a firstEvaluatedCycleStart.
-  const heading =
-    cycle.seq !== null
-      ? `Month ${String(cycle.seq)} of ${String(programmeMonths)} · ${formatCivilDateLabel(cycle.startDate)} – ${formatCivilDateLabel(cycle.endDate)}`
-      : firstEvaluatedCycleStart !== null
-        ? `Your first evaluated month starts ${formatCivilDateLabel(firstEvaluatedCycleStart)}`
-        : "You are not enrolled in a batch yet.";
+  const { summary } = dashboard;
 
   const complianceLabel =
     summary.complianceRate === null ? "— compliance" : `${String(Math.round(summary.complianceRate * 100))}% compliance`;
@@ -107,46 +92,21 @@ export default async function MyMonthPage() {
     <div>
       <PageTitle>My month</PageTitle>
 
+      {/*
+        The ribbon, the outcome counts and the strengths prose moved to the
+        student's home in the §8.2 restructure — that section places all three
+        above the composer, and keeping a second copy here would have made this
+        page a near-duplicate of it. What is left is the thing home genuinely
+        cannot show: the whole cycle day by day, where home lists only the open
+        submission window. The heading and the compliance rate stay because a
+        history is unreadable without knowing which month it covers and how it
+        came out.
+      */}
       <div className="mb-6">
-        <CycleRibbon
-          days={toStudentRibbonDays([...days], today)}
-          extraAfter={[...extraAfter]}
-          label={heading}
-        />
-      </div>
-
-      <div className="mb-8 flex flex-wrap items-baseline gap-6 text-sm">
-        <span className="tabular" style={{ color: "var(--st-ok)" }}>
-          {summary.onTime} on time
-        </span>
-        <span className="tabular" style={{ color: "var(--st-late)" }}>
-          {summary.late} late
-        </span>
-        <span className="tabular" style={{ color: "var(--st-absent)" }}>
-          {summary.absent} absent
-        </span>
-        <span className="tabular" style={{ color: "var(--st-missed)" }}>
-          {summary.missed} missed
-        </span>
-        {summary.extra > 0 && (
-          <span className="tabular" style={{ color: "var(--ink-muted)" }}>
-            +{summary.extra} extra
-          </span>
-        )}
-        <span className="tabular" style={{ color: "var(--ink)" }}>
-          {complianceLabel}
-        </span>
-      </div>
-
-      <SectionLabel>Strengths and areas to develop</SectionLabel>
-      <div className="mt-2 mb-8">
-        <Panel>
-          {strengthsAndWeaknesses === null ? (
-            <EmptyState title="No evaluation yet — your first summary appears after your cycle closes." />
-          ) : (
-            <p style={{ color: "var(--ink)" }}>{strengthsAndWeaknesses}</p>
-          )}
-        </Panel>
+        <SectionLabel>{cycleHeading(dashboard)}</SectionLabel>
+        <div className="mt-2">
+          <CountsRow items={[{ tone: "ink", text: complianceLabel, strong: true }]} />
+        </div>
       </div>
 
       <SectionLabel>Your days</SectionLabel>
@@ -166,20 +126,26 @@ export default async function MyMonthPage() {
           </Panel>
         ) : (
           orderedDays.map((day) => (
-            <Panel key={day.date}>
-              <div className="mb-3 flex items-center justify-between">
-                <SectionLabel>{formatCivilDateLabel(day.date)}</SectionLabel>
-                {day.status !== "none" && (
+            <Panel
+              key={day.date}
+              title={formatCivilDateLabel(day.date)}
+              aside={
+                day.status === "none" ? undefined : (
                   <StatusPill status={day.status} reportStatus={day.reportStatus} />
-                )}
-              </div>
-
+                )
+              }
+            >
               {day.absenceReason !== null && (
                 <p style={{ color: "var(--ink-muted)" }}>{day.absenceReason}</p>
               )}
 
               {day.entries.map((entry) => (
-                <p key={entry.id} data-testid="day-entry-body" style={{ color: "var(--ink)" }}>
+                <p
+                  key={entry.id}
+                  data-testid="day-entry-body"
+                  className="prose"
+                  style={{ color: "var(--ink)" }}
+                >
                   {entry.body}
                 </p>
               ))}

@@ -57,17 +57,30 @@ describe("StatusPill", () => {
     ["missed", "✕", "Missed"],
     ["pending", "·", "Open"],
     ["extra", "+", "Extra"],
-    ["none", "—", "—"],
-    ["future", "—", "—"],
   ] as const)("renders glyph + label for status %s", (status, glyph, label) => {
-    // getByText matches on full textContent (glyph + label concatenated), so
-    // for none/future — where glyph and label are both the same "—" — a
-    // substring query against either half would match two nodes. Query the
-    // pill by its data-status attribute directly instead.
+    // Query the pill by its data-status attribute rather than by text: the
+    // accessible text is glyph and label concatenated, which a substring
+    // query would match ambiguously.
     const { container } = render(<StatusPill status={status} />);
     const pill = container.querySelector(`[data-status="${status}"]`);
     expect(pill).not.toBeNull();
     expect(pill?.textContent).toBe(`${glyph}${label}`);
+  });
+
+  it.each(["none", "future"] as const)("renders nothing at all for status %s", (status) => {
+    // These two mean "nothing has happened here yet", which is not one of
+    // §3.2's statuses. They used to render a pill containing "——" — on the
+    // review page that produced a column of empty pills down every
+    // not-yet-reached day, which is furniture, not information.
+    const { container } = render(<StatusPill status={status} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("still renders a reportStatus that has no day outcome of its own", () => {
+    // A day can be In review before its own outcome settles, so the suppression
+    // above must not swallow the review state too.
+    render(<StatusPill status="future" reportStatus="InReview" />);
+    expect(screen.getByText(/In review/)).toBeInTheDocument();
   });
 
   it("appends the In review suffix when reportStatus is InReview", () => {
@@ -75,9 +88,13 @@ describe("StatusPill", () => {
     expect(screen.getByText(/In review/)).toBeInTheDocument();
   });
 
-  it("appends the Evaluated (locked) suffix when reportStatus is Evaluated", () => {
-    render(<StatusPill status="onTime" reportStatus="Evaluated" />);
-    expect(screen.getByText(/Evaluated \(locked\)/)).toBeInTheDocument();
+  it("appends the Evaluated suffix with its lock glyph when reportStatus is Evaluated", () => {
+    // §3.2 specifies Evaluated as "--ink + lock glyph". The word carries the
+    // meaning (§12: never a glyph alone), so the glyph is aria-hidden and
+    // asserted structurally rather than by accessible name.
+    const { container } = render(<StatusPill status="onTime" reportStatus="Evaluated" />);
+    expect(screen.getByText(/· Evaluated/)).toBeInTheDocument();
+    expect(container.querySelector("svg[aria-hidden='true']")).not.toBeNull();
   });
 
   it("appends no suffix when reportStatus is null", () => {

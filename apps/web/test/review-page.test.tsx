@@ -165,7 +165,7 @@ describe("StudentReviewPage", () => {
 
     render(await StudentReviewPage({ params: params() }));
 
-    expect(screen.getByText(/Evaluated \(locked\)/)).toBeInTheDocument();
+    expect(screen.getByText(/· Evaluated/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark evaluated" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save record" })).not.toBeInTheDocument();

@@ -64,7 +64,7 @@ export default async function StudentsPage({
           </Panel>
         )}
         <p className="mt-4">
-          <Link href="/students" style={{ color: "var(--ink)", textDecoration: "underline" }}>
+          <Link href="/students" className="text-link">
             Back to Students
           </Link>
         </p>
@@ -135,7 +135,7 @@ export default async function StudentsPage({
         <Panel>
           <div className="flex items-center justify-between">
             <SectionLabel>People</SectionLabel>
-            <Link href="/students?view=archived" style={{ color: "var(--ink)", textDecoration: "underline" }} className="text-sm">
+            <Link href="/students?view=archived" className="text-link text-sm">
               View archived
             </Link>
           </div>

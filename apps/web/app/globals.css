@@ -63,6 +63,9 @@
   --color-st-late: var(--st-late);
   --color-st-absent: var(--st-absent);
   --color-st-missed: var(--st-missed);
+  /* --st-review was the one status token with no Tailwind colour, so it was
+     reachable only through an inline style. Every other one has a --color-*. */
+  --color-st-review: var(--st-review);
   --font-sans: var(--font-jakarta);
   --font-mono: var(--font-plex-mono);
   /* docs/design-system.md §10 — the only sanctioned easing. 150ms state-only
@@ -77,6 +80,17 @@ body {
   /* Fixed scale, not fluid. Base UI 14px. docs/design-system.md §4 */
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* §4: "Prose caps at 70ch. Tables may run to full width." and
+   "text-wrap: pretty on summary prose". Entry bodies and AI summaries are the
+   prose in this system; nothing was capping either. 16px, not the 14px base —
+   §4 sets prose one step up. */
+.prose {
+  max-width: 70ch;
+  font-size: 16px;
+  line-height: 1.6;
+  text-wrap: pretty;
 }
 
 /* Every figure is tabular, mono or not. docs/design-system.md §4 */
@@ -119,6 +133,132 @@ h1, h2, h3 {
 .btn-danger { background: transparent; color: var(--st-missed); border: 1px solid var(--st-missed); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--st-missed) 12%, transparent); }
 .btn-danger:active:not(:disabled) { filter: brightness(0.92); }
+
+/* §3.1 assigns --line-strong to CONTROL borders specifically ("inputs,
+   selects, checkboxes — meets 1.4.11 at 3.37:1") and --line to decorative
+   hairlines with "no contrast requirement". Every control in the app used
+   --line, which measures 1.21:1 against --surface and 1.30:1 against --bg —
+   both well under §12's 3:1 floor for non-text UI boundaries. This class is
+   the one place that border is set, so the two tokens cannot be confused
+   again; --bg rather than --surface as the fill so a control stays legible
+   inside a Panel, which is itself --surface. */
+.control {
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 8px 12px;
+  font-size: 14px;
+  transition: border-color 150ms var(--ease-out-quart);
+}
+.control::placeholder { color: var(--ink-muted); }
+.control:hover:not(:disabled) { border-color: var(--ink); }
+.control:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Checkboxes and radios were entirely unstyled — browser default blue, not
+   the brand. accent-color is the whole fix and keeps the native control
+   (§9: "no reinvented form controls"). */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); }
+
+/* Primary navigation. Every destination rendered in flat --ink-muted with no
+   hover and no current-page treatment, so the sidebar was the one surface in
+   the app that never said where you were — while the Roster and Cycles filter
+   chips did. §3.1 assigns --primary-weak to "selected rows, active nav". */
+.nav-item {
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  color: var(--ink-muted);
+  transition: background-color 150ms var(--ease-out-quart),
+    color 150ms var(--ease-out-quart);
+}
+.nav-item:hover { background: var(--bg); color: var(--ink); }
+.nav-item[data-active] {
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-weight: 600;
+}
+.nav-item[data-active]:hover { background: var(--primary-weak); color: var(--primary); }
+.nav-item[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.nav-item[aria-disabled="true"]:hover { background: transparent; color: var(--ink-muted); }
 @media (prefers-reduced-motion: reduce) {
-  .btn { transition: none; }
+  .nav-item { transition: none; }
+}
+
+/* The batch/cycle filter chips on Roster and Cycles. Interactive, with a
+   visible boundary, so 1.4.11 applies to them exactly as it does to a real
+   control — hence --line-strong here too. The selected state was
+   --surface-sunk (#fafbfe on a white canvas: a 1.02:1 difference, effectively
+   invisible); §3.1 assigns --primary-weak to "selected rows, active nav,
+   primary-tinted fills", which is what selection is. */
+.chip {
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line-strong);
+  padding: 6px 12px;
+  font-size: 14px;
+  color: var(--ink-muted);
+  transition: background-color 150ms var(--ease-out-quart),
+    color 150ms var(--ease-out-quart), border-color 150ms var(--ease-out-quart);
+}
+.chip:hover { color: var(--ink); background: var(--surface); }
+.chip[aria-current="page"] {
+  background: var(--primary-weak);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* §9 asks for one vocabulary per element. Three pages inlined
+   `color: --ink; text-decoration: underline` for an in-content link. */
+.text-link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 150ms var(--ease-out-quart);
+}
+.text-link:hover { color: var(--primary); }
+
+/* §9: "Skeletons for loading, never a centred spinner." The pulse is a
+   lightness shift between the two neutral surface tokens, so it stays a
+   surface rather than becoming a fifth colour. */
+@keyframes skeleton-pulse {
+  0%, 100% { background: var(--surface); }
+  50% { background: var(--line); }
+}
+.skeleton {
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  animation: skeleton-pulse 1400ms ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* §10, moment 1: "Ribbon load — marks fill left→right, staggered, ≤250ms
+   total. It's a list stagger, not a page-load sequence." 160ms per mark with
+   the last delay capped at 90ms keeps the whole run inside the budget. The
+   bar is drawn at its real height and scaled up from the baseline, so the
+   final frame is the un-animated state — content is never gated behind the
+   reveal (§10's closing rule). */
+@keyframes ribbon-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.ribbon-mark {
+  transform-origin: bottom;
+  animation: ribbon-rise 160ms var(--ease-out-quart) both;
+}
+
+/* §10, moment 3: "Review state change — 180ms crossfade on the status pill."
+   Replays only when the pill actually remounts, which the review page forces
+   by keying the pill on the status it is rendering. */
+@keyframes pill-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.pill-crossfade { animation: pill-fade 180ms var(--ease-out-quart) both; }
+
+/* §10: reduce → "all of the above become instant or a plain crossfade."
+   The animations resolve to their end state rather than being cancelled. */
+@media (prefers-reduced-motion: reduce) {
+  .btn, .control, .text-link { transition: none; }
+  .ribbon-mark, .pill-crossfade { animation-duration: 1ms; animation-delay: 0ms; }
 }

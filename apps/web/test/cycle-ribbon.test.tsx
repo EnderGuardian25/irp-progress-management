@@ -33,9 +33,46 @@ describe("CycleRibbon", () => {
     // solid full green bar. isToday must decorate whatever mark applies.
     render(<CycleRibbon days={[{ date: "2026-07-17", mark: "missed", isToday: true }]} />);
     const item = screen.getByLabelText("2026-07-17: missed, today");
-    const bar = item.firstElementChild;
+    // Queried by test id rather than firstElementChild: the slot now also
+    // carries a date label under the bar, and position-based traversal broke
+    // silently the moment that landed.
+    const bar = item.querySelector('[data-testid="ribbon-bar"]');
     expect(bar).toHaveStyle({ background: "var(--st-missed)", height: "100%" });
-    expect(item).toHaveStyle({ outline: "1.5px solid var(--primary)" });
+    // The ring frames the bar track, not the whole slot — it must not enclose
+    // the date label beneath.
+    expect(bar?.parentElement).toHaveStyle({ outline: "1.5px solid var(--primary)" });
+  });
+
+  it("prints the day-of-month under every required day, but never under an extra slot", () => {
+    // §7's mock reads "10 11 ⁺ 14": the weekend is a gap in the date run, which
+    // is what keeps the five-a-week weekday rhythm legible.
+    render(<CycleRibbon days={days} extraAfter={["2026-07-10"]} />);
+
+    const dayItem = screen.getByLabelText("2026-07-10: ok");
+    expect(dayItem.textContent).toContain("10");
+
+    const extraItem = screen.getByLabelText("Extra work after 2026-07-10");
+    expect(extraItem.textContent).not.toMatch(/\d/);
+  });
+
+  it("staggers the marks left to right inside §10's 250ms budget", () => {
+    const { container } = render(<CycleRibbon days={days} />);
+    const bars = [...container.querySelectorAll<HTMLElement>('[data-testid="ribbon-bar"]')];
+    const delays = bars.map((b) => Number.parseInt(b.style.animationDelay, 10));
+
+    expect(delays[0]).toBe(0);
+    // Monotonic: the sweep runs one way, never back on itself.
+    for (let i = 1; i < delays.length; i++) {
+      expect(delays[i]).toBeGreaterThan(delays[i - 1]!);
+    }
+    // 160ms animation + the last delay must still land inside 250ms total.
+    expect(delays[delays.length - 1]! + 160).toBeLessThanOrEqual(250);
+  });
+
+  it("gives a single-day cycle no delay rather than dividing by zero", () => {
+    const { container } = render(<CycleRibbon days={[{ date: "2026-07-10", mark: "ok" }]} />);
+    const bar = container.querySelector<HTMLElement>('[data-testid="ribbon-bar"]');
+    expect(bar?.style.animationDelay).toBe("0ms");
   });
 
   it("renders no weekend slot when nobody worked the weekend", () => {
@@ -70,7 +107,9 @@ describe("CycleRibbon", () => {
 
   it("applies a proportional fill for a partial day", () => {
     render(<CycleRibbon days={[{ date: "2026-07-16", mark: "partial", fill: 0.6 }]} />);
-    const bar = screen.getByLabelText("2026-07-16: partial").firstElementChild;
+    const bar = screen
+      .getByLabelText("2026-07-16: partial")
+      .querySelector('[data-testid="ribbon-bar"]');
     expect(bar).toHaveStyle({ height: "60%" });
   });
 });
