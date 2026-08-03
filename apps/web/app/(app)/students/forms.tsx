@@ -3,10 +3,17 @@
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/ui/section-label";
-import { registerUser, addBatch, transferStudentAction, archiveUserAction } from "./admin-actions";
+import {
+  registerUser,
+  addBatch,
+  transferStudentAction,
+  archiveUserAction,
+  restoreUserAction,
+} from "./admin-actions";
 
-const FIELD_CLASS = "rounded-[var(--radius-control)] border px-3 py-2";
-const FIELD_STYLE = { borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" } as const;
+// The shared control treatment lives in app/globals.css's `.control` — the
+// one place --line-strong (the §3.1 control-border token) is set.
+const FIELD_CLASS = "control";
 
 export interface BatchOption {
   id: string;
@@ -41,7 +48,6 @@ export function RegisterForm({ batches }: { batches: BatchOption[] }) {
           onChange={(e) => setRole(e.target.value === "Admin" ? "Admin" : "Student")}
           aria-label="Role"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         >
           <option value="Student">Student</option>
           <option value="Admin">Mentor</option>
@@ -55,7 +61,6 @@ export function RegisterForm({ batches }: { batches: BatchOption[] }) {
           required
           aria-label="Email"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -65,7 +70,6 @@ export function RegisterForm({ batches }: { batches: BatchOption[] }) {
           required
           aria-label="Display name"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -75,14 +79,13 @@ export function RegisterForm({ batches }: { batches: BatchOption[] }) {
           required
           aria-label="External id"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         />
       </label>
       {role === "Student" && (
         <>
           <label className="flex flex-col gap-1">
             <SectionLabel>Batch</SectionLabel>
-            <select name="batchId" required aria-label="Batch" className={FIELD_CLASS} style={FIELD_STYLE}>
+            <select name="batchId" required aria-label="Batch" className={FIELD_CLASS}>
               {batches.map((b) => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
@@ -96,7 +99,6 @@ export function RegisterForm({ batches }: { batches: BatchOption[] }) {
               required
               aria-label="Start date"
               className={FIELD_CLASS}
-              style={FIELD_STYLE}
             />
           </label>
         </>
@@ -126,7 +128,7 @@ export function CreateBatchForm() {
     <form action={action} className="flex flex-col gap-3">
       <label className="flex flex-col gap-1">
         <SectionLabel>Batch name</SectionLabel>
-        <input name="name" required aria-label="Batch name" className={FIELD_CLASS} style={FIELD_STYLE} />
+        <input name="name" required aria-label="Batch name" className={FIELD_CLASS} />
       </label>
       <label className="flex flex-col gap-1">
         <SectionLabel>Batch start date</SectionLabel>
@@ -136,7 +138,6 @@ export function CreateBatchForm() {
           required
           aria-label="Batch start date"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -147,7 +148,6 @@ export function CreateBatchForm() {
           required
           aria-label="Batch end date"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         />
       </label>
       {state !== null && "error" in state && (
@@ -181,7 +181,7 @@ export function TransferForm({
     <form action={action} className="flex flex-col gap-3">
       <label className="flex flex-col gap-1">
         <SectionLabel>Student</SectionLabel>
-        <select name="studentId" required aria-label="Student" className={FIELD_CLASS} style={FIELD_STYLE}>
+        <select name="studentId" required aria-label="Student" className={FIELD_CLASS}>
           {students.map((s) => (
             <option key={s.id} value={s.id}>{s.displayName} ({s.email})</option>
           ))}
@@ -189,7 +189,7 @@ export function TransferForm({
       </label>
       <label className="flex flex-col gap-1">
         <SectionLabel>New batch</SectionLabel>
-        <select name="toBatchId" required aria-label="New batch" className={FIELD_CLASS} style={FIELD_STYLE}>
+        <select name="toBatchId" required aria-label="New batch" className={FIELD_CLASS}>
           {batches.map((b) => (
             <option key={b.id} value={b.id}>{b.name}</option>
           ))}
@@ -203,7 +203,6 @@ export function TransferForm({
           required
           aria-label="Effective date"
           className={FIELD_CLASS}
-          style={FIELD_STYLE}
         />
       </label>
       {state !== null && "error" in state && (
@@ -238,6 +237,30 @@ export function ArchiveButton({ userId }: { userId: string }) {
   return (
     <form action={action} className="flex flex-col items-end gap-1">
       <Button type="submit" variant="danger" loading={pending}>Archive</Button>
+      {state !== null && "error" in state && (
+        <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
+          {state.error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+/**
+ * The archive view's counterpart to ArchiveButton (FR-5). Same bound-action
+ * shape, so a failed restore surfaces the API's problem detail rather than
+ * silently doing nothing.
+ *
+ * `quiet`, not `danger`: restoring grants access back and destroys nothing,
+ * so it is the safe direction. It carries no confirmation step for the same
+ * reason — and because re-archiving is one click away if it was a misclick.
+ */
+export function RestoreButton({ userId }: { userId: string }) {
+  const [state, action, pending] = useActionState(restoreUserAction.bind(null, userId), null);
+
+  return (
+    <form action={action} className="flex flex-col items-end gap-1">
+      <Button type="submit" variant="quiet" loading={pending}>Restore</Button>
       {state !== null && "error" in state && (
         <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
           {state.error}

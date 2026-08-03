@@ -8,18 +8,22 @@ import { Button } from "@/components/ui/button";
  *
  * Server Component (no "use client"), so the inline `"use server"` sign-out
  * action below is valid here without any extra wiring.
+ *
+ * §6's frame sketches a `Batch 12 ▾` switcher in this bar. It is deliberately
+ * absent: `User` (spec/openapi.yaml) carries no batch, a mentor holds several
+ * so a single name would be wrong for them anyway, and batch selection is
+ * already per-page via the Roster and Cycles chips. The `batchName` prop that
+ * anticipated it was never passed by the layout — dead since it was written,
+ * so it is gone rather than left as a slot nothing can fill. Recorded in
+ * docs/design-system.md §13.
  */
-export function Topbar({
-  userName,
-  batchName,
-}: {
-  userName: string;
-  batchName?: string;
-}) {
+export function Topbar({ userName }: { userName: string }) {
   return (
+    // shrink-0: the app frame is a fixed-height flex column, so without it
+    // this 56px bar is compressible once the content column is tall.
     <header
       role="banner"
-      className="flex items-center justify-between border-b px-6"
+      className="flex shrink-0 items-center justify-between border-b px-6"
       style={{ height: "56px", background: "var(--surface)", borderColor: "var(--line)" }}
     >
       <div className="flex items-center gap-2">
@@ -32,11 +36,6 @@ export function Topbar({
       </div>
 
       <div className="flex items-center gap-6">
-        {batchName !== undefined && (
-          <span className="tabular" style={{ color: "var(--ink-muted)" }}>
-            {batchName}
-          </span>
-        )}
         <span style={{ color: "var(--ink)" }}>{userName}</span>
         <form
           action={async () => {

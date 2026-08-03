@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Topbar } from "@/components/app-frame/topbar";
 import { Sidebar } from "@/components/app-frame/sidebar";
@@ -12,18 +12,22 @@ vi.mock("@/auth", () => ({
   signOut: vi.fn(),
 }));
 
+// Sidebar became a Client Component to read usePathname — that is the only
+// way it can know which destination is current, since a layout does not
+// re-render on navigation within its own segment.
+const { usePathname } = vi.hoisted(() => ({ usePathname: vi.fn(() => "/") }));
+vi.mock("next/navigation", () => ({ usePathname }));
+
 describe("Topbar", () => {
   it("shows the signed-in user's name", () => {
     render(<Topbar userName="Damian De Cruz" />);
     expect(screen.getByText("Damian De Cruz")).toBeInTheDocument();
   });
 
-  it("shows the batch when supplied and omits it otherwise", () => {
-    const { rerender } = render(<Topbar userName="A" batchName="Batch 12" />);
-    expect(screen.getByText("Batch 12")).toBeInTheDocument();
-    rerender(<Topbar userName="A" />);
-    expect(screen.queryByText("Batch 12")).not.toBeInTheDocument();
-  });
+  // The `batchName` prop this once covered is gone: it was never passed by the
+  // layout, `User` carries no batch, and §6's global batch switcher is served
+  // instead by the per-page Roster/Cycles chips. Recorded in
+  // docs/design-system.md §13.
 
   it("is a banner landmark 56px tall", () => {
     render(<Topbar userName="A" />);
@@ -37,6 +41,37 @@ describe("Topbar", () => {
 });
 
 describe("Sidebar", () => {
+  beforeEach(() => {
+    usePathname.mockReturnValue("/");
+  });
+
+  it("marks the current destination with aria-current and the active-nav fill", () => {
+    usePathname.mockReturnValue("/roster");
+    render(<Sidebar role="Admin" />);
+
+    expect(screen.getByRole("link", { name: /Roster/ })).toHaveAttribute("aria-current", "page");
+    // §12: colour never carries meaning alone, so the state is also an
+    // attribute assistive tech can read.
+    expect(screen.getByRole("link", { name: /Cycles/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps Review current on a per-student review page, which has no nav entry of its own", () => {
+    usePathname.mockReturnValue("/review/abc-123");
+    render(<Sidebar role="Admin" />);
+
+    expect(screen.getByRole("link", { name: /^Review/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("does not light up Today on every page just because every path starts with /", () => {
+    // The bug a prefix test would introduce: "/" prefixes literally every
+    // route, so Today would read as current on Roster, Review and the rest.
+    usePathname.mockReturnValue("/cycles");
+    render(<Sidebar role="Admin" />);
+
+    expect(screen.getByRole("link", { name: /Today/ })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: /Cycles/ })).toHaveAttribute("aria-current", "page");
+  });
+
   it("is a navigation landmark 216px wide", () => {
     render(<Sidebar role="Admin" />);
     expect(screen.getByRole("navigation")).toHaveStyle({ width: "216px" });

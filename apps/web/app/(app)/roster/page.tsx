@@ -86,27 +86,19 @@ export default async function RosterPage({
         <div>
           <SectionLabel>Batch</SectionLabel>
           <div className="mt-2 flex flex-wrap gap-2">
-            {batches.map((b) => {
-              const isSelected = b.id === selected.id;
-              return (
-                <Link
-                  key={b.id}
-                  href={{
-                    pathname: "/roster",
-                    query: date === undefined ? { batchId: b.id } : { batchId: b.id, date },
-                  }}
-                  aria-current={isSelected ? "page" : undefined}
-                  className="rounded-[var(--radius-control)] border px-3 py-1.5 text-sm"
-                  style={{
-                    borderColor: "var(--line)",
-                    color: isSelected ? "var(--ink)" : "var(--ink-muted)",
-                    background: isSelected ? "var(--surface-sunk)" : "transparent",
-                  }}
-                >
-                  {b.name}
-                </Link>
-              );
-            })}
+            {batches.map((b) => (
+              <Link
+                key={b.id}
+                href={{
+                  pathname: "/roster",
+                  query: date === undefined ? { batchId: b.id } : { batchId: b.id, date },
+                }}
+                aria-current={b.id === selected.id ? "page" : undefined}
+                className="chip"
+              >
+                {b.name}
+              </Link>
+            ))}
           </div>
         </div>
 
@@ -119,8 +111,7 @@ export default async function RosterPage({
               type="date"
               name="date"
               defaultValue={effectiveDate}
-              className="mt-2 block rounded-[var(--radius-control)] border px-3 py-1.5 text-sm"
-              style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+              className="control mt-2 block"
             />
           </div>
           <Button type="submit" variant="quiet">
@@ -147,12 +138,10 @@ export default async function RosterPage({
       )}
 
       {error === undefined && rows !== undefined && rows.length > 0 && (
-        <Panel sunk>
-          {effectiveDate !== undefined && (
-            <div className="mb-3">
-              <SectionLabel>{formatCivilDateLabel(effectiveDate)}</SectionLabel>
-            </div>
-          )}
+        <Panel
+          sunk
+          title={effectiveDate === undefined ? undefined : formatCivilDateLabel(effectiveDate)}
+        >
           <Table>
             <thead>
               <tr>
@@ -198,10 +187,7 @@ export default async function RosterPage({
                     {row.hasMentorRecord ? "✓ recorded" : "— none"}
                   </Td>
                   <Td>
-                    <Link
-                      href={`/review/${row.student.id}`}
-                      style={{ color: "var(--ink)", textDecoration: "underline" }}
-                    >
+                    <Link href={`/review/${row.student.id}`} className="text-link">
                       Review
                     </Link>
                   </Td>

@@ -76,11 +76,10 @@ export function DayRecordForm({
         defaultValue={defaults?.note ?? ""}
         placeholder="Note (optional)"
         aria-label={`Mentor note for ${date}`}
-        className="rounded-[var(--radius-control)] border px-3 py-2"
-        style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
+        className="control"
       />
       <p className="text-xs" style={{ color: "var(--ink-muted)" }}>
-        Saving replaces the whole record for this day -- attendance, tasks, and note together.
+        Saving replaces the whole record for this day — attendance, tasks, and note together.
       </p>
       {state !== null && "error" in state && (
         <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>

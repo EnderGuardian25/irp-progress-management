@@ -162,7 +162,7 @@ test.describe("mentor flows (dev-admin-1)", () => {
     // form -- relocate the same day by its date label, which FR-20 keeps
     // rendering (locked, not hidden).
     const lockedPanel = dayPanelByLabel(page, dateLabel);
-    await expect(lockedPanel.getByText(/Evaluated \(locked\)/)).toBeVisible();
+    await expect(lockedPanel.getByText(/· Evaluated/)).toBeVisible();
     await expect(lockedPanel.getByRole("button")).toHaveCount(0);
   });
 

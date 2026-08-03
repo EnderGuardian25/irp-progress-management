@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { Route } from "next";
 
 /**
@@ -15,6 +18,11 @@ import type { Route } from "next";
  * (Cycles); Task 8 added `.../my-month/page.tsx`, so "My month" joined the
  * others last. Each destination became a real `<Link href="...">` in the
  * task that added its page — no `as Route` cast was needed in the meantime.
+ *
+ * The current destination is marked with `aria-current="page"` and the
+ * `--primary-weak` active-nav fill §3.1 reserves for it. This is a client
+ * component solely because that needs `usePathname`; nothing else here is
+ * interactive.
  *
  * Navigation is role-gated, not just link-gated: a Student never sees
  * mentor-only destinations (Roster, Review, Cycles, Students) at all, rather
@@ -52,6 +60,17 @@ const STUDENT_DESTINATIONS: readonly Destination[] = [
   { label: "My month", href: "/my-month" },
 ];
 
+/**
+ * "/" must match exactly — every other path also starts with it, so a prefix
+ * test would light up Today on every screen in the app. The prefix test is
+ * what the rest need: /review/<studentId> has to keep Review marked, since
+ * that page has no nav entry of its own.
+ */
+function isActive(pathname: string, href: Route): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function Sidebar({
   role,
   reviewCount = 0,
@@ -60,11 +79,19 @@ export function Sidebar({
   reviewCount?: number;
 }) {
   const destinations = role === "Admin" ? MENTOR_DESTINATIONS : STUDENT_DESTINATIONS;
+  // usePathname is why this is a client component. The alternative — threading
+  // the path down from the server layout — is not available: a layout does not
+  // re-render on navigation within its own segment, so the prop would go stale
+  // exactly when the highlight needs to move.
+  const pathname = usePathname();
 
   return (
+    // shrink-0 so the fixed 216px column is never squeezed by a wide table in
+    // the content area; overflow-y-auto so the nav itself scrolls rather than
+    // overflowing the frame if the list ever outgrows a short viewport.
     <nav
       aria-label="Primary"
-      className="flex flex-col gap-1 border-r p-4"
+      className="flex shrink-0 flex-col gap-1 overflow-y-auto border-r p-4"
       style={{ width: "216px", background: "var(--surface)", borderColor: "var(--line)" }}
     >
       {destinations.map((d) => {
@@ -76,12 +103,17 @@ export function Sidebar({
         );
 
         if ("href" in d) {
+          const active = isActive(pathname, d.href);
           return (
             <Link
               key={d.label}
               href={d.href}
-              className="rounded-[var(--radius-control)] px-3 py-2"
-              style={{ color: "var(--ink-muted)" }}
+              // aria-current is the non-visual half of the same signal: §12
+              // does not let colour alone carry meaning, and "which page am I
+              // on" is meaning.
+              aria-current={active ? "page" : undefined}
+              className="nav-item"
+              data-active={active || undefined}
             >
               {d.label}
               {showCount && " "}
@@ -91,12 +123,7 @@ export function Sidebar({
         }
 
         return (
-          <span
-            key={d.label}
-            aria-disabled="true"
-            className="rounded-[var(--radius-control)] px-3 py-2"
-            style={{ color: "var(--ink-muted)" }}
-          >
+          <span key={d.label} aria-disabled="true" className="nav-item">
             {d.label}
             {showCount && " "}
             {badge}

@@ -1,10 +1,13 @@
 import type { UserRepo, UserRecord } from "../../src/db/user-repo.js";
 
-// `create`/`list`/`archive` back /api/v1/users and DELETE /api/v1/users/{id}
-// (Tasks 9/10), which no suite using `fakeUserRepo` exercises — they throw if
-// ever reached, same as `unusedBatchRepo`'s methods.
+// `create`/`list`/`archive`/`restore` back /api/v1/users, DELETE
+// /api/v1/users/{id} and POST /api/v1/users/{id}/restore, none of which any
+// suite using `fakeUserRepo` exercises — they throw if ever reached, same as
+// `unusedBatchRepo`'s methods.
 const unused = () => {
-  throw new Error("unused: userRepo.create/list/archive was not expected to be called in this suite");
+  throw new Error(
+    "unused: userRepo.create/list/archive/restore was not expected to be called in this suite",
+  );
 };
 
 export function fakeUserRepo(users: UserRecord[]): UserRepo {
@@ -19,5 +22,6 @@ export function fakeUserRepo(users: UserRecord[]): UserRepo {
     create: unused,
     list: unused,
     archive: unused,
+    restore: unused,
   };
 }

@@ -65,8 +65,7 @@ export function AbsenceToggle({
             maxLength={500}
             placeholder="Reason"
             aria-label={`Absence reason for ${date}`}
-            className="rounded-[var(--radius-control)] border px-3 py-2"
-            style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
+            className="control"
           />
         </label>
         <Button type="submit" variant="quiet" loading={markPending}>Mark absent</Button>

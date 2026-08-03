@@ -14,17 +14,27 @@ vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
 
 // admin-actions.ts (unmocked -- exercised for real, same as review-page.test's
 // treatment of review-actions.ts) calls createUser/createBatch/
-// transferStudent/archiveUser; page.tsx itself calls listBatches/listUsers.
-// All six are mocked here so the whole tree -- page, RegisterForm,
-// CreateBatchForm, TransferForm, ArchiveButton, and the server actions
-// underneath them -- runs without a real client or network access.
-const { listBatches, listUsers, createUser, createBatch, transferStudent, archiveUser } = vi.hoisted(() => ({
+// transferStudent/archiveUser/restoreUser; page.tsx itself calls
+// listBatches/listUsers. All seven are mocked here so the whole tree -- page,
+// RegisterForm, CreateBatchForm, TransferForm, ArchiveButton, RestoreButton,
+// and the server actions underneath them -- runs without a real client or
+// network access.
+const {
+  listBatches,
+  listUsers,
+  createUser,
+  createBatch,
+  transferStudent,
+  archiveUser,
+  restoreUser,
+} = vi.hoisted(() => ({
   listBatches: vi.fn(),
   listUsers: vi.fn(),
   createUser: vi.fn(),
   createBatch: vi.fn(),
   transferStudent: vi.fn(),
   archiveUser: vi.fn(),
+  restoreUser: vi.fn(),
 }));
 vi.mock("@irp/client", () => ({
   listBatches,
@@ -33,6 +43,7 @@ vi.mock("@irp/client", () => ({
   createBatch,
   transferStudent,
   archiveUser,
+  restoreUser,
 }));
 
 // redirect() in real Next never returns -- it throws a special NEXT_REDIRECT
@@ -136,7 +147,11 @@ describe("StudentsPage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("The batch list could not be loaded.");
   });
 
-  it("archived view lists archived users without any action buttons, and links back", async () => {
+  it("archived view lists archived users with a Restore control, and links back", async () => {
+    // This view was deliberately read-only, which left archiving -- a
+    // one-click action -- with no inverse anywhere in the product. FR-5 asks
+    // for an archive that keeps history; it never asked for that archive to
+    // be one-way.
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listUsers.mockResolvedValue({
@@ -148,8 +163,32 @@ describe("StudentsPage", () => {
 
     expect(listUsers).toHaveBeenCalledWith({ client: {}, query: { archived: true } });
     expect(screen.getByText("Kavindu Silva")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    // Restore is the only action here: everything else on the Students page
+    // (transfer, archive, registration) needs an ACTIVE user.
+    expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByRole("link", { name: /Back to Students/ })).toHaveAttribute("href", "/students");
+  });
+
+  it("restores an archived user through the SDK and surfaces a failure", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listUsers.mockResolvedValue({
+      data: [{ ...STUDENT_DETAIL, id: "s2", displayName: "Kavindu Silva", archived: true }],
+      error: undefined,
+    });
+    restoreUser.mockResolvedValue({
+      data: undefined,
+      error: { title: "Not Found", detail: "That user no longer exists." },
+    });
+
+    render(await StudentsPage({ searchParams: searchParams("archived") }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+
+    // The problem detail has to reach the mentor -- a restore that silently
+    // does nothing is the failure mode the bound-action shape exists to stop.
+    expect(await screen.findByRole("alert")).toHaveTextContent("That user no longer exists.");
+    expect(restoreUser).toHaveBeenCalledWith({ client: {}, path: { id: "s2" } });
   });
 
   it("RegisterForm hides batch/startDate for the Mentor role and omits the enrolment key entirely", async () => {

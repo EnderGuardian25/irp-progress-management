@@ -6,7 +6,13 @@ import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
 import { EmptyState } from "@/components/ui/empty-state";
-import { RegisterForm, CreateBatchForm, TransferForm, ArchiveButton } from "./forms";
+import {
+  RegisterForm,
+  CreateBatchForm,
+  TransferForm,
+  ArchiveButton,
+  RestoreButton,
+} from "./forms";
 
 /**
  * The mentor's directory of people and batches (FR-3, FR-5, FR-6, FR-8).
@@ -14,10 +20,9 @@ import { RegisterForm, CreateBatchForm, TransferForm, ArchiveButton } from "./fo
  * gate -- a Student hitting this route is bounced to "/" rather than shown
  * a 403 page.
  *
- * `?view=archived` renders the FR-5 read-only archive list instead of the
- * four working panels -- names and emails only, no action buttons, since an
- * archived user has already lost access and there is nothing left to do to
- * one from here.
+ * `?view=archived` renders the FR-5 archive list instead of the four working
+ * panels -- names, emails, and a Restore control per row. It carries no other
+ * actions: everything else (transfer, re-registration) needs an active user.
  */
 export default async function StudentsPage({
   searchParams,
@@ -52,19 +57,29 @@ export default async function StudentsPage({
           <Panel sunk>
             <ul className="flex flex-col gap-2">
               {archived.map((u) => (
-                <li key={u.id} className="flex items-center justify-between border-b pb-2" style={{ borderColor: "var(--line)" }}>
+                <li key={u.id} className="flex items-center justify-between gap-4 border-b pb-2" style={{ borderColor: "var(--line)" }}>
                   <div>
                     <div style={{ color: "var(--ink)" }}>{u.displayName}</div>
                     <div className="text-sm" style={{ color: "var(--ink-muted)" }}>{u.email}</div>
                   </div>
-                  <span className="text-sm" style={{ color: "var(--ink-muted)" }}>{u.role}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm" style={{ color: "var(--ink-muted)" }}>{u.role}</span>
+                    {/* This view was read-only on the reasoning that an archived
+                        user "has already lost access and there is nothing left
+                        to do to one from here". That left archiving — a
+                        one-click action — with no inverse anywhere in the
+                        product, so an accidental archive could only be undone
+                        with a direct database write. FR-5 never called for
+                        that; it was an assumption, not a requirement. */}
+                    <RestoreButton userId={u.id} />
+                  </div>
                 </li>
               ))}
             </ul>
           </Panel>
         )}
         <p className="mt-4">
-          <Link href="/students" style={{ color: "var(--ink)", textDecoration: "underline" }}>
+          <Link href="/students" className="text-link">
             Back to Students
           </Link>
         </p>
@@ -135,7 +150,7 @@ export default async function StudentsPage({
         <Panel>
           <div className="flex items-center justify-between">
             <SectionLabel>People</SectionLabel>
-            <Link href="/students?view=archived" style={{ color: "var(--ink)", textDecoration: "underline" }} className="text-sm">
+            <Link href="/students?view=archived" className="text-link text-sm">
               View archived
             </Link>
           </div>

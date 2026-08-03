@@ -42,7 +42,7 @@ describe("MyMonthPage", () => {
     vi.clearAllMocks();
   });
 
-  it("shows Month N of 6 and the student's own ribbon", async () => {
+  it("shows which month the history covers, and how it came out", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
     apiClient.mockResolvedValue({});
     getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
@@ -51,13 +51,14 @@ describe("MyMonthPage", () => {
     render(await MyMonthPage());
 
     expect(screen.getByText(/Month 3 of 6/)).toBeInTheDocument();
-    expect(screen.getByRole("figure")).toBeInTheDocument();
-    expect(screen.getByTestId("required-day-count")).toHaveTextContent("2 required days in this cycle");
-    // The ring comes from the server's Asia/Colombo date, not the browser's.
-    expect(screen.getByLabelText("2026-08-03: late, today")).toBeInTheDocument();
+    expect(screen.getByText(/94% compliance/)).toBeInTheDocument();
   });
 
-  it("renders the designed strengths-and-weaknesses empty state, never a blank panel", async () => {
+  it("leaves the ribbon and the strengths prose to the student's home (§8.2)", async () => {
+    // Both moved to (app)/student-today.tsx, where §8.2 places them: above the
+    // composer, on the page the student lands on. Keeping a second copy here
+    // made My month a near-duplicate of home rather than the day-by-day
+    // history FR-29 asks for.
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT);
     apiClient.mockResolvedValue({});
     getMyDashboard.mockResolvedValue({ data: dash(), error: undefined });
@@ -65,8 +66,8 @@ describe("MyMonthPage", () => {
 
     render(await MyMonthPage());
 
-    expect(screen.getByText(/No evaluation yet/)).toBeInTheDocument();
-    expect(screen.getByText(/after your cycle closes/)).toBeInTheDocument();
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+    expect(screen.queryByText("Strengths and areas to develop")).not.toBeInTheDocument();
   });
 
   it("shows no score, no rank, and no other student anywhere (FR-30)", async () => {
@@ -129,7 +130,7 @@ describe("MyMonthPage", () => {
     const bodies = screen.getAllByTestId("day-entry-body").map((n) => n.textContent);
     expect(bodies).toEqual(["Newer entry.", "Older entry."]);
     expect(screen.getByText("Late")).toBeInTheDocument();
-    expect(screen.getByText(/Evaluated \(locked\)/)).toBeInTheDocument();
+    expect(screen.getByText(/· Evaluated/)).toBeInTheDocument();
   });
 
   it("drops future days and quiet weekends from the history, but keeps a settled day even with no entry (Finding 4)", async () => {
@@ -267,10 +268,10 @@ describe("MyMonthPage", () => {
 
     expect(screen.getByText("Your day history could not be loaded.")).toBeInTheDocument();
     expect(screen.queryByText(/Nothing recorded this cycle yet\./)).not.toBeInTheDocument();
-    // The dashboard heading, ribbon and counts still render -- only the
+    // The dashboard heading and compliance rate still render -- only the
     // day-history section is affected by listMyDays failing.
     expect(screen.getByText(/Month 3 of 6/)).toBeInTheDocument();
-    expect(screen.getByRole("figure")).toBeInTheDocument();
+    expect(screen.getByText(/94% compliance/)).toBeInTheDocument();
   });
 
   it("renders the problem detail when the dashboard call errors", async () => {

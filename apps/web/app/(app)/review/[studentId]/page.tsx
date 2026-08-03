@@ -4,7 +4,6 @@ import { civilDate, isWeekday } from "@irp/core";
 import { getCurrentUserOrRedirect, apiClient } from "@/lib/api-client";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
-import { SectionLabel } from "@/components/ui/section-label";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCivilDateLabel } from "../../format-civil-date";
@@ -143,21 +142,30 @@ export default async function StudentReviewPage({
               : { attended: record.attended, tasksCompleted: record.tasksCompleted, note: record.note };
 
             return (
-              <Panel key={day.date}>
-                <div className="mb-3 flex items-center justify-between">
-                  <SectionLabel>{formatCivilDateLabel(day.date)}</SectionLabel>
-                  {day.status !== "none" && (
-                    <StatusPill status={day.status} reportStatus={day.reportStatus} />
-                  )}
-                </div>
-
+              <Panel
+                key={day.date}
+                title={formatCivilDateLabel(day.date)}
+                aside={
+                  day.status === "none" ? undefined : (
+                    // Keyed on the status it renders so a transition remounts
+                    // it — §10's "180ms crossfade on the status pill" is an
+                    // animation, and an animation only replays on mount.
+                    <StatusPill
+                      key={`${day.status}-${String(day.reportStatus)}`}
+                      status={day.status}
+                      reportStatus={day.reportStatus}
+                      crossfade
+                    />
+                  )
+                }
+              >
                 {day.entries.length === 0 && day.absenceReason === null && (
                   <p style={{ color: "var(--ink-muted)" }}>No entry recorded.</p>
                 )}
 
                 {day.entries.map((entry) => (
                   <div key={entry.id} className="mb-3 flex items-start justify-between gap-3">
-                    <p style={{ color: "var(--ink)" }}>{entry.body}</p>
+                    <p className="prose" style={{ color: "var(--ink)" }}>{entry.body}</p>
                     <div
                       className="flex shrink-0 items-center gap-2 text-sm"
                       style={{ color: "var(--ink-muted)" }}

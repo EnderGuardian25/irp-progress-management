@@ -21,8 +21,7 @@ export function EntryComposer({ targetDates }: { targetDates: string[] }) {
         // API flagged it Late.
         defaultValue={targetDates[0] ?? ""}
         aria-label="Entry date"
-        className="rounded-[var(--radius-control)] border px-3 py-2"
-        style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
+        className="control"
       >
         {targetDates.map((d) => (
           // The ISO value is the wire format the server action reads;
@@ -37,8 +36,7 @@ export function EntryComposer({ targetDates }: { targetDates: string[] }) {
         rows={4}
         placeholder="What did you work on?"
         aria-label="Entry text"
-        className="rounded-[var(--radius-control)] border px-3 py-2"
-        style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
+        className="control"
       />
       {state !== null && (
         <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>{state.error}</p>

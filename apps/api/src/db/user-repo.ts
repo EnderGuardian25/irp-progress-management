@@ -41,6 +41,14 @@ export interface UserRepo {
   // matches a row still `deletedAt: null`, so a repeat call touches zero
   // rows and still resolves successfully rather than erroring.
   archive(id: string, now: Date): Promise<void>;
+  // FR-5: the inverse of archive. Idempotent the same way and for the same
+  // reason — the `updateMany` only matches a row that is currently archived,
+  // so restoring an active user touches zero rows and still resolves.
+  //
+  // Takes no `now`: archive stamps a time, restore only clears one. There is
+  // nothing to record, because a soft archive destroys nothing — the row and
+  // all its history were always there.
+  restore(id: string): Promise<void>;
 }
 
 export function createUserRepo(prisma: PrismaClient): UserRepo {
@@ -101,6 +109,14 @@ export function createUserRepo(prisma: PrismaClient): UserRepo {
       await prisma.user.updateMany({
         where: { id, deletedAt: null },
         data: { deletedAt: now },
+      });
+    },
+
+    async restore(id) {
+      // Idempotent: only clears when currently archived.
+      await prisma.user.updateMany({
+        where: { id, deletedAt: { not: null } },
+        data: { deletedAt: null },
       });
     },
   };

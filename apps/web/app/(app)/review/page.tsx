@@ -24,7 +24,7 @@ export default async function ReviewLandingPage() {
           hint="Every roster row links to that student's review view."
         />
         <div className="mt-4 flex justify-center">
-          <Link href="/roster" style={{ color: "var(--ink)", textDecoration: "underline" }}>
+          <Link href="/roster" className="text-link">
             Go to Roster
           </Link>
         </div>
