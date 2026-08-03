@@ -1,6 +1,6 @@
 import "server-only";
 
-import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import { SignJWT, calculateJwkThumbprint, exportJWK, generateKeyPair } from "jose";
 import type { JWK } from "jose";
 import Credentials from "next-auth/providers/credentials";
 import type { Provider } from "next-auth/providers";
@@ -46,10 +46,25 @@ declare module "next-auth" {
   }
 }
 
-const KID = "dev-key-1";
-
-// Generated once per process and held here. Restarting apps/web invalidates
-// outstanding sessions, which presents correctly as a 401 and a sign-out.
+// Generated once per PROCESS and cached on globalThis. Restarting apps/web
+// invalidates outstanding sessions, which presents correctly as a 401 and a
+// sign-out.
+//
+// The globalThis cache is load-bearing, not a micro-optimisation. A module
+// constant is per module INSTANCE, and Next's dev server does not guarantee
+// one instance per process: `/api/dev-jwks` and `/api/auth/[...nextauth]` are
+// separate entry points, and a hot reload can leave them holding separate
+// evaluations of this module. Each evaluation ran its own generateKeyPair, so
+// the route that PUBLISHES the public key and the route that SIGNS tokens
+// drifted onto different keypairs — and every sign-in then failed with
+// JWKSNoMatchingKey, permanently, until the web server was restarted.
+//
+// It was viciously misleading to diagnose: it only appears after editing some
+// unrelated file under apps/web, it hits every dev identity at once, it looks
+// exactly like broken auth or a missing seed row, and restarting apps/api
+// appears to fix it (it does not — that only clears a different, secondary
+// staleness). Measured directly: the token carried kid 3V2IMvix… while
+// /api/dev-jwks served AIklSHMs…, from one dev server.
 //
 // generateKeyPair is called with NO second argument — the key is permitted
 // to leave the process in one direction only, as a public JWK below.
@@ -59,15 +74,49 @@ const KID = "dev-key-1";
 // convention: even a future edit that mistakenly reaches for
 // keyPair.privateKey in an export path cannot publish private material,
 // because the runtime itself refuses. See test/dev-identity.test.ts's
-// "refuses to export the private key at all" case.
-const keyPair = await generateKeyPair("RS256");
+// "refuses to export the private key at all" case. Caching the handle on
+// globalThis does not weaken that: what is stored is a non-extractable
+// CryptoKey handle, not key material, and this module is only ever evaluated
+// when AUTH_DEV_BYPASS=true.
+const devKeyCache = globalThis as typeof globalThis & {
+  __irpDevKeyPair?: CryptoKeyPair;
+};
+devKeyCache.__irpDevKeyPair ??= await generateKeyPair("RS256");
+const keyPair = devKeyCache.__irpDevKeyPair;
 
 /** Test-only. Asserting the private key cannot be exported requires a handle to it. */
 export const devKeyPairForTest = keyPair;
 
-export async function devJwks(): Promise<{ keys: JWK[] }> {
-  const jwk = await exportJWK(keyPair.publicKey);
-  return { keys: [{ ...jwk, kid: KID, alg: "RS256", use: "sig" }] };
+const publicJwk = await exportJWK(keyPair.publicKey);
+
+/**
+ * The RFC 7638 thumbprint of the public key, NOT a fixed string.
+ *
+ * The kid was hardcoded to "dev-key-1", which made key identity a lie: any
+ * two keypairs claimed the same id. That mattered twice over. `apps/api`
+ * verifies with `createRemoteJWKSet`, which only refetches a JWKS when it
+ * meets a kid it does not already hold — so a matching-but-stale kid is a
+ * cache hit, and the API kept verifying against a key that no longer existed.
+ * It also hid the keypair split described above behind a signature error
+ * instead of naming it.
+ *
+ * A thumbprint is a pure function of the key material, so a new key is
+ * necessarily a new kid: the API reads it as unknown and refetches (subject
+ * to jose's 30s cooldown) rather than trusting its cache. Do not replace this
+ * with a constant. It is the honest-identity half of the fix; the globalThis
+ * cache above is the half that stops two keys existing at all.
+ */
+const KID = await calculateJwkThumbprint(publicJwk, "sha256");
+
+/**
+ * Returns a Promise despite having nothing left to await: the JWK and its
+ * thumbprint are now computed once at module load rather than per call, but
+ * every caller (the route and the tests) awaits this, and awaiting a
+ * non-thenable is its own lint error. Keeping the contract is cheaper than
+ * churning the call sites for a shape that may need to be async again.
+ */
+export function devJwks(): Promise<{ keys: JWK[] }> {
+  return Promise.resolve({ keys: [{ ...publicJwk, kid: KID, alg: "RS256", use: "sig" }] });
 }
 
 export async function mintDevToken(identity: DevIdentity, audience: string): Promise<string> {
@@ -104,4 +153,4 @@ export function devIdentityProvider(): Provider {
       };
     },
   });
-}
+}
