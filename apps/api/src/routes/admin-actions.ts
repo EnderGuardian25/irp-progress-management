@@ -68,4 +68,30 @@ export const adminActionRoutes: FastifyPluginAsync<{
       };
     },
   );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/v1/users/:id/restore",
+    { schema: { params: UUID_PARAM }, preHandler: [app.authenticate] },
+    async (req): Promise<ApiUserDetail> => {
+      requireAdmin(req);
+      // No SelfRestoreError to mirror archive's SelfArchiveError: archiving
+      // revokes access, so an archived caller cannot authenticate and can
+      // never reach this handler as the target. The asymmetry is deliberate.
+      //
+      // findById is unfiltered by deletedAt, which is what makes the lookup
+      // work at all here — the target IS archived, so a filtered read would
+      // 404 every legitimate restore.
+      const target = await opts.userRepo.findById(req.params.id);
+      if (!target) throw new UserNotFoundError(req.params.id);
+      await opts.userRepo.restore(req.params.id);
+      const restored = await opts.userRepo.findById(req.params.id);
+      return {
+        id: restored!.id,
+        email: restored!.email,
+        displayName: restored!.displayName,
+        role: ROLE_TO_API[restored!.role],
+        archived: restored!.deletedAt !== null,
+      };
+    },
+  );
 };

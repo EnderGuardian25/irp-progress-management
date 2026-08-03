@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createUser, createBatch, transferStudent, archiveUser } from "@irp/client";
+import { createUser, createBatch, transferStudent, archiveUser, restoreUser } from "@irp/client";
 import { apiClient } from "@/lib/api-client";
 
 interface ProblemLike {
@@ -122,6 +122,22 @@ export async function archiveUserAction(userId: string): Promise<{ ok: true } | 
   const client = await apiClient();
   const { error } = await archiveUser({ client, path: { id: userId } });
   if (error !== undefined) return { error: problemMessage(error, "The user was not archived.") };
+  revalidatePath("/students");
+  return { ok: true };
+}
+
+/**
+ * The inverse of archiveUserAction (FR-5), bound the same way.
+ *
+ * `revalidatePath` matters more here than it looks: a restored user has to
+ * disappear from the archive list AND reappear on the active one, and both
+ * live under /students (the archive view is `?view=archived`, the same route).
+ * One revalidation covers both.
+ */
+export async function restoreUserAction(userId: string): Promise<{ ok: true } | { error: string }> {
+  const client = await apiClient();
+  const { error } = await restoreUser({ client, path: { id: userId } });
+  if (error !== undefined) return { error: problemMessage(error, "The user was not restored.") };
   revalidatePath("/students");
   return { ok: true };
 }

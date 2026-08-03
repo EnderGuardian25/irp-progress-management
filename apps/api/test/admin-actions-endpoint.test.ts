@@ -367,5 +367,120 @@ describe.skipIf(!dbUrl)(
       const body = res.json<ProblemLike>();
       expect(body.type).toBe("https://irp.bistec.example/problems/admin-only");
     });
+
+    it("restores an archived user with 200 and archived: false", async () => {
+      await mentor("restore-admin-1");
+      const s = await student("restore-student-1");
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/v1/users/${s.id}`,
+        headers: bearer(await signToken({ oid: "restore-admin-1" })),
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/users/${s.id}/restore`,
+        headers: bearer(await signToken({ oid: "restore-admin-1" })),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json<UserDetailLike>().archived).toBe(false);
+      expect((await prisma.user.findUnique({ where: { id: s.id } }))?.deletedAt).toBeNull();
+    });
+
+    it("returns a restored student to the default listUsers view", async () => {
+      // The round trip is the point: archive hides, restore un-hides. Asserting
+      // only on the restore response would pass even if the list filter and the
+      // deletedAt column ever disagreed.
+      await mentor("restore-admin-2");
+      const s = await student("restore-student-2");
+      const token = bearer(await signToken({ oid: "restore-admin-2" }));
+
+      await app.inject({ method: "DELETE", url: `/api/v1/users/${s.id}`, headers: token });
+      const whileArchived = await app.inject({ method: "GET", url: "/api/v1/users", headers: token });
+      expect(whileArchived.json<{ id: string }[]>().map((u) => u.id)).not.toContain(s.id);
+
+      await app.inject({ method: "POST", url: `/api/v1/users/${s.id}/restore`, headers: token });
+
+      const after = await app.inject({ method: "GET", url: "/api/v1/users", headers: token });
+      expect(after.json<{ id: string }[]>().map((u) => u.id)).toContain(s.id);
+
+      const archivedView = await app.inject({
+        method: "GET",
+        url: "/api/v1/users?archived=true",
+        headers: token,
+      });
+      expect(archivedView.json<{ id: string }[]>().map((u) => u.id)).not.toContain(s.id);
+    });
+
+    it("restores access: the student's own token stops 403ing on /me", async () => {
+      // Archive revokes access by making findByExternalId skip the row. Restore
+      // has to give it back, or a "restored" user is restored in name only.
+      await mentor("restore-admin-3");
+      const s = await student("restore-student-3");
+      const adminToken = bearer(await signToken({ oid: "restore-admin-3" }));
+
+      await app.inject({ method: "DELETE", url: `/api/v1/users/${s.id}`, headers: adminToken });
+      const denied = await app.inject({
+        method: "GET",
+        url: "/api/v1/me",
+        headers: bearer(await signToken({ oid: "restore-student-3" })),
+      });
+      expect(denied.statusCode).toBe(403);
+
+      await app.inject({ method: "POST", url: `/api/v1/users/${s.id}/restore`, headers: adminToken });
+
+      const allowed = await app.inject({
+        method: "GET",
+        url: "/api/v1/me",
+        headers: bearer(await signToken({ oid: "restore-student-3" })),
+      });
+      expect(allowed.statusCode).toBe(200);
+    });
+
+    it("is idempotent: restoring a user who was never archived still 200s and changes nothing", async () => {
+      await mentor("restore-admin-4");
+      const s = await student("restore-student-4");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/users/${s.id}/restore`,
+        headers: bearer(await signToken({ oid: "restore-admin-4" })),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json<UserDetailLike>().archived).toBe(false);
+      expect((await prisma.user.findUnique({ where: { id: s.id } }))?.deletedAt).toBeNull();
+    });
+
+    it("rejects an unknown user id on restore with 404 user-not-found", async () => {
+      await mentor("restore-admin-5");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/users/${UNKNOWN_UUID}/restore`,
+        headers: bearer(await signToken({ oid: "restore-admin-5" })),
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.headers["content-type"]).toContain("application/problem+json");
+      expect(res.json<ProblemLike>().type).toBe(
+        "https://irp.bistec.example/problems/user-not-found",
+      );
+    });
+
+    it("rejects a student token on the restore endpoint with 403 admin-only", async () => {
+      const s = await student("restore-student-6");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/users/${s.id}/restore`,
+        headers: bearer(await signToken({ oid: "restore-student-6" })),
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.json<ProblemLike>().type).toBe("https://irp.bistec.example/problems/admin-only");
+    });
   },
 );

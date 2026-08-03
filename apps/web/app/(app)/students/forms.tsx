@@ -3,7 +3,13 @@
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/ui/section-label";
-import { registerUser, addBatch, transferStudentAction, archiveUserAction } from "./admin-actions";
+import {
+  registerUser,
+  addBatch,
+  transferStudentAction,
+  archiveUserAction,
+  restoreUserAction,
+} from "./admin-actions";
 
 // The shared control treatment lives in app/globals.css's `.control` — the
 // one place --line-strong (the §3.1 control-border token) is set.
@@ -231,6 +237,30 @@ export function ArchiveButton({ userId }: { userId: string }) {
   return (
     <form action={action} className="flex flex-col items-end gap-1">
       <Button type="submit" variant="danger" loading={pending}>Archive</Button>
+      {state !== null && "error" in state && (
+        <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
+          {state.error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+/**
+ * The archive view's counterpart to ArchiveButton (FR-5). Same bound-action
+ * shape, so a failed restore surfaces the API's problem detail rather than
+ * silently doing nothing.
+ *
+ * `quiet`, not `danger`: restoring grants access back and destroys nothing,
+ * so it is the safe direction. It carries no confirmation step for the same
+ * reason — and because re-archiving is one click away if it was a misclick.
+ */
+export function RestoreButton({ userId }: { userId: string }) {
+  const [state, action, pending] = useActionState(restoreUserAction.bind(null, userId), null);
+
+  return (
+    <form action={action} className="flex flex-col items-end gap-1">
+      <Button type="submit" variant="quiet" loading={pending}>Restore</Button>
       {state !== null && "error" in state && (
         <p role="alert" className="text-sm" style={{ color: "var(--st-missed)" }}>
           {state.error}

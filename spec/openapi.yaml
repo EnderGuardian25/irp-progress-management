@@ -907,6 +907,60 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/users/{id}/restore:
+    post:
+      operationId: restoreUser
+      summary: Restore an archived user
+      description: |
+        The inverse of archiveUser (FR-5). Clears the archive flag, so the
+        user regains access and reappears on active rosters. Archiving is a
+        soft delete that keeps all history, so nothing has to be recreated —
+        restoring only makes the existing record active again.
+
+        Idempotent — restoring a user who is not archived is a no-op that
+        returns the user unchanged. Mentor only.
+
+        There is no self-restore case to reject, unlike archiveUser's 409: an
+        archived caller cannot authenticate at all, so they can never be the
+        one making this request.
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user id to restore.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+      responses:
+        '200':
+          description: The restored user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+              examples:
+                restored:
+                  summary: A student, restored to active
+                  value:
+                    id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                    email: a.perera@bistecglobal.com
+                    displayName: Amaya Perera
+                    role: Student
+                    archived: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/daily-reports/{id}/transition:
     post:
       operationId: transitionDailyReport
