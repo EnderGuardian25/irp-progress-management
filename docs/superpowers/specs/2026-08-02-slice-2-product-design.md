@@ -230,6 +230,28 @@ Load/NFR proof stays Plan 11. Nothing in this slice claims NFR-1..6 numbers.
 | **6 — Submission + review flows** | OpenAPI for student + mentor endpoints (§4), handlers, services; shared UI primitives (§5, D8); shell sign-out (D7); student Today; mentor Roster + Review + Students pages; picker expansion; e2e for the flows. | `feat/plan-6-submission-and-review` |
 | **7 — Dashboards** | Dashboard endpoints; mentor Today (FR-28) + Cycles; student My month (FR-29); walkthrough doc; remaining e2e; typography migration audit of every page. | `feat/plan-7-dashboards` |
 
+**Plan 7: delivered on the branch above, not yet merged.** All three dashboard endpoints, both
+new pages (mentor Cycles, student My month), the mentor Today rebuild, `docs/walkthrough.md`,
+`dashboard-flows.spec.ts` (7 tests), and the D8 typography migration audit are complete as of
+Task 12 (this documentation sweep). Task 3's review also found and fixed a real scoring defect —
+`countCycle` was clipping a student's obligation against their whole cross-batch history rather
+than this batch's enrolment interval(s); see `handoff.md` §1 and the docstring in
+`apps/api/src/services/dashboard-service.ts` for the measured before/after. A related gap —
+weekend `extra` is not batch-clipped — ships deliberately, documented at the same site.
+
+**Two contract additions Plan 7 made to §4, beyond what that section originally specified:**
+
+- **`today` was added to `StudentDashboard`.** §4 specified "Month N of 6" and the current-cycle
+  compliance summary for `GET /me/dashboard`; the shipped schema also carries `today`, the
+  student's own classification for the batch's current required day, so the page can render
+  today's status without a second round trip.
+- **`StudentCycleSummary` carries no evaluation field.** §4's `GET
+  /batches/{id}/dashboard/summary` entry says "No scores (none exist yet)" but did not say
+  whether the schema should reserve a field for one. It does not: with D2 keeping all scoring
+  behind O-5, an evaluation field would be permanently `null` in every response this slice can
+  ever produce — dead contract, not a forward-compatible one. Plan 9 adds the field with Plan 9's
+  own operation, per the house rule that a schema and the operation using it land together.
+
 Slice rule (handoff §2a) satisfied: Slice 1 is merged; features land on the proven
 pipeline. Each plan updates `handoff.md` §2a status on merge.
 

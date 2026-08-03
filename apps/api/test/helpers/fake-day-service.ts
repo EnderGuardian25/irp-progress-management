@@ -7,9 +7,11 @@ import type { DayService } from "../../src/services/day-service.js";
  * bug, not a legitimate call path. Same pattern as `unusedEntryRepo`.
  */
 export function unusedDayService(): DayService {
+  const unused = () => {
+    throw new Error("unused: dayService was not expected to be called in this suite");
+  };
   return {
-    listDays: () => {
-      throw new Error("unused: dayService was not expected to be called in this suite");
-    },
+    listDays: unused,
+    listDaysForStudents: unused,
   };
 }

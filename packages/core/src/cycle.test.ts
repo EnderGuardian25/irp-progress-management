@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { civilDate } from "./civil-date.js";
-import { cycleContaining, cycleFor, cycleWorkingDays, firstEvaluatedCycleStart, shiftCycle } from "./cycle.js";
+import {
+  cycleContaining,
+  cycleFor,
+  cycleWorkingDays,
+  firstEvaluatedCycleStart,
+  PROGRAMME_MONTHS,
+  shiftCycle,
+} from "./cycle.js";
 import { isWeekday } from "./weekday.js";
 
 describe("cycleContaining", () => {
@@ -146,5 +153,11 @@ describe("cycleFor", () => {
 
   it("returns null for a date before admission entirely", () => {
     expect(cycleFor(civilDate("2026-07-01"), admission)).toBeNull();
+  });
+});
+
+describe("PROGRAMME_MONTHS", () => {
+  it("is the six-cycle programme length FR-29 reports against", () => {
+    expect(PROGRAMME_MONTHS).toBe(6);
   });
 });

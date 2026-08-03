@@ -26,6 +26,8 @@ export interface AbsenceRepo {
   create(input: { studentId: string; date: CivilDate; reason: string }): Promise<AbsenceRecordShape>;
   remove(studentId: string, date: CivilDate): Promise<AbsenceRecordShape>;
   listForStudent(studentId: string, from: CivilDate, to: CivilDate): Promise<AbsenceRecordShape[]>;
+  /** Batched sibling of listForStudent (ADR-0018). */
+  listForStudents(studentIds: string[], from: CivilDate, to: CivilDate): Promise<AbsenceRecordShape[]>;
 }
 
 export function createAbsenceRepo(prisma: PrismaClient): AbsenceRepo {
@@ -78,6 +80,15 @@ export function createAbsenceRepo(prisma: PrismaClient): AbsenceRepo {
     async listForStudent(studentId, from, to) {
       const rows = await prisma.absenceRecord.findMany({
         where: { studentId, date: { gte: toDbDate(from), lte: toDbDate(to) } },
+        orderBy: { date: "asc" },
+      });
+      return rows.map((r) => ({ id: r.id, studentId: r.studentId, date: fromDbDate(r.date), reason: r.reason }));
+    },
+
+    async listForStudents(studentIds, from, to) {
+      if (studentIds.length === 0) return [];
+      const rows = await prisma.absenceRecord.findMany({
+        where: { studentId: { in: studentIds }, date: { gte: toDbDate(from), lte: toDbDate(to) } },
         orderBy: { date: "asc" },
       });
       return rows.map((r) => ({ id: r.id, studentId: r.studentId, date: fromDbDate(r.date), reason: r.reason }));

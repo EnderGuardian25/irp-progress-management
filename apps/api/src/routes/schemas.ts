@@ -118,6 +118,15 @@ export const TRANSFER_BODY = {
   },
 } as const;
 
+export const CYCLE_QUERY = {
+  type: "object",
+  additionalProperties: false,
+  // The wire (coercing) ajv instance turns the querystring's "2" into a
+  // number here — see validation.ts, and the note in CLAUDE.md about why a
+  // coercing compiler exists for querystrings at all.
+  properties: { cycle: { type: "integer", minimum: 1 } },
+} as const;
+
 export const STUDENT_DATE_PARAM = {
   type: "object",
   required: ["id", "date"],

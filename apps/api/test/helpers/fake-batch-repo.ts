@@ -20,5 +20,7 @@ export function unusedBatchRepo(): BatchRepo {
     firstEnrolmentStart: unused,
     listEnrolments: unused,
     rosterMembers: unused,
+    listEnrolmentsForStudents: unused,
+    enrolmentsInRange: unused,
   };
 }

@@ -13,6 +13,7 @@ import { unusedBatchRepo } from "./helpers/fake-batch-repo.js";
 import { unusedMentorRecordRepo } from "./helpers/fake-mentor-record-repo.js";
 import { unusedDayService } from "./helpers/fake-day-service.js";
 import { unusedRosterService } from "./helpers/fake-roster-service.js";
+import { unusedDashboardService } from "./helpers/fake-dashboard-service.js";
 import { unusedPrisma } from "./helpers/fake-prisma.js";
 import { problemSchema } from "./helpers/problem-schema.js";
 import { getLocalKeySet, signToken, testIssuer, testAudience } from "./helpers/keys.js";
@@ -37,6 +38,7 @@ beforeAll(async () => {
     mentorRecordRepo: unusedMentorRecordRepo(),
     dayService: unusedDayService(),
     rosterService: unusedRosterService(),
+    dashboardService: unusedDashboardService(),
     getKey,
     tracerProvider: createTracerProvider(new InMemorySpanExporter()),
     prisma: unusedPrisma(),

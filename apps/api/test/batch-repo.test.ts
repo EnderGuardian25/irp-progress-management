@@ -126,4 +126,60 @@ describe.skipIf(!dbUrl)("createBatchRepo", () => {
     const s = await student("t-9");
     expect(await repo.listEnrolments(s.id)).toEqual([]);
   });
+
+  it("enrolmentsInRange returns overlapping enrolments with student identity, excluding archived students", async () => {
+    const batch = await repo.create({
+      name: "Batch Range", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09"),
+    });
+    const inside = await prisma.user.create({
+      data: { externalId: "range-inside", email: "range-inside@dev.local", displayName: "Bea", role: "STUDENT" },
+    });
+    const archived = await prisma.user.create({
+      data: {
+        externalId: "range-archived", email: "range-archived@dev.local",
+        displayName: "Ada", role: "STUDENT", deletedAt: new Date(),
+      },
+    });
+    const before = await prisma.user.create({
+      data: { externalId: "range-before", email: "range-before@dev.local", displayName: "Cal", role: "STUDENT" },
+    });
+    await repo.enrol(inside.id, batch.id, civilDate("2026-06-01"));
+    await repo.enrol(archived.id, batch.id, civilDate("2026-06-01"));
+    // Enrolled and gone before the window opens: closed 2026-05-31, window starts 06-10.
+    await repo.enrol(before.id, batch.id, civilDate("2026-05-10"));
+    await prisma.enrolment.updateMany({
+      where: { studentId: before.id },
+      data: { endDate: new Date(Date.UTC(2026, 4, 31)) },
+    });
+
+    const rows = await repo.enrolmentsInRange(batch.id, civilDate("2026-06-10"), civilDate("2026-07-09"));
+
+    expect(rows.map((r) => r.studentId)).toEqual([inside.id]);
+    expect(rows[0]!.displayName).toBe("Bea");
+    expect(rows[0]!.startDate).toBe("2026-06-01");
+    expect(rows[0]!.endDate).toBeNull();
+  });
+
+  it("listEnrolmentsForStudents returns every interval for every id asked for", async () => {
+    const a = await repo.create({
+      name: "Batch Multi A", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09"),
+    });
+    const b = await repo.create({
+      name: "Batch Multi B", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09"),
+    });
+    const mover = await prisma.user.create({
+      data: { externalId: "multi-mover", email: "multi-mover@dev.local", displayName: "Mover", role: "STUDENT" },
+    });
+    const stayer = await prisma.user.create({
+      data: { externalId: "multi-stayer", email: "multi-stayer@dev.local", displayName: "Stayer", role: "STUDENT" },
+    });
+    await repo.enrol(mover.id, a.id, civilDate("2026-05-10"));
+    await repo.transfer(mover.id, b.id, civilDate("2026-06-10"));
+    await repo.enrol(stayer.id, a.id, civilDate("2026-05-10"));
+
+    const rows = await repo.listEnrolmentsForStudents([mover.id, stayer.id]);
+
+    expect(rows.filter((r) => r.studentId === mover.id)).toHaveLength(2);
+    expect(rows.filter((r) => r.studentId === stayer.id)).toHaveLength(1);
+  });
 });

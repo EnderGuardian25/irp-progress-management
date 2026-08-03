@@ -13,6 +13,7 @@ import { registerShutdown } from "./shutdown.js";
 import { createTracerProvider } from "./telemetry.js";
 import { createDayService } from "./services/day-service.js";
 import { createRosterService } from "./services/roster-service.js";
+import { createDashboardService } from "./services/dashboard-service.js";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -32,11 +33,12 @@ await bootstrap({
     const mentorRecordRepo = createMentorRecordRepo(prisma);
     const dayService = createDayService({ entryRepo, absenceRepo, batchRepo });
     const rosterService = createRosterService({ batchRepo, dayService, mentorRecordRepo });
+    const dashboardService = createDashboardService({ batchRepo, dayService });
     const getKey = createRemoteJWKSet(new URL(config.jwksUri));
     const tracerProvider = createTracerProvider(selectSpanExporter(process.env));
     const app = await buildServer({
       config, userRepo, entryRepo, absenceRepo, batchRepo, mentorRecordRepo,
-      dayService, rosterService, getKey, tracerProvider, prisma,
+      dayService, rosterService, dashboardService, getKey, tracerProvider, prisma,
     });
 
     registerShutdown({

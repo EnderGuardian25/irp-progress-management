@@ -43,6 +43,8 @@ tags:
     description: Registration and the user directory. Mentor (Admin) access only; there is no self-registration.
   - name: Reviews
     description: Mentor review of daily reports — forward-only state, attendance records, and the per-student day view.
+  - name: Dashboards
+    description: Derived, read-only summaries — the mentor's batch view (FR-28) and the student's own month (FR-29). Every figure is computed per request; nothing here is stored.
 
 # Fail closed: every operation requires a bearer token unless it explicitly
 # opts out with `security: []`. Without this, an operation that simply omits
@@ -242,6 +244,67 @@ paths:
                       reportId: null
                       absenceReason: null
                       entries: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/me/dashboard:
+    get:
+      operationId: getMyDashboard
+      summary: The caller's own month
+      description: |
+        FR-29: the signed-in student's programme position ("Month N of 6"),
+        their current cycle's day-by-day classification, and that cycle's
+        compliance figures.
+
+        FR-30 by construction: the endpoint takes no student identifier and
+        reads only the caller's own id from the validated token, so no
+        parameter exists that could name another student. It returns no score
+        and no rank. A mentor calling it sees a cycle with no required days
+        of their own — mentors hold no enrolment.
+      tags: [Dashboards]
+      responses:
+        '200':
+          description: The caller's current-cycle dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentDashboard'
+              examples:
+                monthThree:
+                  summary: Month 3 of 6, one worked weekend, no evaluation yet
+                  value:
+                    today: '2026-08-11'
+                    programmeMonths: 6
+                    firstEvaluatedCycleStart: '2026-06-10'
+                    cycle:
+                      seq: 3
+                      startDate: '2026-08-10'
+                      endDate: '2026-09-09'
+                      requiredDayCount: 22
+                    days:
+                      - date: '2026-08-10'
+                        status: onTime
+                      - date: '2026-08-11'
+                        status: late
+                    extraAfter:
+                      - '2026-07-31'
+                    summary:
+                      requiredDays: 22
+                      settledDays: 17
+                      onTime: 13
+                      late: 2
+                      absent: 1
+                      missed: 1
+                      pending: 1
+                      extra: 2
+                      complianceRate: 0.9412
+                    strengthsAndWeaknesses: null
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -473,6 +536,165 @@ paths:
                             isExtra: false
                       hasMentorRecord: false
                       extraCountThisCycle: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches/{id}/dashboard/today:
+    get:
+      operationId: getBatchDashboardToday
+      summary: Today's submission figures for a batch
+      description: |
+        FR-28, the must-ship mentor figure: "N of M submitted" for the batch's
+        current required day, with late, absent and missed counts, plus the
+        per-day series the cycle ribbon renders over the whole current cycle.
+
+        Weekends carry no obligation, so on a Saturday or Sunday the endpoint
+        reports the most recent required day in the cycle and sets
+        `isFallbackDay`. Every figure is derived per request from the same
+        classification the student's own day view uses; nothing is stored.
+        Mentor only.
+      tags: [Dashboards]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The batch id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+      responses:
+        '200':
+          description: The batch's current-cycle dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchTodayDashboard'
+              examples:
+                midCycle:
+                  summary: Day 17 of a 22-day cycle, one weekend worked
+                  value:
+                    batchId: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                    batchName: Batch Aurora
+                    date: '2026-08-03'
+                    isFallbackDay: false
+                    dayNumber: 17
+                    cycle:
+                      seq: 3
+                      startDate: '2026-07-10'
+                      endDate: '2026-08-09'
+                      requiredDayCount: 22
+                    counts:
+                      date: '2026-08-03'
+                      enrolled: 10
+                      submitted: 8
+                      late: 2
+                      absent: 1
+                      missed: 0
+                      pending: 1
+                    extraCount: 3
+                    days:
+                      - date: '2026-08-03'
+                        enrolled: 10
+                        submitted: 8
+                        late: 2
+                        absent: 1
+                        missed: 0
+                        pending: 1
+                    extraAfter:
+                      - '2026-07-31'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/batches/{id}/dashboard/summary:
+    get:
+      operationId: getBatchDashboardSummary
+      summary: Per-student compliance for one cycle
+      description: |
+        One row per student enrolled in the batch at any point during the
+        cycle, with required-day outcomes, weekend Extra, and review progress.
+        Defaults to the current cycle.
+
+        Cycles are addressed by their 1-based sequence within the batch,
+        computed by the domain engine rather than read from the materialised
+        `Cycle` table (ADR-0019). A sequence beyond the current cycle is
+        rejected — a cycle that has not happened has nothing to summarise.
+        No scores: none exist in this slice. Mentor only.
+      tags: [Dashboards]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The batch id.
+          schema:
+            type: string
+            format: uuid
+            examples:
+              - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        - name: cycle
+          in: query
+          required: false
+          description: The cycle's 1-based sequence within the batch. Defaults to the current cycle.
+          schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 2
+      responses:
+        '200':
+          description: The batch's per-student figures for the requested cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchCycleSummary'
+              examples:
+                oneStudent:
+                  summary: A single student, mostly compliant
+                  value:
+                    batchId: 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+                    batchName: Batch Aurora
+                    cycle:
+                      seq: 2
+                      startDate: '2026-06-10'
+                      endDate: '2026-07-09'
+                      requiredDayCount: 22
+                    currentSeq: 4
+                    students:
+                      - student:
+                          id: 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+                          displayName: Amaya Wickramasinghe
+                          email: amaya@dev.local
+                        counts:
+                          requiredDays: 22
+                          settledDays: 17
+                          onTime: 13
+                          late: 2
+                          absent: 1
+                          missed: 1
+                          pending: 1
+                          extra: 2
+                          complianceRate: 0.9412
+                        reviewProgress:
+                          submitted: 4
+                          inReview: 3
+                          evaluated: 10
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1508,6 +1730,434 @@ components:
           description: Weekend Extra entries inside the cycle containing the roster date. A count, not a status — Extra is not a compliance state.
           examples:
             - 2
+
+    CycleView:
+      type: object
+      title: CycleView
+      description: |
+        Which evaluation cycle a dashboard describes. Bounds are the fixed
+        10th-to-9th calendar window (FR-9). `seq`'s anchor depends on the
+        endpoint: for the two batch dashboards
+        (`GET /batches/{id}/dashboard/today`, `GET /batches/{id}/dashboard/summary`)
+        it is the BATCH's own 1-based numbering, anchored on the batch's first
+        evaluated cycle (ADR-0019); for `GET /me/dashboard` it is anchored on
+        the CALLER's own first enrolment instead, deliberately, so
+        "Month N of 6" survives a transfer between batches. `null` means a
+        different thing at each anchor — see `seq` below.
+      required: [seq, startDate, endDate, requiredDayCount]
+      additionalProperties: false
+      properties:
+        seq:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: |
+            The cycle's 1-based position. For `GET /batches/{id}/dashboard/today`
+            and `GET /batches/{id}/dashboard/summary` this is the BATCH's own
+            numbering, null when the batch's first evaluated cycle has not
+            opened yet (FR-27). For `GET /me/dashboard` this is instead
+            anchored on the CALLER's own first enrolment — null there means
+            the caller has never been enrolled at all, not that a batch
+            hasn't started.
+          examples:
+            - 3
+        startDate:
+          type: string
+          format: date
+          description: First day of the cycle, inclusive — always a 10th.
+          examples:
+            - '2026-07-10'
+        endDate:
+          type: string
+          format: date
+          description: Last day of the cycle, inclusive — always a 9th.
+          examples:
+            - '2026-08-09'
+        requiredDayCount:
+          type: integer
+          minimum: 0
+          description: Weekdays in the cycle. Weekends are excluded — they carry no obligation and never enter a denominator (FR-12).
+          examples:
+            - 22
+
+    DayCompliance:
+      type: object
+      title: DayCompliance
+      description: |
+        One required day, counted across a batch. `submitted` includes late
+        submissions — a late entry is still submitted — and `late` reports how
+        many of them were. Extra (weekend) work never appears here (FR-12/FR-33).
+        Days nobody has reached yet report `enrolled` with every other count at
+        zero.
+      required: [date, enrolled, submitted, late, absent, missed, pending]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The required day (Asia/Colombo).
+          examples:
+            - '2026-08-03'
+        enrolled:
+          type: integer
+          minimum: 0
+          description: Students enrolled in the batch on this day — the "M" in "N of M".
+          examples:
+            - 10
+        submitted:
+          type: integer
+          minimum: 0
+          description: Students with at least one entry for this day, late included — the "N" in "N of M".
+          examples:
+            - 8
+        late:
+          type: integer
+          minimum: 0
+          description: How many of the submissions landed after the day ended but inside grace (FR-13).
+          examples:
+            - 2
+        absent:
+          type: integer
+          minimum: 0
+          description: Students who explicitly recorded an absence with a reason (FR-16).
+          examples:
+            - 1
+        missed:
+          type: integer
+          minimum: 0
+          description: Students with no entry and no absence, past the grace window (FR-14). Final.
+          examples:
+            - 0
+        pending:
+          type: integer
+          minimum: 0
+          description: Students with nothing recorded whose grace window is still open. Not yet a miss.
+          examples:
+            - 1
+
+    BatchTodayDashboard:
+      type: object
+      title: BatchTodayDashboard
+      description: |
+        FR-28's answer for one batch: today's "N of M submitted" with late and
+        absent counts, plus the whole cycle's per-day series that the cycle
+        ribbon renders. `counts` is `days` entry for `date` — repeated at the
+        top level so the required figures are first-class rather than something
+        the client has to find.
+      required: [batchId, batchName, date, isFallbackDay, dayNumber, cycle, counts, extraCount, days, extraAfter]
+      additionalProperties: false
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          description: The batch this dashboard describes.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        batchName:
+          type: string
+          description: The batch's display name.
+          examples:
+            - Batch Aurora
+        date:
+          type: string
+          format: date
+          description: The required day being reported — today when today is a weekday, otherwise the most recent required day in this cycle.
+          examples:
+            - '2026-08-03'
+        isFallbackDay:
+          type: boolean
+          description: True when `date` is not today — a weekend, or a cycle that opened on one. The interface must label the figures as belonging to an earlier day rather than presenting them as today's.
+          examples:
+            - false
+        dayNumber:
+          type: integer
+          minimum: 1
+          description: Position of `date` among the cycle's required days, 1-based — the "Day 12 of 22" figure.
+          examples:
+            - 17
+        cycle:
+          $ref: '#/components/schemas/CycleView'
+        counts:
+          $ref: '#/components/schemas/DayCompliance'
+        extraCount:
+          type: integer
+          minimum: 0
+          description: Weekend Extra entries recorded anywhere in this cycle by this batch (FR-33). A count, never a compliance state.
+          examples:
+            - 3
+        days:
+          type: array
+          description: Every required day in the cycle, earliest first. Weekends are absent by construction.
+          items:
+            $ref: '#/components/schemas/DayCompliance'
+        extraAfter:
+          type: array
+          description: Required days immediately preceding a weekend somebody actually worked. The ribbon draws a half-width Extra slot after each (FR-33).
+          items:
+            type: string
+            format: date
+          examples:
+            - ['2026-07-31']
+
+    CycleCounts:
+      type: object
+      title: CycleCounts
+      description: |
+        One student's required-day outcomes over one cycle. Denominators count
+        required days only (FR-12); `extra` is weekend entries and is reported
+        beside them, never inside them (FR-33).
+
+        `complianceRate` divides accounted-for days (on time + late + absent)
+        by SETTLED days — those whose outcome is final. Days still inside the
+        grace window and days not yet reached are in neither side, so the rate
+        does not dip merely because the afternoon is young. Absence counts as
+        accounted-for: it is recorded with a reason and carries no penalty
+        (assumption O-7).
+      required: [requiredDays, settledDays, onTime, late, absent, missed, pending, extra, complianceRate]
+      additionalProperties: false
+      properties:
+        requiredDays:
+          type: integer
+          minimum: 0
+          description: Weekdays in the cycle the student was enrolled for. Fewer than the cycle's total for a mid-cycle joiner or a transfer (FR-27).
+          examples:
+            - 22
+        settledDays:
+          type: integer
+          minimum: 0
+          description: Required days whose outcome is final — on time, late, absent or missed.
+          examples:
+            - 17
+        onTime:
+          type: integer
+          minimum: 0
+          description: Required days submitted before the day ended.
+          examples:
+            - 13
+        late:
+          type: integer
+          minimum: 0
+          description: Required days submitted after the day ended but inside grace (FR-13).
+          examples:
+            - 2
+        absent:
+          type: integer
+          minimum: 0
+          description: Weekdays explicitly marked absent with a reason (FR-16).
+          examples:
+            - 1
+        missed:
+          type: integer
+          minimum: 0
+          description: Weekdays with no entry and no absence, past grace (FR-14).
+          examples:
+            - 1
+        pending:
+          type: integer
+          minimum: 0
+          description: Required days with nothing recorded whose grace window is still open.
+          examples:
+            - 1
+        extra:
+          type: integer
+          minimum: 0
+          description: Weekend entries in the cycle (FR-33). Never required, never penalised by its absence, never in a denominator.
+          examples:
+            - 2
+        complianceRate:
+          oneOf:
+            - type: number
+              minimum: 0
+              maximum: 1
+            - type: 'null'
+          description: Accounted-for settled days as a fraction, rounded to four decimals. Null when no day has settled yet — render a dash, not a zero.
+          examples:
+            - 0.9412
+
+    ReviewProgress:
+      type: object
+      title: ReviewProgress
+      description: The student's daily reports in this cycle by review state (FR-18). Forward-only; there is no Rejected state.
+      required: [submitted, inReview, evaluated]
+      additionalProperties: false
+      properties:
+        submitted:
+          type: integer
+          minimum: 0
+          description: Reports awaiting a mentor's first look.
+          examples:
+            - 4
+        inReview:
+          type: integer
+          minimum: 0
+          description: Reports a mentor has opened but not finished.
+          examples:
+            - 3
+        evaluated:
+          type: integer
+          minimum: 0
+          description: Reports finished and locked for the student (FR-20).
+          examples:
+            - 10
+
+    StudentCycleSummary:
+      type: object
+      title: StudentCycleSummary
+      description: |
+        One enrolled student's cycle at a glance, for the mentor's Cycles view.
+        Carries no score and no rank — no evaluation exists in this slice
+        (O-5 blocks the AI provider decision), so the interface renders an
+        "awaiting evaluation" state rather than the API returning an always-null
+        field.
+      required: [student, counts, reviewProgress]
+      additionalProperties: false
+      properties:
+        student:
+          type: object
+          description: The enrolled student.
+          required: [id, displayName, email]
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: User id.
+              examples:
+                - 3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8
+            displayName:
+              type: string
+              description: Name as shown in the interface.
+              examples:
+                - Amaya Wickramasinghe
+            email:
+              type: string
+              format: email
+              description: Bistec account email.
+              examples:
+                - amaya@dev.local
+        counts:
+          $ref: '#/components/schemas/CycleCounts'
+        reviewProgress:
+          $ref: '#/components/schemas/ReviewProgress'
+
+    BatchCycleSummary:
+      type: object
+      title: BatchCycleSummary
+      description: Every student enrolled in a batch during one cycle, with that cycle's compliance figures.
+      required: [batchId, batchName, cycle, currentSeq, students]
+      additionalProperties: false
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          description: The batch summarised.
+          examples:
+            - 9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b
+        batchName:
+          type: string
+          description: The batch's display name.
+          examples:
+            - Batch Aurora
+        cycle:
+          $ref: '#/components/schemas/CycleView'
+        currentSeq:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: |
+            The batch's CURRENT cycle sequence — the highest sequence that has
+            actually started — independent of which cycle `cycle.seq`
+            describes. A client uses this to render a complete cycle picker
+            (1..currentSeq) no matter which cycle was requested, so browsing
+            to an earlier cycle does not strand the picker without a way back
+            to the present. Null when the batch's first evaluated cycle has
+            not opened yet (ADR-0019), in which case there is no cycle to pick
+            from at all.
+          examples:
+            - 4
+        students:
+          type: array
+          description: One row per student enrolled at any point in the cycle, ordered by display name.
+          items:
+            $ref: '#/components/schemas/StudentCycleSummary'
+
+    StudentDay:
+      type: object
+      title: StudentDay
+      description: One required day in the student's own month view. Weekends never appear — worked weekends are reported through `extraAfter` instead (FR-33).
+      required: [date, status]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: The required day (Asia/Colombo).
+          examples:
+            - '2026-08-03'
+        status:
+          $ref: '#/components/schemas/DayStatus'
+
+    StudentDashboard:
+      type: object
+      title: StudentDashboard
+      description: |
+        The caller's own month (FR-29). Carries no score, no rank, and no other
+        student's data anywhere (FR-30) — and takes no student identifier, so
+        there is no parameter to tamper with.
+
+        `strengthsAndWeaknesses` is null until an evaluation exists for the
+        student. None do in this release: O-5 blocks the AI provider decision,
+        so the interface renders a designed empty state rather than an
+        apologetic blank.
+      required: [today, programmeMonths, firstEvaluatedCycleStart, cycle, days, extraAfter, summary, strengthsAndWeaknesses]
+      additionalProperties: false
+      properties:
+        today:
+          type: string
+          format: date
+          description: The server's current civil date in Asia/Colombo. Supplied so the interface can ring today on the ribbon without deriving a timezone-sensitive date in the browser — a browser in another zone would ring the wrong bar.
+          examples:
+            - '2026-08-03'
+        programmeMonths:
+          type: integer
+          minimum: 1
+          description: Programme length in evaluation cycles — the "of 6" in "Month N of 6".
+          examples:
+            - 6
+        firstEvaluatedCycleStart:
+          oneOf:
+            - type: string
+              format: date
+            - type: 'null'
+          description: The first cycle the student is evaluated for, from their earliest enrolment (FR-27). Null when the caller has never been enrolled.
+          examples:
+            - '2026-06-10'
+        cycle:
+          $ref: '#/components/schemas/CycleView'
+        days:
+          type: array
+          description: Every required day in the current cycle, earliest first, with the student's own classification.
+          items:
+            $ref: '#/components/schemas/StudentDay'
+        extraAfter:
+          type: array
+          description: Required days immediately preceding a weekend this student worked (FR-33).
+          items:
+            type: string
+            format: date
+          examples:
+            - ['2026-07-31']
+        summary:
+          $ref: '#/components/schemas/CycleCounts'
+        strengthsAndWeaknesses:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: The latest evaluation's prose summary. Null until the student's first cycle has been evaluated.
+          examples:
+            - null
 
     TransitionRequest:
       type: object

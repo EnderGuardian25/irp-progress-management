@@ -14,5 +14,6 @@ export function unusedAbsenceRepo(): AbsenceRepo {
     create: unused,
     remove: unused,
     listForStudent: unused,
+    listForStudents: unused,
   };
 }

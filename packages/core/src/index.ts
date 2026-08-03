@@ -22,6 +22,7 @@ export {
   cycleFor,
   cycleWorkingDays,
   firstEvaluatedCycleStart,
+  PROGRAMME_MONTHS,
   shiftCycle,
   type Cycle,
   type CycleBounds,

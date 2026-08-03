@@ -179,4 +179,50 @@ describe.skipIf(!dbUrl)("createDayService", () => {
     expect(byDate.get(joinDate)!.status).toBe("missed");
     expect(byDate.get(THU_MISSED)!.status).toBe("missed");
   });
+
+  it("listDaysForStudents classifies every requested student in one pass", async () => {
+    const batch = await batchRepo.create({
+      name: "Batch Batched", startDate: civilDate("2026-05-10"), endDate: civilDate("2026-11-09"),
+    });
+    const one = await prisma.user.create({
+      data: { externalId: "batched-1", email: "batched-1@dev.local", displayName: "One", role: "STUDENT" },
+    });
+    const two = await prisma.user.create({
+      data: { externalId: "batched-2", email: "batched-2@dev.local", displayName: "Two", role: "STUDENT" },
+    });
+    await batchRepo.enrol(one.id, batch.id, civilDate("2026-05-10"));
+    await batchRepo.enrol(two.id, batch.id, civilDate("2026-05-10"));
+    // 2026-06-01 is a Monday. One submits on time; Two submits nothing.
+    await entryRepo.addEntry({
+      studentId: one.id,
+      entryDate: civilDate("2026-06-01"),
+      body: "Batched read fixture entry.",
+      submittedAt: colomboInstant(civilDate("2026-06-01"), "10:00"),
+    });
+    const now = colomboInstant(civilDate("2026-06-15"), "10:00");
+
+    const batched = await service.listDaysForStudents(
+      [one.id, two.id], civilDate("2026-06-01"), civilDate("2026-06-05"), now,
+    );
+
+    expect([...batched.keys()].sort()).toEqual([one.id, two.id].sort());
+    expect(batched.get(one.id)).toHaveLength(5);
+    expect(batched.get(one.id)![0]!.status).toBe("onTime");
+    expect(batched.get(two.id)![0]!.status).toBe("missed");
+
+    // Finding 5, Plan 7 whole-branch review: this test used to close with
+    // `expect(batched.get(id)).toEqual(await service.listDays(id, ...))` for
+    // each student, framed as proving `listDaysForStudents` "agrees with"
+    // `listDays`. That could never fail: `listDays` (day-service.ts) IS
+    // `listDaysForStudents([studentId], ...).get(studentId)` -- one
+    // implementation, not two independent ones to cross-check. No coverage is
+    // lost by removing it: `listDays`'s own behaviour is already covered
+    // directly, with richer fixtures, by the three tests above this one.
+  });
+
+  it("listDaysForStudents returns an empty map for an empty id list, without querying", async () => {
+    const now = colomboInstant(civilDate("2026-06-15"), "10:00");
+    const batched = await service.listDaysForStudents([], civilDate("2026-06-01"), civilDate("2026-06-05"), now);
+    expect(batched.size).toBe(0);
+  });
 });
