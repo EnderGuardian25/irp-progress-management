@@ -3,14 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { Topbar } from "@/components/app-frame/topbar";
 import { Sidebar } from "@/components/app-frame/sidebar";
 
-// Topbar now imports signOut from @/auth for its sign-out form. Real
-// next-auth (pulled in transitively via @/auth) needs `next/server`, which
-// isn't resolvable under Vitest's environment — mock the app's thin wrapper,
-// same as signin.test.tsx does for NotRegisteredPage. The inline `"use
-// server"` action is asserted by presence, never invoked.
-vi.mock("@/auth", () => ({
-  signOut: vi.fn(),
-}));
+// No `@/auth` mock here: sign-out moved to the sidebar (O-15) as a
+// `signOutSlot` the SERVER layout builds and passes down — neither Topbar
+// nor Sidebar imports `@/auth` themselves, so there is nothing left in this
+// file for such a mock to intercept.
 
 // Sidebar became a Client Component to read usePathname — that is the only
 // way it can know which destination is current, since a layout does not
@@ -34,10 +30,10 @@ describe("Topbar", () => {
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
   });
 
-  it("offers a sign-out control", () => {
-    render(<Topbar userName="A" />);
-    expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
-  });
+  // Sign-out moved out of the Topbar and into the Sidebar (O-15): it is no
+  // longer this component's control to offer. Coverage that the app frame
+  // offers sign-out now lives on Sidebar — see "renders whatever sign-out
+  // slot the server layout hands it" in test/sidebar.test.tsx.
 });
 
 describe("Sidebar", () => {

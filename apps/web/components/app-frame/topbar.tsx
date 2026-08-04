@@ -1,5 +1,3 @@
-import { signOut } from "@/auth";
-import { Button } from "@/components/ui/button";
 import { BrandMark } from "./brand-mark";
 
 /**
@@ -7,8 +5,11 @@ import { BrandMark } from "./brand-mark";
  * `--surface` — docs/design-system.md §6. Desktop only (NFR-13); no mobile
  * treatment is provided.
  *
- * Server Component (no "use client"), so the inline `"use server"` sign-out
- * action below is valid here without any extra wiring.
+ * Still a Server Component (no "use client") — nothing here needs
+ * client-side interactivity. Sign out moved to the sidebar (O-15): it is
+ * built as a form in `app/(app)/layout.tsx`, the actual Server Component
+ * that owns the inline `"use server"` action, and passed down as a slot. Do
+ * not restore a sign-out control here.
  *
  * §6's frame sketches a `Batch 12 ▾` switcher in this bar. It is deliberately
  * absent: `User` (spec/openapi.yaml) carries no batch, a mentor holds several
@@ -36,14 +37,6 @@ export function Topbar({ userName }: { userName: string }) {
 
       <div className="flex items-center gap-6">
         <span style={{ color: "var(--ink)" }}>{userName}</span>
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/signin" });
-          }}
-        >
-          <Button type="submit" variant="quiet">Sign out</Button>
-        </form>
       </div>
     </header>
   );

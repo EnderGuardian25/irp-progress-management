@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Route } from "next";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   TodayIcon, RosterIcon, ReviewIcon, CyclesIcon, StudentsIcon, SettingsIcon,
 } from "@/components/ui/icons";
@@ -94,9 +94,17 @@ function isActive(pathname: string, href: Route): boolean {
 export function Sidebar({
   role,
   reviewCount = 0,
+  signOutSlot,
 }: {
   role: "Admin" | "Student";
   reviewCount?: number;
+  /**
+   * The sign-out form, rendered by the SERVER layout and passed in. This
+   * component is a Client Component (usePathname), and `signOut` from
+   * `@/auth` is server-side — importing it here would be a build error. A
+   * ReactNode slot keeps the existing inline `"use server"` action intact.
+   */
+  signOutSlot?: ReactNode;
 }) {
   const destinations = role === "Admin" ? MENTOR_DESTINATIONS : STUDENT_DESTINATIONS;
   // usePathname is why this is a client component. The alternative — threading
@@ -175,6 +183,7 @@ export function Sidebar({
           <SettingsIcon />
           {SETTINGS_DESTINATION.label}
         </Link>
+        {signOutSlot}
       </div>
     </nav>
   );

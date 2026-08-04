@@ -88,4 +88,28 @@ describe("Sidebar Settings entry", () => {
       expect(svg.getAttribute("stroke")).toBe("currentColor");
     }
   });
+
+  it("renders whatever sign-out slot the server layout hands it", () => {
+    render(
+      <Sidebar role="Admin" signOutSlot={<button type="submit">Sign out</button>} />,
+    );
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("puts the sign-out slot in the bottom group, AFTER Settings", () => {
+    render(
+      <Sidebar role="Admin" signOutSlot={<button type="submit">Sign out</button>} />,
+    );
+    const settings = screen.getByRole("link", { name: "Settings" });
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const wrapper = settings.parentElement!;
+    // Same wrapper, and Settings first. DOCUMENT_POSITION_FOLLOWING === 4.
+    expect(wrapper.contains(signOut)).toBe(true);
+    expect(settings.compareDocumentPosition(signOut) & 4).toBeTruthy();
+  });
+
+  it("renders nothing extra when no slot is supplied", () => {
+    render(<Sidebar role="Admin" />);
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
 });
