@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { addDays, compareDates, cycleContaining, dayOfWeek, toProgrammeDate } from "@irp/core";
+import { SEED_BATCH_NAMES } from "@irp/fixtures";
 import {
   dayPanelByHiddenDate,
   dayPanelByLabel,
@@ -46,10 +47,11 @@ test.describe("mentor flows (dev-admin-1)", () => {
     await signInAsMentor(page);
     await page.goto("/roster");
 
-    // Batches list startDate-ascending (batch-repo.ts's `list()`), and Batch
-    // Aurora (Batch A) started two cycles before Batch Basalt, so it is
-    // already the default selection.
-    await expect(page.getByRole("link", { name: "Batch Aurora", exact: true })).toHaveAttribute(
+    // Batches list startDate-ascending (batch-repo.ts's `list()`), and batch
+    // A started two cycles before batch B, so it is already the default
+    // selection. Asserted via SEED_BATCH_NAMES rather than a literal: the
+    // ordering is what this checks, and it must not re-break on a rename.
+    await expect(page.getByRole("link", { name: SEED_BATCH_NAMES.A, exact: true })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -75,7 +77,7 @@ test.describe("mentor flows (dev-admin-1)", () => {
       );
     }
 
-    await switchToBatch(page, "Batch Basalt");
+    await switchToBatch(page, SEED_BATCH_NAMES.B);
     await page.getByLabel("Date").fill(lastSaturday);
     await page.getByRole("button", { name: "Go" }).click();
 
@@ -99,7 +101,8 @@ test.describe("mentor flows (dev-admin-1)", () => {
           "count exists yet to assert against.",
       );
     }
-    expect(extraText).toMatch(/^\+\d+ extra$/);
+    // Bare "+N" -- the column header ("Extra (cycle)") carries the word.
+    expect(extraText).toMatch(/^\+\d+$/);
   });
 
   test("roster -> review -> record -> transition -> lock, over the mixed persona's first Submitted day", async ({
@@ -107,7 +110,7 @@ test.describe("mentor flows (dev-admin-1)", () => {
   }) => {
     await signInAsMentor(page);
     await page.goto("/roster");
-    await switchToBatch(page, "Batch Basalt");
+    await switchToBatch(page, SEED_BATCH_NAMES.B);
 
     const chamodiRow = page.locator("table tbody tr").filter({ hasText: "Chamodi Herath" });
     await chamodiRow.getByRole("link", { name: "Review" }).click();
@@ -190,7 +193,7 @@ test.describe("mentor flows (dev-admin-1)", () => {
     reseed();
   });
 
-  test("registers a throwaway Batch Basalt student, sees them on the roster, then archives them", async ({
+  test("registers a throwaway batch-B student, sees them on the roster, then archives them", async ({
     page,
   }) => {
     await signInAsMentor(page);
@@ -209,14 +212,14 @@ test.describe("mentor flows (dev-admin-1)", () => {
     // insensitive) makes "Batch" match CreateBatchForm's "Batch name"/"Batch
     // start date"/"Batch end date" too, and "Start date" matches "Batch
     // start date" the same way -- both are strict-mode violations without it.
-    await page.getByLabel("Batch", { exact: true }).selectOption({ label: "Batch Basalt" });
+    await page.getByLabel("Batch", { exact: true }).selectOption({ label: SEED_BATCH_NAMES.B });
     await page.getByLabel("Start date", { exact: true }).fill(today);
     await page.getByRole("button", { name: "Register" }).click();
     await expect(page.getByText("Registered.")).toBeVisible();
     await expect(page.locator("li").filter({ hasText: displayName })).toBeVisible();
 
     await page.goto("/roster");
-    await switchToBatch(page, "Batch Basalt");
+    await switchToBatch(page, SEED_BATCH_NAMES.B);
     await expect(page.getByText(displayName)).toBeVisible();
 
     // externalId here is NOT in SEED_EXTERNAL_IDS (@irp/fixtures), so

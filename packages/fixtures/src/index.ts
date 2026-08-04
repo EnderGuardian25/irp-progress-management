@@ -32,7 +32,13 @@ export interface SeedStudent {
   kind: PersonaKind;
 }
 
-export const SEED_BATCH_NAMES = { A: "Batch Aurora", B: "Batch Basalt" } as const;
+// Positional names, and the seed is the only thing that creates them. `A`/`B`
+// remain the code-side keys — a batch's NAME is mentor-supplied at runtime and
+// carries no ordering, so nothing may infer "first"/"second" from these
+// strings. Prefer importing this constant over writing the literals: the
+// 2026-08-04 rename from "Batch Aurora"/"Batch Basalt" had to touch the
+// Playwright suite in five places precisely because they were hardcoded.
+export const SEED_BATCH_NAMES = { A: "Batch 1", B: "Batch 2" } as const;
 
 // dev-admin-1 / dev-student-1 keep their historical externalIds: the
 // Playwright suite and CI's seeded users predate this package, and identity
