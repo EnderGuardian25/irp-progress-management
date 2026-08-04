@@ -60,13 +60,46 @@ A small post-Plan-7 slice, not a plan of its own. Three things, plus two defects
   mid-seed — the wipe commits, the rebuild is cut off, and the next four tests assert against a
   half-seeded database, so **one timeout presents as four unrelated failures**. Both tests now
   carry the 120s budget the file already used. Same trap as Playwright's default timeout.
-- **Open, not diagnosed:** `mentor-flows.spec.ts`'s "roster -> review -> record -> transition ->
-  lock" failed once in a full suite run, then passed in isolation and passed 24/24 on a full re-run
-  from a fresh seed. It walks a report to Evaluated, which is irreversible, so it is inherently
-  state-sensitive. Not reproduced; watch it in CI.
+### 2026-08-04 (later) — the ribbon key, and the Playwright worker-count defect
 
-Verified: typecheck 6/6 · core 113 · api 269 · web 198 · eslint clean · `next build` 12 routes ·
-Playwright 24/24.
+- **`RibbonKey`** — a collapsed `<details>` key for the mentor dashboard's cycle ribbon, rendered
+  once below all batch sections. Names all eight marks and states the aggregation rule, which is
+  the reason it exists: a mentor's bar is the **worst** outcome in the batch that day, so a red bar
+  means at least one student missed, not that all did. **ADR-0020**, and a note in
+  design-system §7. Mentor-only — the same colours mean a student's own status on their ribbon,
+  where "at least one student" is nonsense.
+  - Its swatches import `MARK_COLOR` from `cycle-ribbon.tsx` rather than re-declaring the tokens.
+    `counts-row.tsx` records why: the status vocabulary reached four separate inline definitions
+    before it was consolidated.
+  - **The first version shipped an unreadable key past its own green tests.** At a 16px swatch
+    track a 55% `partial` fill was indistinguishable from a full `ok` bar, and the `today` ring had
+    no room to clear its outline offset — so three of eight swatches looked identical. The tests
+    assert text and colour values, which cannot catch that. Track is now 20px with 3px horizontal
+    clearance. **Look at the render.**
+
+- **`playwright.config.ts` now pins `workers: 1`, and this is the diagnosis of the flake the entry
+  above logged as unreproducible.** `fullyParallel: false` orders tests *within* a file; it does
+  **not** stop Playwright distributing *files* across workers. That is `workers`, and its default
+  is 1 **only when `process.env.CI` is set** — otherwise half the logical cores. The same config
+  therefore ran **1 worker in CI and 4 on the dev machine**, confirmed from the CI job log
+  ("Running 24 tests using 1 worker") against a local run reporting 4.
+
+  All four spec files share one Postgres database and one dev server and they mutate it:
+  `student-flows` submits an entry and marks an absence for today, `dashboard-flows` asserts
+  today's counts and cross-reads the Roster for the same day, and `mentor-flows`' archive test
+  calls `reseed()` — a full `db:seed` that wipes and rebuilds every persona **mid-run**. A reseed
+  in one worker while another is mid-assertion is not tunable; the shared fixture is the design.
+
+  Measured on one commit against a freshly seeded database: **24/24, then 23/24, then 19/24**, while
+  CI stayed green because CI was serial. After pinning: three consecutive local runs, 24/24 each.
+  **A gate that only fails where nobody is watching is the worst kind** — it teaches the reader to
+  re-run rather than to read. Do not raise `workers` to speed the suite up; serial costs ~2 minutes.
+
+Verified: typecheck 6/6 · core 113 · api 269 · web 203 · eslint clean · `next build` 12 routes ·
+Playwright 24/24 ×3 consecutive.
+
+Verified for the entry above: typecheck 6/6 · core 113 · api 269 · web 198 · eslint clean ·
+`next build` 12 routes · Playwright 24/24.
 
 ### 2026-07-29 — Plan 3
 
