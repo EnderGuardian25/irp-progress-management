@@ -6,13 +6,7 @@ import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
 import { EmptyState } from "@/components/ui/empty-state";
-import {
-  RegisterForm,
-  CreateBatchForm,
-  TransferForm,
-  ArchiveButton,
-  RestoreButton,
-} from "./forms";
+import { TransferForm, ArchiveButton, RestoreButton } from "./forms";
 
 /**
  * The mentor's directory of people and batches (FR-3, FR-5, FR-6, FR-8).
@@ -20,7 +14,11 @@ import {
  * gate -- a Student hitting this route is bounced to "/" rather than shown
  * a 403 page.
  *
- * `?view=archived` renders the FR-5 archive list instead of the four working
+ * Register and Create batch moved to Settings (ADR-0022) -- this page is the
+ * management surface for people and batches that already exist, not where
+ * they're created.
+ *
+ * `?view=archived` renders the FR-5 archive list instead of the two working
  * panels -- names, emails, and a Restore control per row. It carries no other
  * actions: everything else (transfer, re-registration) needs an active user.
  */
@@ -87,10 +85,11 @@ export default async function StudentsPage({
     );
   }
 
-  // The default view's four panels (Register, Create batch, Transfer,
-  // People) all draw from the same two reads -- every active (non-archived,
-  // the default) user and every batch -- rather than each panel issuing its
-  // own request.
+  // The default view's two panels (Transfer, People) both draw from the same
+  // two reads -- every active (non-archived, the default) user and every
+  // batch -- rather than each panel issuing its own request. Register and
+  // Create batch moved to Settings (ADR-0022); `batches` is still read here
+  // because Transfer needs its options.
   const [{ data: batches, error: batchesError }, { data: users, error: usersError }] =
     await Promise.all([
       listBatches({ client }),
@@ -123,20 +122,6 @@ export default async function StudentsPage({
 
       <div className="grid grid-cols-2 gap-6">
         <Panel>
-          <SectionLabel>Register</SectionLabel>
-          <div className="mt-3">
-            <RegisterForm batches={batchOptions} />
-          </div>
-        </Panel>
-
-        <Panel>
-          <SectionLabel>Create batch</SectionLabel>
-          <div className="mt-3">
-            <CreateBatchForm />
-          </div>
-        </Panel>
-
-        <Panel>
           <SectionLabel>Transfer</SectionLabel>
           <div className="mt-3">
             {studentOptions.length === 0 || batchOptions.length === 0 ? (
@@ -156,7 +141,10 @@ export default async function StudentsPage({
           </div>
           <div className="mt-3">
             {usersError !== undefined ? null : (users === undefined || users.length === 0) ? (
-              <EmptyState title="No one registered yet." hint="Use Register to add the first mentor or student." />
+              <EmptyState
+                title="No one registered yet."
+                hint="Register the first mentor or student from Settings."
+              />
             ) : (
               <ul className="flex flex-col gap-2">
                 {users.map((u) => (

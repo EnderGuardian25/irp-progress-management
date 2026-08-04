@@ -13,12 +13,13 @@ const { getCurrentUserOrRedirect, apiClient } = vi.hoisted(() => ({
 vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
 
 // admin-actions.ts (unmocked -- exercised for real, same as review-page.test's
-// treatment of review-actions.ts) calls createUser/createBatch/
-// transferStudent/archiveUser/restoreUser; page.tsx itself calls
-// listBatches/listUsers. All seven are mocked here so the whole tree -- page,
-// RegisterForm, CreateBatchForm, TransferForm, ArchiveButton, RestoreButton,
-// and the server actions underneath them -- runs without a real client or
-// network access.
+// treatment of review-actions.ts) imports createUser/createBatch/
+// transferStudent/archiveUser/restoreUser as a single module; page.tsx itself
+// calls listBatches/listUsers. All seven are mocked here so the whole tree
+// runs without a real client or network access -- createUser and createBatch
+// stay mocked even though RegisterForm and CreateBatchForm no longer render
+// on this page (ADR-0022, they moved to Settings), because admin-actions.ts's
+// module-level import still pulls both names out of @irp/client.
 const {
   listBatches,
   listUsers,
@@ -117,20 +118,44 @@ describe("StudentsPage", () => {
     expect(listBatches).not.toHaveBeenCalled();
   });
 
-  it("renders all four panels in the default view", async () => {
+  it("no longer carries Register or Create batch — they live in Settings now (ADR-0022)", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
-    defaultReads();
+    listBatches.mockResolvedValue({ data: [BATCH], error: undefined });
+    listUsers.mockResolvedValue({ data: [STUDENT_DETAIL, MENTOR_DETAIL], error: undefined });
 
-    render(await StudentsPage({ searchParams: searchParams() }));
+    render(await StudentsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getAllByText("Register").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Create batch").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Role")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Batch name")).not.toBeInTheDocument();
+  });
+
+  it("keeps Transfer and People, which are the management half", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH], error: undefined });
+    listUsers.mockResolvedValue({ data: [STUDENT_DETAIL, MENTOR_DETAIL], error: undefined });
+
+    render(await StudentsPage({ searchParams: Promise.resolve({}) }));
+
+    // getAllByText, not getByText: TransferForm's own submit button is also
+    // labelled "Transfer" (forms.tsx:219), so the plain text match the brief
+    // specified finds two elements and throws.
     expect(screen.getAllByText("Transfer").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("People").length).toBeGreaterThan(0);
-    // People lists both the active student and mentor read back.
+    expect(screen.getByText("People")).toBeInTheDocument();
     expect(screen.getByText("Amaya Perera")).toBeInTheDocument();
-    expect(screen.getByText("Dev Mentor")).toBeInTheDocument();
+  });
+
+  it("sends a reader to Settings when nobody is registered yet", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH], error: undefined });
+    listUsers.mockResolvedValue({ data: [], error: undefined });
+
+    render(await StudentsPage({ searchParams: Promise.resolve({}) }));
+
+    // The old hint pointed at a Register panel on this page. That panel is gone.
+    expect(screen.getByText(/Settings/)).toBeInTheDocument();
   });
 
   it("renders the problem detail when a read errors -- must not silently fall through to an empty state", async () => {
@@ -191,36 +216,6 @@ describe("StudentsPage", () => {
     expect(restoreUser).toHaveBeenCalledWith({ client: {}, path: { id: "s2" } });
   });
 
-  it("RegisterForm hides batch/startDate for the Mentor role and omits the enrolment key entirely", async () => {
-    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
-    apiClient.mockResolvedValue({});
-    defaultReads();
-    createUser.mockResolvedValue({ error: undefined, data: MENTOR_DETAIL });
-
-    render(await StudentsPage({ searchParams: searchParams() }));
-
-    // Student is the default role -- batch/start date are visible.
-    expect(screen.getByLabelText("Batch")).toBeInTheDocument();
-    expect(screen.getByLabelText("Start date")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Admin" } });
-
-    expect(screen.queryByLabelText("Batch")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Start date")).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new.mentor@bistecglobal.com" } });
-    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "New Mentor" } });
-    fireEvent.change(screen.getByLabelText("External id"), { target: { value: "oid-123" } });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
-
-    await screen.findByRole("status");
-
-    expect(createUser).toHaveBeenCalledTimes(1);
-    const callArgs = createUser.mock.calls[0]?.[0] as { body: Record<string, unknown> } | undefined;
-    expect(callArgs?.body.role).toBe("Admin");
-    expect(callArgs?.body).not.toHaveProperty("enrolment");
-  });
-
   it("surfaces an archive action's 409 self-archive error via role=alert", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
@@ -235,21 +230,5 @@ describe("StudentsPage", () => {
     fireEvent.click(archiveButtons[0]!);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("A mentor cannot archive their own account.");
-  });
-
-  it("surfaces a successful batch creation with a role=status success line", async () => {
-    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
-    apiClient.mockResolvedValue({});
-    defaultReads();
-    createBatch.mockResolvedValue({ error: undefined, data: BATCH });
-
-    render(await StudentsPage({ searchParams: searchParams() }));
-
-    fireEvent.change(screen.getByLabelText("Batch name"), { target: { value: "Batch Bramble" } });
-    fireEvent.change(screen.getByLabelText("Batch start date"), { target: { value: "2026-09-10" } });
-    fireEvent.change(screen.getByLabelText("Batch end date"), { target: { value: "2027-03-09" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create batch" }));
-
-    expect(await screen.findByRole("status")).toHaveTextContent("Batch created.");
   });
 });
