@@ -101,6 +101,97 @@ Playwright 24/24 ×3 consecutive.
 Verified for the entry above: typecheck 6/6 · core 113 · api 269 · web 198 · eslint clean ·
 `next build` 12 routes · Playwright 24/24.
 
+### 2026-08-04 — Plan 7A: Settings page, theme by cookie, verified dark (FR-3)
+
+**Shipped:** a `/settings` page, pinned at the bottom of the sidebar for both roles. It carries an
+**Appearance** section (Light / Dark / Follow system, everyone) and, for mentors only, **Register**
+and **Create batch** — moved off `/students`, which now carries only Transfer and People
+(ADR-0022). The theme choice persists in a server-readable cookie (`irp-theme`), read by the root
+layout so `<html data-theme>` is correct in the initial HTML with no flash-of-wrong-theme
+(ADR-0021). The client control stamps the DOM synchronously on click and persists via a Server
+Action it does not wait for, so the repaint is instant. **This is the first release in which dark
+is reachable without changing the operating system's own theme** — ADR-0002 shipped the dark
+tokens with a full contrast audit; there was never an in-app way to see them until now.
+
+**O-14 is outstanding.** The theme switch maps to no FR — `CLAUDE.md` says a change mapping to no
+FR does not belong in the repo, so this is logged rather than silently accepted. The assumption
+taken is that finishing ADR-0002 is wanted: support nobody can reach is not support, and the dark
+tokens ship either way. Mentor sign-off is non-blocking and still pending. The theme layer's
+commits (Tasks 2–5, 8's `chromium-dark` project) are kept separate from the FR-3 registration move
+(Task 7) precisely so a "no" on O-14 reverts cleanly without touching the registration change.
+
+**ADR-0021** (theme persistence by server-readable cookie, over `localStorage` or a `User` column)
+and **ADR-0022** (Settings as the registration home, over leaving registration on Students or
+renaming Students to "People") — both under `docs/adr/`.
+
+**`/_not-found` and `/not-registered` moved from `○` to `ƒ` in the build's route table.** This is
+an intended, measured consequence of Task 3 reading the theme cookie in the root layout — a cookie
+read forces dynamic rendering for every route the root layout wraps, including the two previously
+static ones — **not a regression.** Verified empirically, not asserted: built at the base commit
+(`36b0de4`, immediately before Task 3) and at Task 3's commit (`3217547`), and diffed the two route
+tables. Before: both `○`. After: both `ƒ`, every other route unchanged. `pnpm typecheck` stayed
+clean at the branch tip once `.next/types/routes.d.ts` was regenerated.
+
+**The `chromium-dark` Playwright project is scoped to one read-only spec (`dark-theme.spec.ts`),
+and must NEVER be widened to cover `mentor-flows.spec.ts` or `student-flows.spec.ts`.** Those two
+mutate shared state that a single serial run cannot survive twice: `mentor-flows` submits a
+throwaway registration, walks a report irreversibly `Submitted → In Review → Evaluated`, and calls
+`reseed()` mid-run — a full `db:seed` that wipes and rebuilds every persona; `student-flows`
+submits an entry and marks/clears an absence for *today*, a day that does not reset between passes.
+Running either file a second time in the same serial pass means the second pass meets state the
+first pass already consumed (an already-Evaluated report, an already-submitted "today", a database
+mid-reseed) — this is exactly the state-dependence that produced the 24/24 → 23/24 → 19/24 flake
+logged above, before `workers: 1` was pinned. `dark-theme.spec.ts` only navigates and asserts
+rendering for exactly this reason: a light-vs-dark comparison needs the app in two colour schemes,
+not the mutating suites run twice.
+
+**A known pre-existing gap, surfaced by this slice's Playwright work but not introduced by it, and
+deliberately not fixed here:** `apps/web/e2e/student-flows.spec.ts:38` ("marks and clears an
+absence for today") skips whenever today already carries a submission — gated at line 64 on
+*state*, not on the weekend check at lines 42–48. `apps/api/src/seed/run-seed.ts:64` seeds the
+compliant persona's on-time entry in a fixed **17:10–17:49 Colombo** window, and `run-seed.ts:208`
+only seeds instants that have already happened, so any full-suite run whose most recent reseed
+lands after that window finds "today" already submitted and skips — roughly the last seven hours
+of every Colombo day. It is the **only** e2e test covering the absence mark/clear round trip, so
+**FR-12 has zero e2e coverage** on any suite run after that daily instant, silently, with a green
+build. Recorded for a future plan to give the absence round-trip a day-independent target (e.g. a
+day the seed never touches) rather than "today."
+
+**A copy note, deliberately left as-is.** The theme rejection message composes to *"That is not a
+theme this app offers. This device will go back to Follow system on reload."* "go back to Follow
+system" momentarily parses as an instruction rather than a description of what will happen.
+Recorded as slightly clumsy and left unchanged — reworking user-facing copy is a design-system
+decision, not a fix-round liberty, and the message is correct, just not elegant.
+
+**The dark visual pass (spec D5) is owned by the human partner and was not performed by an agent.**
+`dark-theme.spec.ts` proves every view renders and its landmark content is present with the OS in
+dark; it cannot judge whether dark *looks* right — a test cannot see a border vanish into a canvas.
+Still needing eyes, in order of suspected risk:
+- **The ribbon's `future` mark** — a transparent bar with a `var(--line)` border. On `#121212`, a
+  `#313339` border is the lowest-contrast element in the system; whether unreached days are still
+  legible as such has not been confirmed visually.
+- **Focus rings** on the theme radios and the Register form — §12 requires a visible 2px
+  `--primary` ring; `#8a9ff0` on `#1c1e23` should be obvious, but has not been looked at.
+- **`status-pill.tsx`** — the one component whose source mentions theme by name; every status needs
+  a legibility check.
+- **The `RibbonKey` swatches** — confirm `Partly in` still reads as a part-height bar and `Today`
+  still shows its ring at the smaller swatch scale.
+- **Selected/active nav** using `--primary-weak` (`#262c45` in dark) — confirm the current page is
+  still obviously current against the dark canvas.
+- **The sidebar's bottom-pinning and its divider above Settings** — jsdom cannot verify either;
+  both need a real render.
+
+If the pass finds a defect needing a design decision rather than a straightforward token fix, the
+instruction is to log it here and keep the switch: dark is no worse than it was before this slice
+(unreachable), and a half-made design call in a hurry is worse than a recorded gap.
+
+Verified (agent-run automated half only; excludes the human visual pass and PR/CI steps):
+typecheck 6/6 projects · core 113/113 · api 269/269 · web 239/239 · `pnpm lint` exit 0 ·
+`next build` (`AUTH_DEV_BYPASS=false`) — 13 routes, all `ƒ` · Playwright 29 tests/1 worker, 28
+passed, 1 skipped (the known `student-flows.spec.ts:38` gap above, confirmed by name in the run),
+0 failed. Full command-by-command detail in
+`.superpowers/sdd/2026-08-04-plan-7a-settings-page/task-9-report.md`.
+
 ### 2026-07-29 — Plan 3
 
 **Plan 3 merged as PR #6**. Slice 1 needs only Plan 4 (infra,

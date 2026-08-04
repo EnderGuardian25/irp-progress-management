@@ -31,6 +31,7 @@ Every task's requirements implicitly include this section.
 - **Conventional commits**, one per task. Any decision with a plausible rejected alternative gets an ADR naming **at least two** rejected alternatives.
 - **Never weaken the dev-bypass guards.** Nothing in this plan touches `auth.config.ts`, `proxy.ts`, `instrumentation.ts`, or `app/api/dev-jwks/route.ts`. Task 3 modifies `app/layout.tsx`, which is **not** one of the four guard entry points and must not become one.
 - **Playwright: `workers: 1` stays pinned.** Do not raise it. See Task 8 for why the dark project must not re-run mutating specs.
+- **Any task that moves a UI surface between routes must run the Playwright suite, not just unit tests.** Task 7 moved `RegisterForm`/`CreateBatchForm` off `/students` and broke `mentor-flows.spec.ts`, which still visited `/students` for those fields — a gap unit tests cannot see, because nothing in them exercises a stale `page.goto`. A route-moving task's verification set is incomplete without `cd apps/web; pnpm exec playwright test --reporter=line`.
 
 ### Environment
 
@@ -503,7 +504,7 @@ describe("RootLayout data-theme stamping", () => {
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `pnpm --filter @irp/web exec vitest run test/root-layout.test.tsx`
-Expected: FAIL — the first three cases fail because `RootLayout` is not async and stamps nothing.
+Expected: FAIL, but only on the **first two** cases ("stamps dark" / "stamps light"), because the pre-change `RootLayout` stamps nothing. The other three cases assert *absence* of `data-theme` ("omits the attribute … for system" / "… when there is no cookie" / "… for a tampered value") and pass vacuously against that same pre-change layout, since a layout that stamps nothing has no attribute to find either way.
 
 - [ ] **Step 3: Modify the layout**
 
@@ -755,7 +756,9 @@ describe("ThemeControl", () => {
   it("stamps the attribute IMMEDIATELY on choose, before the action resolves", () => {
     // A theme switch that waits for a round trip reads as broken. The action is
     // left unresolved here on purpose: the DOM must already be right.
-    setTheme.mockReturnValue(new Promise(() => {}));
+    // `() => undefined`, not `() => {}` — an empty arrow body trips this
+    // repo's `no-empty-function` lint rule.
+    setTheme.mockReturnValue(new Promise(() => undefined));
     render(<ThemeControl current="system" />);
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
@@ -786,7 +789,15 @@ describe("ThemeControl", () => {
     render(<ThemeControl current="system" />);
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/not a theme/i);
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(/not a theme/i);
+      // The reversion clause must name the ORIGINAL current prop ("system" ->
+      // "Follow system"), not the newly clicked option ("dark" -> "Dark"). The
+      // positive assertion alone would stay green even if the component were
+      // edited to close over the new selection instead of `current` — the
+      // negative half is what actually pins that distinction.
+      expect(alert).toHaveTextContent(/Follow system/i);
+      expect(alert).not.toHaveTextContent(/\bDark\b/);
     });
   });
 });
@@ -873,13 +884,23 @@ export function ThemeControl({ current }: { current: Theme }) {
             value={theme}
             checked={selected === theme}
             onChange={() => { choose(theme); }}
+            aria-describedby={`theme-hint-${theme}`}
             className="mt-1"
           />
           <span>
             <span className="block text-sm" style={{ color: "var(--ink)" }}>
               {LABEL[theme]}
             </span>
-            <span className="block text-xs" style={{ color: "var(--ink-muted)" }}>
+            {/* aria-hidden keeps this out of the radio's accessible NAME (computed
+                from the wrapping label's content) while aria-describedby still
+                surfaces it as the accessible DESCRIPTION — a direct reference is
+                not subject to the same hidden-content exclusion. */}
+            <span
+              id={`theme-hint-${theme}`}
+              aria-hidden="true"
+              className="block text-xs"
+              style={{ color: "var(--ink-muted)" }}
+            >
               {HINT[theme]}
             </span>
           </span>
@@ -894,6 +915,8 @@ export function ThemeControl({ current }: { current: Theme }) {
   );
 }
 ```
+
+**Why the hint cannot simply sit inside the label.** If both the label span and the hint span sit inside the `<label>` with no other markup, each radio's accessible name concatenates them — e.g. "Dark" + "Always dark, whatever this device is set to." becomes one name, "DarkAlways dark, whatever this device is set to." — and the six tests below (and `apps/web/test/theme-control.test.tsx`) cannot resolve `getByRole("radio", { name: "Dark" })` at all. Moving the hint to `aria-describedby` with `aria-hidden="true"` on the hint span fixes this: `aria-hidden` normally excludes a node from *both* the accessible name and description computations, but AccName's hidden-content exclusion exempts a node that is the **direct target of the referencing relationship** — so a `aria-describedby` reference to a hidden node still resolves, while the same node's text is excluded from the label's own name computation. The label keeps its own accessible name short and correct, and the hint still reaches assistive tech as the field's description.
 
 The panel heading comes from `Panel`'s own `title` prop in Task 6, so this component renders no label of its own.
 
@@ -1228,11 +1251,14 @@ git commit -m "feat(web): add the Settings page with a bottom-pinned sidebar ent
 
 **Files:**
 - Modify: `apps/web/app/(app)/students/page.tsx`
+- Modify: `apps/web/e2e/mentor-flows.spec.ts` — its registration test still visited `/students` for the fields this task removes; point it at `/settings` instead.
 - Test: `apps/web/test/students-page.test.tsx`
 
 **Interfaces:**
 - Consumes: the Settings page from Task 6, which now renders both forms.
 - Produces: nothing new. `students/forms.tsx` is **not** modified — `RegisterForm` and `CreateBatchForm` stay exported from there and are imported by Settings.
+
+> **This task moves a UI surface between routes, so unit tests are not enough to prove it safe.** `apps/web/e2e/mentor-flows.spec.ts` has a test that registers a throwaway student and, before this task, drove that flow entirely on `/students`. Moving `RegisterForm`/`CreateBatchForm` off that page breaks it deterministically — the fields are simply no longer there — and no unit test can see a stale `page.goto("/students")`. Update the spec's registration test to `page.goto("/settings")` for the register step, then `page.goto("/students")` for the People-directory checks (visible row, archive) that stayed behind. Run the Playwright suite as part of this task's verification, not only at the end of Task 9 — see Step 6.
 
 - [ ] **Step 1: Update the Students test to expect the panels gone**
 
@@ -1261,7 +1287,12 @@ Modify `apps/web/test/students-page.test.tsx`:
 
     render(await StudentsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getByText("Transfer")).toBeInTheDocument();
+    // getAllByText, not getByText: TransferForm's own submit button is also
+    // labelled "Transfer" (forms.tsx:219), so a plain getByText match finds two
+    // elements and throws. The plan's own pre-existing "renders all four
+    // panels" test already used getAllByText for exactly this reason — this
+    // step should have matched it from the start.
+    expect(screen.getAllByText("Transfer").length).toBeGreaterThan(0);
     expect(screen.getByText("People")).toBeInTheDocument();
     expect(screen.getByText("Amaya Perera")).toBeInTheDocument();
   });
@@ -1341,7 +1372,13 @@ pnpm --filter @irp/web test
 pnpm typecheck
 pnpm lint
 $env:AUTH_DEV_BYPASS = "false"; pnpm --filter @irp/web build
-git add "apps/web/app/(app)/students/page.tsx" apps/web/test/students-page.test.tsx
+cd apps/web; pnpm exec playwright test --reporter=line
+```
+
+**The Playwright run is not optional here.** `mentor-flows.spec.ts`'s registration test is the only thing that exercises the moved forms end-to-end, and it fails deterministically against the old `/students` target — a review that skips this command passes clean while the e2e gate is broken, which is exactly what happened the first time this task ran.
+
+```bash
+git add "apps/web/app/(app)/students/page.tsx" apps/web/e2e/mentor-flows.spec.ts apps/web/test/students-page.test.tsx
 git commit -m "refactor(web): move Register and Create batch to Settings (FR-3, ADR-0022)"
 ```
 
@@ -1416,7 +1453,10 @@ test.describe("dark theme renders every view", () => {
     const key = page.getByTestId("ribbon-key");
     await expect(key).toBeVisible();
     await key.getByText("How to read this").click();
-    await expect(key.getByText("On time")).toBeVisible();
+    // exact: true — the ribbon-key's closing paragraph also contains the
+    // substring "…then on time.", so a plain getByText("On time") match finds
+    // two elements and violates Playwright's strict mode.
+    await expect(key.getByText("On time", { exact: true })).toBeVisible();
   });
 });
 ```
@@ -1427,7 +1467,7 @@ Create `apps/web/e2e/settings.spec.ts`:
 
 ```ts
 import { expect, test } from "@playwright/test";
-import { signInAsMentor } from "./helpers";
+import { signInAsMentor, signInAsStudent } from "./helpers";
 
 /**
  * The switch itself, in the default (light) project. This is the one test that
@@ -1441,7 +1481,23 @@ test.describe("Settings — theme switch", () => {
 
     await expect(page.locator("html")).not.toHaveAttribute("data-theme", "dark");
 
-    await page.getByRole("radio", { name: "Dark" }).check();
+    // ThemeControl (theme-control.tsx) writes the DOM attribute synchronously
+    // on click, then persists via a Server Action inside startTransition --
+    // deliberately not awaited by the click itself, so the repaint is instant
+    // (see the component's own comment on why it does not wait for the round
+    // trip). That means `.check()` resolving proves the DOM changed but says
+    // nothing about the cookie: an immediate `reload()` can beat the POST and
+    // reload before the server ever set the cookie, losing the choice through
+    // no fault of the persistence logic itself. Waiting for that POST is what
+    // makes "survives a reload" test the persistence, not the race. This is
+    // the plan's own deliberate instant-DOM design (§5.4) surfacing in a test —
+    // the DOM-before-await behaviour is correct, it is "click then reload"
+    // that is racy.
+    const [saveDark] = await Promise.all([
+      page.waitForResponse((resp) => resp.request().method() === "POST"),
+      page.getByRole("radio", { name: "Dark" }).check(),
+    ]);
+    expect(saveDark.ok()).toBe(true);
     // Immediate, before any navigation — the control writes the DOM itself.
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
@@ -1450,13 +1506,16 @@ test.describe("Settings — theme switch", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
     // Put it back, so this spec leaves no state for another test to inherit.
-    await page.getByRole("radio", { name: "Follow system" }).check();
+    const [saveSystem] = await Promise.all([
+      page.waitForResponse((resp) => resp.request().method() === "POST"),
+      page.getByRole("radio", { name: "Follow system" }).check(),
+    ]);
+    expect(saveSystem.ok()).toBe(true);
     await page.reload();
     await expect(page.locator("html")).not.toHaveAttribute("data-theme", "dark");
   });
 
   test("a student reaches Settings and gets Appearance without the mentor sections", async ({ page }) => {
-    const { signInAsStudent } = await import("./helpers");
     await signInAsStudent(page);
     await page.goto("/settings");
 
@@ -1467,7 +1526,7 @@ test.describe("Settings — theme switch", () => {
 });
 ```
 
-> Check `apps/web/e2e/helpers.ts` for the exact exported names before running. If the student helper is named differently, use the real name and import it at the top with `signInAsMentor` rather than dynamically.
+> `signInAsStudent` is imported at the top alongside `signInAsMentor` (both exist in `apps/web/e2e/helpers.ts`) — no dynamic import is needed.
 
 - [ ] **Step 3: Run both to make sure they fail for the right reason**
 
