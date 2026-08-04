@@ -60,14 +60,25 @@ The topbar is 56px tall, so the whole lockup fits at roughly 40px — at which t
 illegible. It would also sit beside text already reading "Hearts Academy · IRP", and on `/signin`
 directly above an `<h1>Hearts Academy</h1>`. So:
 
-| Placement | Asset | Size | Adjacent text |
+| Placement | Asset | Size | Relationship to existing content |
 |---|---|---|---|
-| `topbar.tsx` | heart mark only | 32px square | keeps "Hearts Academy · IRP" |
-| `/signin` | full lockup | ~140px wide | **replaces** the duplicated heading |
-| `/not-registered` | full lockup | ~140px wide | **replaces** the duplicated heading |
+| `topbar.tsx` | heart mark only | 32px square | replaces the diamond; keeps "Hearts Academy · IRP" |
+| `/signin` | full lockup | ~140px wide | replaces the diamond **and becomes the `<h1>`'s content** |
+| `/not-registered` | full lockup | ~140px wide | **purely additive** — added above the existing heading |
 
-Both existing blue diamonds (`&#9670;`) are removed — `topbar.tsx` and `signin/page.tsx`. There are
-two, not one.
+Both existing blue diamonds (`&#9670;`) are removed — `topbar.tsx` and `signin/page.tsx:58-60`. There
+are exactly two, and `/not-registered` has neither a diamond nor a wordmark.
+
+**`/signin`'s heading must survive the replacement.** Its current `<h1>Hearts Academy</h1>` is the
+page's only `h1`, so deleting it outright would leave the page with no heading. Instead the lockup
+becomes the heading's content — `<h1><Image alt="Bistec Hearts Academy" …/></h1>` — which keeps exactly
+one `h1`, gives it an accessible name, and removes the duplicated wordmark in one move. The
+"Industry Readiness Programme" tagline below it stays.
+
+**`/not-registered` replaces nothing.** Its heading is "Your account is not registered" — a statement
+about the reader's state, not a wordmark — so the lockup is added above it and the heading is left
+alone. Since nothing else on that page names the product, its `alt` **is** populated
+(`alt="Bistec Hearts Academy"`), unlike the topbar's.
 
 ### D3 — The brand card is a deliberately theme-invariant token
 
@@ -180,9 +191,13 @@ image with no Dockerfile change at all.
 Type support is already present: `apps/web/next-env.d.ts` references Next's image type declarations, so
 a `.png` import typechecks without new configuration.
 
-Rendered with `next/image` and explicit `width`/`height`, inside a card using `--brand-card`, with
-`alt` text — `alt="Bistec Hearts Academy"` on the auth pages where the logo *is* the heading, and
-`alt=""` in the topbar where the adjacent text already names the product.
+Rendered with `next/image` and explicit `width`/`height`, inside a card using `--brand-card`:
+
+| Placement | `alt` | Why |
+|---|---|---|
+| `topbar.tsx` | `""` | "Hearts Academy · IRP" sits beside it; a name here means every screen reader user hears the product twice on every page |
+| `/signin` | `"Bistec Hearts Academy"` | the image *is* the `<h1>`'s content, so this text is the page's heading |
+| `/not-registered` | `"Bistec Hearts Academy"` | nothing else on that page names the product |
 
 ## 3. The icon set
 
