@@ -79,9 +79,9 @@ the supplied `hearts-academy.png`, 1080×1031 RGBA with an **opaque** near-white
 **cannot work**: the heart is an L-shaped silhouette (two circles above a diagonal paddle) and
 "BISTEC" sits in the notch of that L, so every rectangle wide and tall enough to hold the whole
 heart also holds part of the "B" — do not "simplify" the mark back to a rectangular crop, that
-regresses this defect. `hearts-academy-mark.png` is instead an 8-connected flood-fill mask (seed
-inside the paddle, background threshold `|Δr|,|Δg|,|Δb| ≤ 8` from the field colour), bbox
-`104,106`–`610,546`, padded 10px on every side and composited onto a **transparent** canvas — never
+regresses this defect. `hearts-academy-mark.png` is instead an 8-connected flood-fill mask (seed at
+pixel `(300,400)`, inside the paddle; background threshold `|Δr|,|Δg|,|Δb| ≤ 8` from the field
+colour), bbox `104,106`–`610,546`, padded 10px on every side and composited onto a **transparent** canvas — never
 the source's own field colour — before a `fit:"contain"` resize to 64px. `hearts-academy-lockup.png`
 keeps the whole asset (resized to 320px wide) but runs the *same* field threshold over the whole
 image first: the field is opaque, and 16px of `--brand-card` white around an opaque near-white

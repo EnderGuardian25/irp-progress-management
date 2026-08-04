@@ -176,13 +176,14 @@ Two derived assets, committed under `apps/web/assets/`:
 **A plain rectangular `extract()` of the mark cannot work.** The heart is an L-shaped silhouette —
 two circles above a diagonal paddle — and "BISTEC" sits in the notch of that L. Any rectangle wide
 and tall enough to hold the whole heart therefore also holds part of the "B". The mark is instead
-built from an 8-connected flood-fill mask (seed inside the paddle, background threshold `|Δr|,
-|Δg|,|Δb| ≤ 8` from the source's opaque field colour `(248,249,250)`), which yields bbox
-`104,106`–`610,546`; padded 10px on every side and composited onto a **transparent** canvas — never
-the source's own field — before the `fit:"contain"` resize to 64px. The full derivation, including
-why the source's field is *opaque* near-white rather than transparent or pure white, and why that
-matters for both assets, is recorded in `docs/design-system.md` §3.4 — that is the durable copy;
-this spec section is not re-verified against implementation after the plan closes.
+built from an 8-connected flood-fill mask (seed at pixel `(300,400)`, inside the paddle; background
+threshold `|Δr|,|Δg|,|Δb| ≤ 8` from the source's opaque field colour `(248,249,250)`), which yields
+bbox `104,106`–`610,546`; padded 10px on every side and composited onto a **transparent** canvas —
+never the source's own field — before the `fit:"contain"` resize to 64px. The full derivation,
+including why the source's field is *opaque* near-white rather than transparent or pure white, and
+why that matters for both assets, is recorded in `docs/design-system.md` §3.1 (the paragraph
+immediately after the `--brand-card` explanation) — that is the durable copy; this spec section is
+not re-verified against implementation after the plan closes.
 
 The lockup keeps the same field-colour threshold applied to the *whole* image (not just the heart),
 so its background is transparent too — the field is `(248,249,250)`, not `#ffffff`, and against the
