@@ -254,7 +254,10 @@ don't have to manually walk every day forward:
 4. **Students** directory → show the archive flow, and that it's reversible
    (restore, FR-5).
 5. **Today** dashboard → per-batch "N of M submitted" figures and the cycle
-   ribbon.
+   ribbon. Open **"How to read this"** underneath: it names the eight ribbon
+   marks and states the aggregation rule — each bar is the **worst** outcome in
+   the batch that day (missed → late → absent → partly in → on time), so a red
+   bar means at least one student missed, not that all of them did (ADR-0020).
 6. **Cycles** view → every active student in either batch, confirm no score is
    shown (scoring/evaluation is blocked on open point O-5 — AI provider not
    yet chosen).

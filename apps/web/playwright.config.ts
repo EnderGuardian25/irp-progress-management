@@ -5,6 +5,30 @@ export default defineConfig({
   // No retries. A flaky end-to-end test that passes on retry teaches nothing,
   // and this repo has been bitten twice by gates that looked green.
   retries: 0,
+  // `fullyParallel: false` orders tests WITHIN a file. It does NOT stop
+  // Playwright distributing FILES across workers — that is `workers`, whose
+  // default is 1 only when `process.env.CI` is set and half the logical cores
+  // otherwise. So this suite ran serially in CI and 4-way parallel on a dev
+  // machine, from the same config.
+  //
+  // There is no safe file-level parallelism here. All four spec files share one
+  // Postgres database and one dev server, and they mutate it:
+  // student-flows submits an entry and marks an absence for TODAY,
+  // dashboard-flows asserts today's counts and cross-reads the Roster for the
+  // same day, and mentor-flows' archive test calls reseed() — a full
+  // `db:seed`, which wipes and rebuilds every seed persona MID-RUN. A reseed in
+  // one worker while another is mid-assertion is not a race that can be tuned
+  // away; the shared fixture is the whole design.
+  //
+  // Measured on 2026-08-04, same commit, same freshly seeded database:
+  // 24/24, then 23/24, then 19/24. CI was green throughout, because CI was
+  // serial. That divergence is the worst property a gate can have — it fails
+  // only where nobody is watching and teaches the reader to re-run.
+  //
+  // Pinned rather than left to the default so local and CI run the identical
+  // schedule. Do not raise it to "speed the suite up": the cost of a serial
+  // run is ~2 minutes, and the cost of a parallel one is a gate nobody trusts.
+  workers: 1,
   fullyParallel: false,
   // These are NOT a retry in disguise, and they are not padding — the default
   // 5000ms expect budget was measurably the wrong budget, and it made the

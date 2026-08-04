@@ -1,6 +1,7 @@
 import { listBatches, getBatchDashboardToday, type Role } from "@irp/client";
 import { apiClient } from "@/lib/api-client";
 import { CycleRibbon } from "@/components/cycle-ribbon/cycle-ribbon";
+import { RibbonKey } from "@/components/cycle-ribbon/ribbon-key";
 import { toBatchRibbonDays } from "@/lib/ribbon";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
@@ -131,6 +132,15 @@ export async function MentorToday({ displayName, role }: { displayName: string; 
             </section>
           );
         })}
+      </div>
+
+      {/*
+        Once, after every batch section — not inside CycleRibbon, which renders
+        per batch and would repeat the key for each. Collapsed, so §8.1's
+        above-the-fold budget still belongs to the ribbons and their figures.
+      */}
+      <div className="mt-6">
+        <RibbonKey />
       </div>
     </div>
   );

@@ -281,6 +281,16 @@ spec §7 and remove the bypass. ADR-0012.
   assertion — two cold compiles, ~4.9s. `playwright.config.ts` budgets for it explicitly
   (`expect: { timeout: 20_000 }`); the default 5000ms made that gate a coin flip. **Do not "tidy"
   those timeouts back down.**
+- **`fullyParallel: false` is not "run serially", and `workers` must stay pinned to 1.**
+  `fullyParallel` only orders tests *within* a file; Playwright still distributes *files* across
+  workers. `workers` controls that, and its default is 1 **only when `process.env.CI` is set** —
+  otherwise half the logical cores. So one config ran **serially in CI and 4-way parallel locally**,
+  which is why the suite was green on every CI run and scored 24/24, 23/24 then 19/24 across three
+  local runs of the same commit. The four spec files share one database and one dev server and
+  mutate them — `mentor-flows`' archive test calls `reseed()`, a full `db:seed` that wipes and
+  rebuilds every persona **mid-run**, while other files are asserting on today's figures. There is
+  no safe parallelism to recover; `workers: 1` is pinned so local and CI run the identical schedule.
+  A gate that fails only where nobody is watching teaches the reader to re-run instead of to read.
 
 **Infrastructure facts from Plan 4B:**
 

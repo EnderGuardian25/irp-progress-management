@@ -80,6 +80,12 @@ You land here. One block per batch, each with a cycle ribbon and the figures ben
   colour, so it reads correctly in greyscale and for a colour-blind viewer.
 - **`+4 extra this cycle` on Batch 2** is in muted grey, not a status colour. Weekend work is
   recorded and surfaced, but it is not a compliance state and never enters a denominator.
+- **Open "How to read this" below the two batches** (ADR-0020). It names all eight marks, and then
+  says the thing worth saying out loud: **each bar is the worst outcome in the batch that day**,
+  ranked missed → late → absent → partly in → on time. So a red bar means at least one student
+  missed — not that everybody did. If you demo one thing about the ribbon, demo this; it is the
+  reading a viewer gets wrong unprompted. It is collapsed by default because §8.1 keeps the fold
+  for the figures.
 
 **If you are demoing in the morning, read this first.** See "What surprised us" #1 — the counts
 will legitimately read `0 of 4 submitted`, and you need to be able to say why without hesitating.
