@@ -61,6 +61,17 @@ const STUDENT_DESTINATIONS: readonly Destination[] = [
 ];
 
 /**
+ * Settings is NOT appended to either role list. Those render in document order
+ * inside a `flex flex-col`, so an appended entry would sit directly under the
+ * last primary destination rather than at the bottom of the column.
+ *
+ * It is also on BOTH roles' frames: the theme is a personal preference, and the
+ * page gates its mentor-only sections itself (settings/page.tsx). A Student
+ * following this link gets a page with one section, not a redirect.
+ */
+const SETTINGS_DESTINATION: LinkedDestination = { label: "Settings", href: "/settings" };
+
+/**
  * "/" must match exactly — every other path also starts with it, so a prefix
  * test would light up Today on every screen in the app. The prefix test is
  * what the rest need: /review/<studentId> has to keep Review marked, since
@@ -130,6 +141,22 @@ export function Sidebar({
           </span>
         );
       })}
+      {/* mt-auto is what pins this to the bottom — a margin guess would drift
+          as the primary list grows. The divider separates "where you work"
+          from "how it looks". */}
+      <div
+        className="mt-auto border-t pt-1"
+        style={{ borderColor: "var(--line)" }}
+      >
+        <Link
+          href={SETTINGS_DESTINATION.href}
+          aria-current={isActive(pathname, SETTINGS_DESTINATION.href) ? "page" : undefined}
+          className="nav-item"
+          data-active={isActive(pathname, SETTINGS_DESTINATION.href) || undefined}
+        >
+          {SETTINGS_DESTINATION.label}
+        </Link>
+      </div>
     </nav>
   );
 }

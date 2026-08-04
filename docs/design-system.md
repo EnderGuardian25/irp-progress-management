@@ -191,10 +191,20 @@ behaviour is structural (sidebar collapse below 1440px), never fluid typography.
 │  Cycles   │                                                          │
 │  Students │                                                          │
 │           │                                                          │
+│ ─────────  ← border-top rule, --line                                 │
+│  Settings │                                                          │
+│           │                                                          │
 │ 216px     │                                                          │
 │ --surface │                                                          │
 └───────────┴──────────────────────────────────────────────────────────┘
 ```
+
+Settings sits pinned to the bottom of the 216px column with `mt-auto`, separated from the primary
+destinations above it by a `border-top` rule (`--line`) — never appended to the destination list
+itself, which would sit it directly under the last primary item instead. It appears on **both**
+roles' frames: appearance (theme) is a personal preference, not a mentor privilege. The page it
+links to gates its own sections rather than the route bouncing a Student away — Settings shows
+Appearance to everyone and Register/Create batch only to a mentor (ADR-0022).
 
 ---
 
