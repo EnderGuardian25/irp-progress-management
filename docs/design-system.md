@@ -64,6 +64,15 @@ Every pair below was verified with a WCAG contrast script against the sRGB conve
 | `--ink-muted` | `oklch(0.50 0.018 272)` | `#5f636e` | Labels, secondary text, placeholders — 6.01:1 |
 | `--primary` | `oklch(0.45 0.14 272)` | `#3c4ba2` | **Bistec slot.** Indigo ink. Primary actions, selection, focus — 7.71:1 |
 | `--primary-weak` | `oklch(0.95 0.022 272)` | `#e9eefe` | Selected rows, active nav, primary-tinted fills. |
+| `--brand-card` | — | `#ffffff` | The card behind the Bistec Hearts Academy logo. **Theme-invariant** — see below. |
+
+`--brand-card` is the only token that is **identical in light and dark**, by never being
+overridden. **Why:** the brand lockup is a supplied asset whose own internal contrast is not
+ours to re-verify, and it carries near-black text on a light field — a card that followed the
+theme would put that wordmark on `#1c1e23` and erase it. It therefore sits outside the
+`dark-tokens` markers in `globals.css`, and `apps/web/test/theme-tokens.test.ts` enforces that.
+It is **not** a general-purpose surface — it exists for the brand card and nothing else.
+Anything else needing a fixed light surface is a new design decision, not a reuse of this.
 
 ### 3.2 Status vocabulary
 

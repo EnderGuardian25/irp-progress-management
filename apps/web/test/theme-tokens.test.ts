@@ -65,3 +65,40 @@ describe("globals.css dark token blocks", () => {
     expect(block!.match(/--[a-z-]+:/g)).toHaveLength(13);
   });
 });
+
+/**
+ * --brand-card is the ONLY token that is deliberately the same in light and
+ * dark. The logo's wordmark is near-black green on a light field, so the card
+ * behind it must not follow the theme — if it did, the wordmark would sit on
+ * #1c1e23 and disappear.
+ *
+ * It achieves that by being declared once in the base :root and NEVER
+ * overridden, which is also why it must stay OUTSIDE the dark-tokens markers:
+ * inside them it would break the 13-declaration count and the byte-identity
+ * check. This test is what stops someone "fixing the inconsistency" by adding
+ * a dark value.
+ */
+describe("--brand-card is theme-invariant", () => {
+  const css = readFileSync(
+    path.join(import.meta.dirname, "..", "app", "globals.css"),
+    "utf8",
+  );
+
+  it("is declared exactly once in the whole stylesheet", () => {
+    expect(css.match(/--brand-card:/g)).toHaveLength(1);
+  });
+
+  it("is white", () => {
+    expect(css).toMatch(/--brand-card:\s*#ffffff;/);
+  });
+
+  it("is not inside either dark token block, so it is never overridden", () => {
+    const blocks = [
+      ...css.matchAll(/\/\* dark-tokens:start \*\/([\s\S]*?)\/\* dark-tokens:end \*\//g),
+    ];
+    expect(blocks).toHaveLength(2);
+    for (const [, body] of blocks) {
+      expect(body).not.toContain("--brand-card");
+    }
+  });
+});

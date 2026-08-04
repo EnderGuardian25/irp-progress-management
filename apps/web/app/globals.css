@@ -10,6 +10,15 @@
      style everything we draw ourselves; color-scheme is the one declaration
      that reaches controls the browser draws for us. */
   color-scheme: light;
+  /* The ONE deliberately theme-invariant colour in the system. Declared here
+     and never overridden, so it stays #ffffff in dark — that is the whole
+     point, not an oversight.
+     The brand lockup is near-black green on a light field (it is a supplied
+     asset, not our palette), so a card that followed the theme would put that
+     wordmark on #1c1e23 and erase it. Kept OUTSIDE the dark-tokens markers
+     because it needs no dark entry; putting it inside would break the
+     13-declaration count. test/theme-tokens.test.ts enforces both. */
+  --brand-card: #ffffff;
   --bg: #ffffff;
   --surface: #f6f7fb;
   --surface-sunk: #fafbfe;
