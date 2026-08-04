@@ -394,5 +394,6 @@ Each names at least three rejected alternatives:
 | [0002](adr/0002-light-default-with-dark-support.md) | Light default, dark supported, both contrast-verified |
 | [0003](adr/0003-cycle-ribbon-as-fr-28-summary.md) | Cycle ribbon as the FR-28 summary surface |
 | [0020](adr/0020-collapsed-ribbon-key-on-the-mentor-dashboard.md) | A collapsed, mentor-only key for the cycle ribbon (§7) |
+| [0021](adr/0021-theme-persistence-by-cookie.md) | Theme persistence by server-readable cookie; dark becomes user-reachable (§3.3) |
 
 Changing anything in §3–§7 means amending the ADR that governs it, not just this file.
