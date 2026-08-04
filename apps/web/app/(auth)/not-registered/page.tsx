@@ -1,6 +1,7 @@
 import { signOut } from "@/auth";
 import { PageTitle } from "@/components/ui/page-title";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/app-frame/brand-mark";
 
 // Terminal state — never link to /signin. The session here is VALID (the
 // user authenticated fine), it is just not registered on the programme, so
@@ -11,6 +12,12 @@ export default function NotRegisteredPage() {
   return (
     <div className="flex items-center justify-center" style={{ minHeight: "100dvh" }}>
       <div className="max-w-[52ch] px-8">
+        {/* Additive, not a replacement: this page's heading is about the
+            reader's state, not the product, and nothing else here names the
+            product — hence a populated alt, unlike the topbar's. */}
+        <div className="mb-8">
+          <BrandMark variant="lockup" />
+        </div>
         <PageTitle>Your account is not registered</PageTitle>
         <p className="mb-6 text-base" style={{ color: "var(--ink-muted)" }}>
           You signed in successfully, but no one has registered you on the programme yet.

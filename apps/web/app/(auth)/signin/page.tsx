@@ -1,6 +1,7 @@
 import { signIn } from "@/auth";
 import { CycleRibbon, type RibbonDay } from "@/components/cycle-ribbon/cycle-ribbon";
 import { isEntraConfigured } from "@/auth.config";
+import { BrandMark } from "@/components/app-frame/brand-mark";
 import { SignInPanel } from "./sign-in-panel";
 
 // Rendered per request, NOT statically prerendered.
@@ -55,11 +56,11 @@ export default function SignInPage() {
       </section>
 
       <section className="flex flex-1 flex-col justify-center px-16">
-        <span aria-hidden="true" className="mb-6 text-xl" style={{ color: "var(--primary)" }}>
-          &#9670;
-        </span>
-        <h1 className="mb-2 text-2xl font-bold" style={{ color: "var(--ink)" }}>
-          Hearts Academy
+        {/* The logo IS the heading. Its alt text is the accessible name, so the
+            page keeps exactly one h1 and the wordmark is not duplicated —
+            deleting the h1 outright would leave this page headingless. */}
+        <h1 className="mb-2">
+          <BrandMark variant="lockup" />
         </h1>
         <p className="mb-8 text-sm" style={{ color: "var(--ink-muted)" }}>
           Industry Readiness Programme
