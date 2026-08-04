@@ -33,7 +33,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           signOutSlot={
             /* Built HERE, in a Server Component, so the inline "use server"
                action stays valid — the sidebar is a client component and
-               cannot import `@/auth`. */
+               cannot import `@/auth`. No unit test covers this call site
+               wiring the real form in; e2e/signin.spec.ts:35 and
+               e2e/student-flows.spec.ts:207 are what would catch its
+               removal or a revert to `<Sidebar role={user.role} />`. */
             <form
               action={async () => {
                 "use server";
