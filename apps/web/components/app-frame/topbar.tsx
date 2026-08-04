@@ -1,5 +1,6 @@
 import { signOut } from "@/auth";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "./brand-mark";
 
 /**
  * The app frame's topbar. Semantic `banner` landmark, 56px tall, on
@@ -27,9 +28,7 @@ export function Topbar({ userName }: { userName: string }) {
       style={{ height: "56px", background: "var(--surface)", borderColor: "var(--line)" }}
     >
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" style={{ color: "var(--primary)" }}>
-          &#9670;
-        </span>
+        <BrandMark variant="mark" />
         <span className="font-semibold" style={{ color: "var(--ink)" }}>
           Hearts Academy &middot; IRP
         </span>
