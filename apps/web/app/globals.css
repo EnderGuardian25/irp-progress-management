@@ -5,6 +5,11 @@
    --primary is the Bistec slot: a placeholder indigo until the brand hex
    arrives. Any replacement must avoid hue 20-70 (missed/late) and 140-170 (ok). */
 :root {
+  /* Tells the browser to render NATIVE controls (the type="date" calendar
+     indicator, scrollbars, select dropdowns) in a light-aware palette. Tokens
+     style everything we draw ourselves; color-scheme is the one declaration
+     that reaches controls the browser draws for us. */
+  color-scheme: light;
   --bg: #ffffff;
   --surface: #f6f7fb;
   --surface-sunk: #fafbfe;
@@ -46,6 +51,10 @@
    asserts the two copies stay identical — do not edit one without the other. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    /* Same declaration as the light :root, re-aimed at native controls — see
+       that comment. Outside the dark-tokens markers on purpose:
+       test/theme-tokens.test.ts asserts exactly 13 declarations between them. */
+    color-scheme: dark;
     /* dark-tokens:start */
     --bg: #121212;
     --surface: #1c1e23;
@@ -65,6 +74,10 @@
 }
 
 :root[data-theme="dark"] {
+  /* Same declaration as the light :root, re-aimed at native controls — see
+     that comment. Outside the dark-tokens markers on purpose:
+     test/theme-tokens.test.ts asserts exactly 13 declarations between them. */
+  color-scheme: dark;
   /* dark-tokens:start */
   --bg: #121212;
   --surface: #1c1e23;

@@ -151,7 +151,14 @@ export function Sidebar({
         <Link
           href={SETTINGS_DESTINATION.href}
           aria-current={isActive(pathname, SETTINGS_DESTINATION.href) ? "page" : undefined}
-          className="nav-item"
+          // The .map()-rendered links above are direct children of the nav's
+          // `flex flex-col`, so they are blockified as flex items. This one sits
+          // inside a plain `div` wrapper instead and stays inline by default:
+          // .nav-item's vertical padding would not affect the wrapper's height,
+          // and its hover/data-active background would paint outside the line
+          // box — plausibly bleeding into the border-t divider just above it.
+          // `block` makes it box identically to the flex-item links.
+          className="nav-item block"
           data-active={isActive(pathname, SETTINGS_DESTINATION.href) || undefined}
         >
           {SETTINGS_DESTINATION.label}

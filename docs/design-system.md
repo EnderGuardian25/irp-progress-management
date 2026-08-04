@@ -128,6 +128,13 @@ Dark is user-reachable as of ADR-0021, selected by `data-theme` on `<html>`:
   and once under `:root[data-theme="dark"]`, because CSS cannot combine a media query with a
   selector list and this project uses no preprocessor. `apps/web/test/theme-tokens.test.ts`
   keeps the two copies honest — it fails if they ever drift apart.
+- Each theme rule also sets the CSS `color-scheme` property (`light` on the base `:root`,
+  `dark` in both dark rules) alongside its tokens. This is the one declaration that reaches
+  **native** controls — the `type="date"` calendar indicator, scrollbars, `<select>`
+  dropdowns — which are drawn by the browser, not by us, and so are not reachable by any
+  token. Without it, dark mode paints a dark calendar icon on a dark field. It sits outside
+  the `dark-tokens:start`/`:end` markers, since those are asserted to hold exactly the 13
+  tokens above.
 
 ### 3.4 The Bistec slot
 

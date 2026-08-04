@@ -30,6 +30,17 @@ test.describe("Settings — theme switch", () => {
     // Immediate, before any navigation — the control writes the DOM itself.
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
+    // The attribute existing is not the claim — the claim is that it APPLIES the
+    // dark tokens. This spec runs in the light `chromium` project, so
+    // prefers-color-scheme is light and the media query cannot be what sets this:
+    // only :root[data-theme="dark"] can. Without this line, typoing that selector
+    // leaves every unit and e2e test green while dark is entirely inert.
+    expect(
+      await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+      ),
+    ).toBe("#121212");
+
     await page.reload();
     // Survives only if the cookie was written AND the server stamped from it.
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

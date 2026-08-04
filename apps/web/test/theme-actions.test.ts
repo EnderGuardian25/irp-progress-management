@@ -31,6 +31,13 @@ describe("setTheme", () => {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
+      // The one attribute whose value is CONDITIONAL rather than hard-coded —
+      // theme-actions.ts derives it from `process.env.NODE_ENV === "production"`.
+      // Without pinning it, a hard-coded `secure: true` (which silently drops the
+      // cookie over plain HTTP in dev) or an inverted condition (which drops
+      // `Secure` in production) would both pass every other assertion here.
+      // Vitest runs with NODE_ENV=test, so the expected value is false.
+      secure: false,
       maxAge: 60 * 60 * 24 * 365,
     });
   });
