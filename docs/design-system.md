@@ -231,6 +231,16 @@ late/absent/missed counts are computed over required days only (FR-12).
 **Day mark states:** full (all submitted) · partial (proportional fill) · ochre notch (late)
 · slate (absent) · red (missed) · outline (not yet reached) · ringed (today).
 
+**The key (Plan 7 follow-up, ADR-0020).** These eight states — the seven above plus §3.2's Extra
+slot — are named on screen by `RibbonKey`, a `<details>` disclosure collapsed by default and
+rendered **once** below all batch sections on the **mentor** dashboard. Collapsed because §8.1's
+above-the-fold budget belongs to the figures; once because the dashboard renders a ribbon per
+batch; mentor-only because a student's ribbon shows their own status and the aggregation copy
+below would be false there. Its swatches import `MARK_COLOR` from `cycle-ribbon.tsx` rather than
+re-declaring the tokens — see `counts-row.tsx` for what re-declaring them costs. Swatch track is
+20px: at 16px a 55% `partial` fill did not read as different from a full `ok` bar and the `today`
+ring had no clearance, so the key was unreadable while its tests were green.
+
 **Batch aggregation (Plan 7).** A batch day holds a mix of outcomes and the ribbon draws one
 mark, so precedence is fixed: **missed → late → absent → partial → ok**, with an outline for a
 day nobody has reached. The failure outranks the warning, the warning outranks the excused
@@ -376,12 +386,13 @@ Non-negotiable, verified rather than assumed.
 
 ## 14. Governing ADRs
 
-All three written, each naming three rejected alternatives:
+Each names at least three rejected alternatives:
 
 | ADR | Decision |
 |---|---|
 | [0001](adr/0001-tailwind-and-shadcn-for-web-ui.md) | Tailwind CSS + shadcn/ui, retuned token-first |
 | [0002](adr/0002-light-default-with-dark-support.md) | Light default, dark supported, both contrast-verified |
 | [0003](adr/0003-cycle-ribbon-as-fr-28-summary.md) | Cycle ribbon as the FR-28 summary surface |
+| [0020](adr/0020-collapsed-ribbon-key-on-the-mentor-dashboard.md) | A collapsed, mentor-only key for the cycle ribbon (§7) |
 
 Changing anything in §3–§7 means amending the ADR that governs it, not just this file.

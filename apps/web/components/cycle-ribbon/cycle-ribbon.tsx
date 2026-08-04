@@ -35,7 +35,13 @@ export interface RibbonProps {
 // — §7 "outline (not yet reached)". Today is not a mark of its own — it is a
 // ring (isToday) drawn OVER whichever of these colours the day's real status
 // produces, so an unsubmitted today still shows as unsubmitted.
-const MARK_COLOR: Record<Exclude<DayMark, "future">, string> = {
+// Exported for RibbonKey alone. The key's swatches MUST be the same values the
+// bars are drawn with, or it can quietly start describing colours that are no
+// longer on screen — a legend that lies is worse than none. counts-row.tsx
+// records what happens otherwise: the status vocabulary reached four separate
+// inline definitions of these same tokens before it was consolidated. Do not
+// re-declare these anywhere; import them.
+export const MARK_COLOR: Record<Exclude<DayMark, "future">, string> = {
   ok: "var(--st-ok)",
   partial: "var(--st-ok)",
   late: "var(--st-late)",
