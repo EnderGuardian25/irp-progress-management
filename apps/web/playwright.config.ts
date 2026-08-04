@@ -106,7 +106,28 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      // The dark spec belongs to chromium-dark alone. Without this ignore it
+      // would also run here, in light, where its whole premise is false.
+      testIgnore: /dark-theme\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // The dark guard (ADR-0021). Scoped by testMatch to ONE read-only spec —
+      // NOT the whole suite. mentor-flows and student-flows mutate shared state
+      // (an entry for today, a report walked irreversibly to Evaluated, a
+      // reseed mid-run), so a second pass over them in the same serial run
+      // meets state the first pass consumed. That is precisely the
+      // state-dependence that made this suite score 24/24, 23/24 and 19/24
+      // before `workers: 1` was pinned. Cost here is one extra sign-in chain,
+      // not a doubled suite.
+      name: "chromium-dark",
+      testMatch: /dark-theme\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], colorScheme: "dark" },
+    },
+  ],
   webServer: [
     {
       // NOT `pnpm --filter @irp/api dev` — that is `tsx watch`, a file watcher.
