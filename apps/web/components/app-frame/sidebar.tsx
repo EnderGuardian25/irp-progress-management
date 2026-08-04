@@ -175,13 +175,15 @@ export function Sidebar({
         <Link
           href={SETTINGS_DESTINATION.href}
           aria-current={isActive(pathname, SETTINGS_DESTINATION.href) ? "page" : undefined}
-          // The .map()-rendered links above are direct children of the nav's
-          // `flex flex-col`, so they are blockified as flex items. This one sits
-          // inside a plain `div` wrapper instead and stays inline by default:
-          // .nav-item's vertical padding would not affect the wrapper's height,
-          // and its hover/data-active background would paint outside the line
-          // box — plausibly bleeding into the border-t divider just above it.
-          // `block` makes it box identically to the flex-item links.
+          // `.nav-item` (globals.css) is itself `display: flex`, so this link is
+          // already boxed identically to the .map()-rendered flex-item links
+          // above regardless of the wrapper it sits in. The `block` utility
+          // class below is a retained no-op, not load-bearing: `.nav-item`'s
+          // declaration is unlayered CSS, which outranks `@layer utilities`
+          // regardless of specificity, so Tailwind's `.block{display:block}`
+          // never wins against it. Kept rather than removed so a future change
+          // to `.nav-item` that drops its own `display` does not silently
+          // un-blockify this one link with nothing here to catch it.
           className="nav-item block"
           data-active={isActive(pathname, SETTINGS_DESTINATION.href) || undefined}
         >

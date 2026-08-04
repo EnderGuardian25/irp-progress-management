@@ -1,8 +1,30 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Sidebar } from "@/components/app-frame/sidebar";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+
+/**
+ * D5's whole point is that `signOut` (from `@/auth`, server-only) never
+ * reaches this Client Component — it is handed in as a `signOutSlot`
+ * `ReactNode` instead. Importing `@/auth` here would be a Next.js build
+ * error (a Client Component cannot import server-only code), so a
+ * regression would surface only at `next build`, not in this test suite.
+ * This is a source-level assertion, in the style `test/theme-tokens.test.ts`
+ * uses for `globals.css`, so it fails fast in `pnpm test` instead.
+ */
+describe("sidebar.tsx never imports @/auth", () => {
+  const source = readFileSync(
+    path.join(import.meta.dirname, "..", "components", "app-frame", "sidebar.tsx"),
+    "utf8",
+  );
+
+  it("has no import referencing @/auth", () => {
+    expect(source).not.toMatch(/from\s+["']@\/auth["']/);
+  });
+});
 
 describe("Sidebar Settings entry", () => {
   it("offers Settings to a mentor", () => {

@@ -245,8 +245,8 @@ replacing the placeholder diamond a `◆` used to stand in for — see §3.1 and
 `apps/web/components/app-frame/brand-mark.tsx`. **The topbar now holds only the brand and the
 user's name**: no dropdown chevron, no batch switcher. Every sidebar row carries a hand-drawn
 `currentColor` icon before its label (`▪` above is a stand-in for the real glyph — calendar,
-table, check-in-circle, circular arrow, two people, sliders, door-with-arrow — see §3 and Task 5
-of the Plan 7B implementation plan for the actual set), so the icon column, not just the label,
+table, check-in-circle, circular arrow, two people, sliders, door-with-arrow — see
+`apps/web/components/ui/icons.tsx` for the actual set), so the icon column, not just the label,
 now carries the active-row colour change.
 
 **`Batch 12 ▾` is gone from this mock, not merely left unbuilt-but-drawn.** The previous version
@@ -465,7 +465,7 @@ Non-negotiable, verified rather than assumed.
 | # | Item | Effect |
 |---|---|---|
 | — | **Bistec brand colour** | `--primary` is a placeholder. One-token swap; see §3.4 for hue constraints. |
-| — | **§6's topbar batch switcher is not built** | `Batch 12 ▾` in the §6 frame has no data behind it: `User` in `spec/openapi.yaml` carries no batch, and a mentor holds several, so one name in a global slot would be wrong for the primary audience. Batch selection is per-page instead, via the Roster and Cycles chips. Revisit only if a global batch context is ever genuinely needed; it would need a spec change first. |
+| — | **§6's topbar batch switcher is not built** | `Batch 12 ▾` would have appeared in the §6 frame with no data behind it: `User` in `spec/openapi.yaml` carries no batch, and a mentor holds several, so one name in a global slot would be wrong for the primary audience. Batch selection is per-page instead, via the Roster and Cycles chips. Revisit only if a global batch context is ever genuinely needed; it would need a spec change first. |
 | O-6 | Rubric criteria wording | Blocks the evaluation surface layout — five criteria need real labels before that screen is designed. |
 | O-7 | Absence/lateness penalty | `--st-absent` is neutral on the stated assumption. If leadership rules that absence penalises the score, this token and its copy change. |
 | O-5 | AI provider | Blocks every evaluation-output surface. Nothing here depends on it yet. |

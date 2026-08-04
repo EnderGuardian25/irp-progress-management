@@ -32,25 +32,30 @@ import lockup from "@/assets/hearts-academy-lockup.png";
  * size) against the `height`/`width` HTML ATTRIBUTES after load. Tailwind's
  * preflight applies `height: auto` to every `<img>` globally, and — because
  * this asset HAS a natural intrinsic size — the CSS auto-sizing algorithm
- * uses that natural ratio (256x244) over the attribute-derived one (140x134)
+ * uses that natural ratio over the attribute-derived one (140x134)
  * regardless of any `style` prop you add; **an explicit `style={{ height:
  * "auto" }}` on the `Image` was tried here and measured (via a real browser,
  * not reasoning) to change NOTHING — the preflight rule already forces the
  * exact same thing, so it is a pure no-op and was removed.** The only lever
  * that actually silences this specific check, without changing the visible
  * size, is making the declared attribute match what will actually render:
- * at `width: 140` against this asset's true 256x244 pixels, the rendered
- * height is `140 * 244 / 256 = 133.4375`, which the browser reports via the
+ * at `width: 140` against this asset's true 320x305 pixels, the rendered
+ * height is `140 * 305 / 320 = 133.4375`, which the browser reports via the
  * `.height` IDL as `133` (rounded). Hence `height: 133` here, not 134.
  *
  * **This value is derived from `hearts-academy-lockup.png`'s CURRENT pixel
- * dimensions (256x244) and MUST be recomputed if that asset is ever
+ * dimensions (320x305) and MUST be recomputed if that asset is ever
  * regenerated** — this is exactly the failure mode that produced the
  * original bug: Task 3's transparent-field trim changed the asset from the
- * 1080x1031-derived assumption to 256x244, and the declared `height: 134`
+ * 1080x1031-derived assumption to 320x305, and the declared `height: 134`
  * was never updated to match. If the asset changes again: read its new
- * pixel dimensions, then set `height = round(140 * naturalHeight /
- * naturalWidth)`.
+ * pixel dimensions from the FILE — e.g. its PNG IHDR header — not from a
+ * browser's `naturalWidth`/`naturalHeight`, which can report a smaller
+ * *optimized* variant Next served (256x244 was observed here) rather than
+ * the file's own size; the ratio is identical (244/256 = 305/320 =
+ * 0.953125) so the height this formula derives is unaffected either way,
+ * but the stated dimensions above must be the file's. Then set `height =
+ * round(140 * naturalHeight / naturalWidth)` using the FILE's dimensions.
  */
 const VARIANTS = {
   mark: { src: mark, width: 32, height: 32, alt: "", padding: "4px", radius: "8px" },

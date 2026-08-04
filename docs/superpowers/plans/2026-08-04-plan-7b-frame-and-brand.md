@@ -1409,7 +1409,25 @@ The PR is opened by `superpowers:finishing-a-development-branch` **after** the w
 | §8 back/forward open item | 9 |
 | §9 non-goals | Global Constraints |
 
-No gaps.
+**Correction (whole-branch review, post-merge-prep fix wave):** the "§6 all nine test rows" row
+above is wrong — two of the nine were never written, and no task closed them:
+
+- **"The sidebar never imports `@/auth`"** was carried into the fix wave and landed as a source
+  assertion in `test/sidebar.test.tsx` (`readFileSync` + a regex against `sidebar.tsx`, in the
+  style `test/theme-tokens.test.ts` uses for `globals.css`).
+- **"The label-only branch renders an icon"** was investigated in the same fix wave and found to
+  need a fixture destination that no task's data model provides: `MENTOR_DESTINATIONS` and
+  `STUDENT_DESTINATIONS` in `sidebar.tsx` contain only `LinkedDestination` entries, both arrays
+  are module-private with no export, and the `Sidebar` component takes no prop that reaches them —
+  so there is no way to render the `LabelOnlyDestination` branch through the component's existing
+  public surface. Closing this row would require exporting the destination lists/types or adding
+  a testing-only prop, i.e. reshaping `sidebar.tsx` to make it testable, which was judged worse
+  than the gap it would close. **This row remains open** — the `<Glyph />` Task 5 added to that
+  branch is still unexercised by any test, and the whole suite stays green if it is deleted.
+
+Both gaps are the plan grading its own coverage wrongly, not an implementer omission — see
+`.superpowers/sdd/2026-08-04-plan-7b-frame-and-brand/final-review-fixes.md` item 2 and
+`final-fix-report.md` for the full account.
 
 **Type consistency:** `BrandMark({ variant }: { variant: "mark" | "lockup" })` is defined in Task 3 and used with that exact prop in Tasks 3 and 4. The seven icon components are defined in Task 5 with the names `TodayIcon`, `RosterIcon`, `ReviewIcon`, `CyclesIcon`, `StudentsIcon`, `SettingsIcon`, `SignOutIcon`; Task 5 consumes the first six and Task 6 consumes `SignOutIcon`. `icon: () => ReactElement` is added to both destination interfaces in Task 5 and every array literal in that task supplies one. `signOutSlot?: ReactNode` is added in Task 6 and passed in Task 6's layout edit. `--brand-card` is created in Task 2 and read as `var(--brand-card)` in Task 3.
 

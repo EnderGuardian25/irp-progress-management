@@ -76,6 +76,17 @@ redundant `ml-2` (`apps/web/components/app-frame/sidebar.tsx`); `sidebar.test.ts
 `app-frame.test.tsx` both re-run clean, the latter's `/^Review\s*3$/` assertion being
 whitespace-tolerant by design.
 
+**A second latent defect was found and fixed in the same pass: a dev-console `next/image`
+mismatch warning on the lockup (`55ec68e`).** The `Image`'s declared `height: 134` was hand-set
+against `hearts-academy-lockup.png`'s pixel dimensions at the time it was chosen, and Task 3's
+transparent-field trim changed those dimensions without the declared height being recomputed to
+match — next/image's dev-only warning compares the declared `height`/`width` HTML attributes
+against the actual rendered size, not CSS, so the mismatch fired on every load. A `style={{
+height: "auto" }}` override was tried and measured (via a real browser) to be a no-op: Tailwind's
+preflight already forces `height: auto` on every `<img>`. Fixed by recomputing the declared height
+from the asset's true pixel ratio (see `brand-mark.tsx`'s comment for the exact figures); `height:
+133` is what actually silences the check, because it is what the browser already renders.
+
 **The back/forward theme question Plan 7A left open reproduces, and it is worse than 7A's review
 predicted — logged as new open point O-16.** 7A expected the page to *stay* dark while only the
 radio might misread "Follow system." Measured with the OS reporting light (so any dark rendering
@@ -87,8 +98,9 @@ Plan 7B — `theme-control.tsx`/`theme-actions.ts` were untouched by this plan a
 fix below. A real fix is an ADR-level decision: the theme cookie is deliberately `httpOnly`
 (ADR-0021), so the client cannot read it to re-stamp the attribute on restore, and every candidate
 (drop `httpOnly`, add `revalidatePath`, introduce a client-readable store) either needs its own ADR
-or is the exact thing ADR-0021 rejected on instant-repaint grounds. Not fixed here on purpose — see
-`docs/interview-and-prd.md` O-16.
+or is the exact thing `theme-actions.ts`'s docblock rejects — it would force a server round trip
+and re-render on every switch, contradicting ADR-0021's flash-free Decision. Not fixed here on
+purpose — see `docs/interview-and-prd.md` O-16.
 
 **What Task 9 did fix: the radio group's half of that defect.** `ThemeControl` seeded its checked
 state from the server-supplied `current` prop alone, which is exactly what a stale router-cache

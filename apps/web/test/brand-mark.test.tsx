@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { BrandMark } from "@/components/app-frame/brand-mark";
 
+/**
+ * Vite resolves a static PNG import to a plain URL **string**, not the
+ * `{src, width, height}` object a real bundler's static import produces — so
+ * this suite exercises `next/image`'s string-`src` path, never the
+ * static-import path. That is exactly why `next/image`'s production-only
+ * `height` inference from a static import (see CLAUDE.md's hard-won-facts
+ * list) is untestable here: `isStaticImport(src)` is false against a string,
+ * the inference branch never runs, and every test below would fail if
+ * `BrandMark` ever omitted `height` — which is by design, not a gap.
+ */
 describe("BrandMark", () => {
   it("renders the mark variant with an EMPTY alt, because adjacent text names the product", () => {
     const { container } = render(<BrandMark variant="mark" />);

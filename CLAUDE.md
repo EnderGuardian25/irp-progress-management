@@ -248,6 +248,20 @@ spec §7 and remove the bypass. ADR-0012.
   variable. **CI is unaffected**: `.env.local` is git-ignored and CI never sets the flag, which
   is why the CI build step deliberately runs with it absent. If a local `next build` ever
   succeeds with `AUTH_DEV_BYPASS=true`, guard one has broken — investigate immediately.
+- **`next/image` cannot infer `height` from a static import under Vitest, even though it can in
+  production.** In production, omitting `height` and supplying only `width` against a statically
+  imported image is sound: `next/dist/shared/lib/get-img-props.js` computes
+  `height = round(staticImageData.height * width / staticImageData.width)` because
+  `isStaticImport(src)` is true for the object a static import resolves to. Under Vitest it is
+  **not** — Vite resolves a PNG import to a plain URL **string**, not a `{src, width, height}`
+  object, so `isStaticImport(src)` is false, the inference branch never runs, and all four
+  `brand-mark.test.tsx` cases fail with *"Image with src … is missing required `height`
+  property."* This was measured (Plan 7B's whole-branch review), not theorised. Adopting the
+  inference would need a Vitest asset stub for PNG imports first; until then, declare both
+  `width` and `height` explicitly on every statically imported `next/image`, and do not "simplify"
+  one by dropping `height` on the assumption Next will infer it — the test suite exercises the
+  string-`src` path, not the static-import path, so that regression would only surface here, not
+  in production.
 
 **Container facts from Plan 4A:**
 
