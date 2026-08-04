@@ -97,17 +97,25 @@ export async function runSeed(prisma: PrismaClient, now: Date): Promise<void> {
     prisma.mentorDayRecord.deleteMany({ where: { studentId: { in: ids } } }),
     prisma.absenceRecord.deleteMany({ where: { studentId: { in: ids } } }),
     // OR'd with "enrolled in a seed-owned batch", not just "studentId in
-    // ids": the seed owns Batch Aurora/Basalt by NAME (the cycle deleteMany
-    // right below already reflects that), and the batch deleteMany two
-    // lines down throws a Prisma P2003 foreign-key violation if ANY
-    // enrolment still references one of those batch ids -- including a
-    // non-seed student's. Task 16's e2e Students-page registration test
-    // proved this: a throwaway student registered into Batch Basalt and
-    // then archived (soft-deleted, externalId never in SEED_EXTERNAL_IDS)
-    // left its Enrolment row behind, and the NEXT db:seed run failed on
-    // Enrolment_batchId_fkey trying to delete Batch Basalt out from under
-    // it. Archiving a user only soft-deletes the User row; it was never
-    // going to clear their Enrolment too.
+    // ids": the seed owns its batches by NAME, via SEED_BATCH_NAMES (the
+    // cycle deleteMany right below already reflects that), and the batch
+    // deleteMany two lines down throws a Prisma P2003 foreign-key violation
+    // if ANY enrolment still references one of those batch ids -- including
+    // a non-seed student's. Task 16's e2e Students-page registration test
+    // proved this: a throwaway student registered into batch B and then
+    // archived (soft-deleted, externalId never in SEED_EXTERNAL_IDS) left
+    // its Enrolment row behind, and the NEXT db:seed run failed on
+    // Enrolment_batchId_fkey trying to delete that batch out from under it.
+    // Archiving a user only soft-deletes the User row; it was never going to
+    // clear their Enrolment too.
+    //
+    // Ownership-by-name also means RENAMING SEED_BATCH_NAMES orphans the old
+    // rows rather than migrating them: an existing dev database keeps the
+    // previously-named batches (their cycles intact, enrolments cleared by
+    // the studentId arm above) and gains the new ones, so the batch picker
+    // shows both sets. Delete the old rows by name once, by hand, after any
+    // such rename -- this happened on 2026-08-04 going from
+    // "Batch Aurora"/"Batch Basalt" to "Batch 1"/"Batch 2".
     prisma.enrolment.deleteMany({
       where: {
         OR: [{ studentId: { in: ids } }, { batch: { name: { in: Object.values(SEED_BATCH_NAMES) } } }],

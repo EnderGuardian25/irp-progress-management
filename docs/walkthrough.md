@@ -44,16 +44,16 @@ list the seed and the dev sign-in picker both read.
 
 | Name | Batch | What makes them worth showing |
 |---|---|---|
-| **Dev Student** | Aurora | Fully compliant. The clean case, and the only student you can sign in as. |
-| **Nuwan Perera** | Aurora | Habitually late — submits inside the grace window, so he is flagged but still counted. |
-| **Sachini Silva** | Aurora | Has genuinely missed weekdays. The only Aurora student whose compliance is below 100%. |
-| **Kavindu Jayasuriya** | Aurora | Records absences with reasons. Read his compliance figure carefully — see O-7 below. |
-| **Tharindu Weerasinghe** | Aurora | **Archived.** Must not appear on any active roster or cycle list (FR-5). |
-| **Ishara Gunawardena** | Basalt | Compliant. |
-| **Dilini Rathnayake** | Basalt | Works weekends. Her entries drive the `+N extra` figure and the ribbon's half-width Extra slots (FR-33). |
-| **Ramesh Kumar** | Basalt | Joined mid-cycle. His pre-enrolment weekdays read `—`, not `missed` (FR-27). |
-| **Amaya Wickramasinghe** | Basalt | Transferred Aurora → Basalt mid-programme (FR-8). |
-| **Chamodi Herath** | Basalt | Mixed record — some late, some missed, some absent. |
+| **Dev Student** | Batch 1 | Fully compliant. The clean case, and the only student you can sign in as. |
+| **Nuwan Perera** | Batch 1 | Habitually late — submits inside the grace window, so he is flagged but still counted. |
+| **Sachini Silva** | Batch 1 | Has genuinely missed weekdays. The only Batch 1 student whose compliance is below 100%. |
+| **Kavindu Jayasuriya** | Batch 1 | Records absences with reasons. Read his compliance figure carefully — see O-7 below. |
+| **Tharindu Weerasinghe** | Batch 1 | **Archived.** Must not appear on any active roster or cycle list (FR-5). |
+| **Ishara Gunawardena** | Batch 2 | Compliant. |
+| **Dilini Rathnayake** | Batch 2 | Works weekends. Her entries drive the `+N extra` figure and the ribbon's half-width Extra slots (FR-33). |
+| **Ramesh Kumar** | Batch 2 | Joined mid-cycle. His pre-enrolment weekdays read `—`, not `missed` (FR-27). |
+| **Amaya Wickramasinghe** | Batch 2 | Transferred Batch 1 → Batch 2 mid-programme (FR-8). |
+| **Chamodi Herath** | Batch 2 | Mixed record — some late, some missed, some absent. |
 | **Dev Mentor** · **Priya Fernando** | — | The two mentors. Sign in as Dev Mentor. |
 
 ---
@@ -68,17 +68,17 @@ You land here. One block per batch, each with a cycle ribbon and the figures ben
 
 **What to point at:**
 
-- **Batch Aurora reads `Cycle 3`. Batch Basalt reads `Cycle 1`. Both show the same calendar
+- **Batch 1 reads `Cycle 3`. Batch 2 reads `Cycle 1`. Both show the same calendar
   dates.** This is the whole of FR-6 and FR-9 in one glance: cycle *boundaries* are fixed calendar
   months (the 10th to the 9th) for everyone, but which cycle is a batch's *first* depends on when
-  it was admitted. Aurora started two cycles earlier, so it is on its third. Nobody has to explain
+  it was admitted. Batch 1 started two cycles earlier, so it is on its third. Nobody has to explain
   the rule; the two ribbons say it.
 - **The ribbon is one bar per required day.** Weekends are absent by construction — the strip is
   five-a-week and grows a narrow `+` slot only where somebody actually worked a weekend. Look at
-  Basalt's ribbon for those slots; Dilini put them there.
+  Batch 2's ribbon for those slots; Dilini put them there.
 - **"N of M submitted", then late / absent / missed.** Every figure carries a word as well as a
   colour, so it reads correctly in greyscale and for a colour-blind viewer.
-- **`+4 extra this cycle` on Basalt** is in muted grey, not a status colour. Weekend work is
+- **`+4 extra this cycle` on Batch 2** is in muted grey, not a status colour. Weekend work is
   recorded and surfaced, but it is not a compliance state and never enters a denominator.
 
 **If you are demoing in the morning, read this first.** See "What surprised us" #1 — the counts
@@ -89,9 +89,11 @@ will legitimately read `0 of 4 submitted`, and you need to be able to say why wi
 `Roster` in the sidebar. One row per enrolled student for one date, with a batch picker and a date
 picker.
 
-- Four Aurora rows, not five — **Tharindu is archived and has left the active roster** (FR-5). His
+- Four Batch 1 rows, not five — **Tharindu is archived and has left the active roster** (FR-5). His
   history is intact; he simply cannot be worked on.
-- Switch to Basalt and look at Dilini's `+N extra` badge.
+- Switch to Batch 2 and look at Dilini's **Extra (cycle)** count. Say the "(cycle)" part out loud:
+  every other column on that row describes the one selected date, but this one spans the whole
+  cycle containing it, so it does not change as you step the date picker within a cycle.
 
 ### 3. Review
 
@@ -108,9 +110,9 @@ picker.
 
 `Cycles`. Batch picker, cycle picker, one row per student.
 
-- Aurora offers **Cycle 1, 2 and 3**; Basalt offers only Cycle 1. The picker only ever offers
+- Batch 1 offers **Cycle 1, 2 and 3**; Batch 2 offers only Cycle 1. The picker only ever offers
   cycles that have actually started.
-- **Sachini is the one Aurora student below 100%** — she has genuinely missed days.
+- **Sachini is the one Batch 1 student below 100%** — she has genuinely missed days.
 - **Nuwan shows 5 late and still reads 100%.** Late work is late, not absent: it is flagged, and it
   counts.
 - **Kavindu shows 4 absences and also reads 100%.** This is the open question O-7 made visible —
@@ -132,7 +134,7 @@ picker.
 
 ## Student walkthrough
 
-Sign out, then sign in as **Student** (Dev Student, Aurora, fully compliant).
+Sign out, then sign in as **Student** (Dev Student, Batch 1, fully compliant).
 
 ### 6. Today
 
@@ -240,8 +242,8 @@ cycle so the shape of the month is visible.
 
 ### 4. The two batches make FR-6/FR-9 self-explanatory
 
-The best thing on the mentor dashboard was not planned as a feature: Aurora reading `Cycle 3` and
-Basalt `Cycle 1` **over identical calendar dates** explains the cycle model faster than any
+The best thing on the mentor dashboard was not planned as a feature: Batch 1 reading `Cycle 3` and
+Batch 2 `Cycle 1` **over identical calendar dates** explains the cycle model faster than any
 sentence. Lead with it.
 
 ---

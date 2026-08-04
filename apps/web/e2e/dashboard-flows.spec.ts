@@ -72,13 +72,13 @@ test.describe("mentor Today (FR-28)", () => {
     expect(barCount).toBeGreaterThanOrEqual(declared);
   });
 
-  test("the Cycles page lists a row per Batch Aurora student and never a score", async ({ page }) => {
+  test("the Cycles page lists a row per batch-1 student and never a score", async ({ page }) => {
     await signInAsMentor(page);
     await page.getByRole("link", { name: "Cycles" }).click();
     await expect(page.getByRole("heading", { name: "Cycles" })).toBeVisible();
 
-    const activeAuroraStudents = SEED_STUDENTS.filter((s) => s.batch === "A" && s.kind !== "archived");
-    for (const s of activeAuroraStudents) {
+    const activeBatch1Students = SEED_STUDENTS.filter((s) => s.batch === "A" && s.kind !== "archived");
+    for (const s of activeBatch1Students) {
       await expect(page.getByText(s.name)).toBeVisible();
     }
     // The archived persona has left active rosters (FR-5).

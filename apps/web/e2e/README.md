@@ -15,22 +15,22 @@ Four spec files, one Playwright config, one seeded database:
 dev-identity picker both derive from — see its own docblock. The picker itself still only carries
 three entries (`apps/web/lib/dev-identities.ts`: Mentor, Student, Unregistered user) — Plan 5 kept
 it that way and Plan 6 did not extend it — so a **Student** flow can only ever be driven as
-`dev-student-1` ("Dev Student", compliant, Batch Aurora). Every other persona is reached from the
+`dev-student-1` ("Dev Student", compliant, Batch 1). Every other persona is reached from the
 **mentor's** side instead, since Roster/Review/Students read every batch's students, not just the
 signed-in identity:
 
 | externalId | Name | Batch | Kind | Exercised in |
 |---|---|---|---|---|
-| `dev-student-1` | Dev Student | Aurora (A) | compliant | `student-flows.spec.ts` (signed in as), `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (signed in as for the whole student My month suite; also part of Batch Aurora's dashboard/Cycles figures) |
-| `seed-student-a2` | Nuwan Perera | Aurora (A) | late | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch Aurora's N of M and Cycles listing) |
-| `seed-student-a3` | Sachini Silva | Aurora (A) | missed | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch Aurora's N of M and Cycles listing) |
-| `seed-student-a4` | Kavindu Jayasuriya | Aurora (A) | absent | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch Aurora's N of M and Cycles listing) |
-| `seed-student-a5` | Tharindu Weerasinghe | Aurora (A) | **archived** | `mentor-flows.spec.ts` (asserted ABSENT from the active roster), `dashboard-flows.spec.ts` (asserted ABSENT from the Cycles listing too) |
-| `seed-student-b1` | Ishara Gunawardena | Basalt (B) | compliant | `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
-| `seed-student-b2` | Dilini Rathnayake | Basalt (B) | **weekend** | `mentor-flows.spec.ts` (roster's `+N extra` badge), `dashboard-flows.spec.ts` (Batch Basalt's N of M figure) |
-| `seed-student-b3` | Ramesh Kumar | Basalt (B) | joiner | `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
-| `seed-student-b4` | Amaya Wickramasinghe | Basalt (B) | transfer | `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
-| `seed-student-b5` | Chamodi Herath | Basalt (B) | **mixed** | `mentor-flows.spec.ts` (review's Submitted → In Review → Evaluated walk, and the archive flow), `dashboard-flows.spec.ts` (part of Batch Basalt's N of M figure) |
+| `dev-student-1` | Dev Student | Batch 1 (A) | compliant | `student-flows.spec.ts` (signed in as), `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (signed in as for the whole student My month suite; also part of Batch 1's dashboard/Cycles figures) |
+| `seed-student-a2` | Nuwan Perera | Batch 1 (A) | late | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch 1's N of M and Cycles listing) |
+| `seed-student-a3` | Sachini Silva | Batch 1 (A) | missed | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch 1's N of M and Cycles listing) |
+| `seed-student-a4` | Kavindu Jayasuriya | Batch 1 (A) | absent | `mentor-flows.spec.ts` (roster row count), `dashboard-flows.spec.ts` (Batch 1's N of M and Cycles listing) |
+| `seed-student-a5` | Tharindu Weerasinghe | Batch 1 (A) | **archived** | `mentor-flows.spec.ts` (asserted ABSENT from the active roster), `dashboard-flows.spec.ts` (asserted ABSENT from the Cycles listing too) |
+| `seed-student-b1` | Ishara Gunawardena | Batch 2 (B) | compliant | `dashboard-flows.spec.ts` (part of Batch 2's N of M figure) |
+| `seed-student-b2` | Dilini Rathnayake | Batch 2 (B) | **weekend** | `mentor-flows.spec.ts` (roster's `+N extra` badge), `dashboard-flows.spec.ts` (Batch 2's N of M figure) |
+| `seed-student-b3` | Ramesh Kumar | Batch 2 (B) | joiner | `dashboard-flows.spec.ts` (part of Batch 2's N of M figure) |
+| `seed-student-b4` | Amaya Wickramasinghe | Batch 2 (B) | transfer | `dashboard-flows.spec.ts` (part of Batch 2's N of M figure) |
+| `seed-student-b5` | Chamodi Herath | Batch 2 (B) | **mixed** | `mentor-flows.spec.ts` (review's Submitted → In Review → Evaluated walk, and the archive flow), `dashboard-flows.spec.ts` (part of Batch 2's N of M figure) |
 | `dev-admin-1` | Dev Mentor | — | mentor | `mentor-flows.spec.ts` (signed in as), `dashboard-flows.spec.ts` (signed in as for the whole mentor Today/Cycles suite) |
 | `seed-mentor-2` | Priya Fernando | — | mentor | — (never signed in by any spec) |
 
@@ -112,10 +112,10 @@ the Cycles view, and FR-29/FR-30's student My month.
 
 | Test | Personas it touches | What it proves |
 |---|---|---|
-| N of M submitted, per batch | `dev-admin-1`'s view of Batch Aurora and Batch Basalt | The must-ship figure renders for every batch, N never exceeds M, and N is never smaller than the late count shown beside it |
-| M matches the Roster's row count | Batch Aurora's active students | The dashboard's denominator and the Roster agree for the *same day* |
-| Ribbon length matches the cycle it names | Batch Aurora | The figcaption's "Day x of y" and the ribbon's rendered day count agree — see the caveat below |
-| Cycles lists every active Aurora student, never a score | All Batch A personas; the archived one (Tharindu) | FR-5 — an archived student leaves active views; and no score exists to leak |
+| N of M submitted, per batch | `dev-admin-1`'s view of Batch 1 and Batch 2 | The must-ship figure renders for every batch, N never exceeds M, and N is never smaller than the late count shown beside it |
+| M matches the Roster's row count | Batch 1's active students | The dashboard's denominator and the Roster agree for the *same day* |
+| Ribbon length matches the cycle it names | Batch 1 | The figcaption's "Day x of y" and the ribbon's rendered day count agree — see the caveat below |
+| Cycles lists every active Batch 1 student, never a score | All Batch A personas; the archived one (Tharindu) | FR-5 — an archived student leaves active views; and no score exists to leak |
 | Month N of 6, own pills, empty S&W | `dev-student-1` (fully compliant) | FR-29's three elements render together |
 | No score, rank, or peer name | `dev-student-1` vs every other persona | FR-30, asserted against the whole `<main>` text |
 | Student blocked from mentor dashboards | `dev-student-1` | `/cycles` redirects home, and the link is never offered |

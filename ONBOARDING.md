@@ -40,20 +40,52 @@ Set-Location irp-progress-management
 pnpm install
 ```
 
-## 3. Generate the git-ignored packages
+## 3. Generate and build the workspace packages
 
 `packages/types` and `packages/client` are generated from `spec/openapi.yaml`
-and are git-ignored — they don't exist in a fresh clone. Typecheck and build
-fail without this step:
+and are git-ignored — they don't exist in a fresh clone. `packages/core` is
+committed source, but `apps/api` and `apps/web` resolve it from `dist/`, which
+is also git-ignored. All three steps are required:
 
 ```powershell
 pnpm generate
+pnpm --filter @irp/core build
 pnpm --filter @irp/client build
 ```
 
 (`pnpm generate` alone leaves `packages/client/dist` stale — the extra build
 step above is required, not optional; `next build` is the only thing that
 actually catches a missing dist.)
+
+**Nothing in §2–§3 warns you when it's stale rather than missing.** `pnpm
+install` succeeds, `pnpm dev` starts, and the failure surfaces later as what
+looks like broken application code:
+
+| What you see | Actually means |
+|---|---|
+| `apps/api` exits at boot: `SyntaxError: The requested module '@irp/core' does not provide an export named 'X'` | `packages/core/dist` is stale — rebuild `@irp/core` |
+| Browser shows a Turbopack **Build Error**: `Export X doesn't exist in target module … packages/client/src/index.ts` | `packages/client/src` was generated from an older `spec/openapi.yaml` — re-run `pnpm generate`, then rebuild `@irp/client` |
+
+So **returning to an existing clone after pulling is not a shorter path than a
+fresh one** — run §3 in full every time, and §5's `prisma generate` too. Both
+are cheap (a few seconds) and neither is safe to skip on the assumption that
+the directories already existing means they're current.
+
+There are **five** git-ignored generated trees in total, and the fifth catches
+people out because it makes a *passing* check fail rather than making something
+break:
+
+```powershell
+pnpm --filter @irp/web build   # AUTH_DEV_BYPASS=false — see §9
+```
+
+`apps/web/tsconfig.json` includes `.next/types/**/*.ts`, and Next's
+`typedRoutes` route union lives in `.next/types/routes.d.ts` — written by
+`next build`, **not** by `next dev` (dev writes its own copy to
+`.next/dev/types/`, which `tsconfig` does not include). If the last
+`next build` predates a page being added, `pnpm typecheck` reports errors like
+`Type '"/roster"' is not assignable to type 'Route'` against code that is
+correct and works in the browser. Run the build once and it goes clean.
 
 ## 4. Env files
 
@@ -112,6 +144,14 @@ Why `127.0.0.1` and not `localhost`: on Windows, `localhost` can resolve to
 `127.0.0.1` avoids a `P1001: Can't reach database server` that looks like a
 broken database and isn't.
 
+Why `prisma generate` comes **after** `migrate deploy` and **before** §6: the
+client in `apps/api/src/generated/prisma` is a third git-ignored generated
+directory, and it is generated from `schema.prisma`, not from the database. A
+stale one has no model property for anything a newer migration added, so the
+seed fails with a bare `TypeError: Cannot read properties of undefined
+(reading 'deleteMany')` — the undefined thing is the missing model, not the
+data.
+
 ## 6. Seed demo data
 
 ```powershell
@@ -121,6 +161,11 @@ pnpm --filter @irp/api run db:seed
 Idempotent — safe to re-run any time. **Re-run it after running the API's
 own test suite** (`pnpm --filter @irp/api test`), because those tests
 `TRUNCATE` the tables the seed populates.
+
+It reads `DATABASE_URL` from `apps/api/.env` via `process.loadEnvFile()`, so
+unlike the `prisma` commands above it does not need the shell variable — but
+setting it does no harm, since `loadEnvFile` never overrides an already-set
+variable.
 
 ## 7. Run the app
 
@@ -162,8 +207,13 @@ batch's students, not just the signed-in identity.
 
 | Batch | Started | Notes |
 |---|---|---|
-| **Batch Aurora** | 2 cycles before today | Older batch, further into its lifecycle |
-| **Batch Basalt** | at the start of the current cycle | Newer batch, just getting going |
+| **Batch 1** | 2 cycles before today | Older batch, further into its lifecycle. `batch: "A"` in the fixtures |
+| **Batch 2** | at the start of the current cycle | Newer batch, just getting going. `batch: "B"` |
+
+The names come from `SEED_BATCH_NAMES` in `packages/fixtures`. Renaming them
+there does **not** migrate an existing dev database — the seed owns its
+batches by name, so the old rows survive as empty orphans and the picker shows
+both sets. Delete the old ones by name once after any rename.
 
 ### Seeded students (10 total, plus 2 mentors)
 
@@ -180,9 +230,9 @@ character. Nothing here is a fixed calendar date.
 | Kavindu Jayasuriya | A | `absent` | Roughly 1 in 5 required days is a recorded Absence with a reason |
 | Tharindu Weerasinghe | A | `archived` | Stopped submitting 3 weeks after joining, then archived (soft-deleted) — proves archived students disappear from active Roster/Cycles views (FR-5) |
 | Ishara Gunawardena | B | `compliant` | Clean baseline in the newer batch |
-| Dilini Rathnayake | B | `weekend` | Submits an Extra entry every Saturday — shows the Roster's "+N extra" badge; weekends never count as required/missed |
-| Ramesh Kumar | B | `joiner` | Enrolled a few days after Batch Basalt's cycle started — a mid-cycle joiner (FR-27) |
-| Amaya Wickramasinghe | B | `transfer` | Started in Batch Aurora, transferred to Batch Basalt when it opened — cross-batch enrolment history |
+| Dilini Rathnayake | B | `weekend` | Submits an Extra entry every Saturday — drives the Roster's "Extra (cycle)" count; weekends never count as required/missed |
+| Ramesh Kumar | B | `joiner` | Enrolled a few days after Batch 2's cycle started — a mid-cycle joiner (FR-27) |
+| Amaya Wickramasinghe | B | `transfer` | Started in Batch 1, transferred to Batch 2 when it opened — cross-batch enrolment history |
 | Chamodi Herath | B | `mixed` | A blend of on-time, late, missed, and absent days — the most "realistic" single persona; also the one used to demo the Roster → Review → Submitted → In Review → Evaluated → locked walk, and the archive/restore flow |
 
 Older daily reports are pre-advanced through the review lifecycle so you
@@ -195,14 +245,17 @@ don't have to manually walk every day forward:
 
 1. Sign in as **Mentor**.
 2. **Roster** — see both batches, the per-student status for today, Dilini's
-   "+N extra" weekend badge, and that Tharindu (archived) does not appear.
+   "Extra (cycle)" count, and that Tharindu (archived) does not appear.
+   Note the Extra column is a **cycle** total, not a figure for the selected
+   date: change the date within the same cycle and it does not move. Every
+   other column on the row is date-scoped.
 3. **Review** → pick Chamodi Herath (or any recent Submitted report) → walk
    it Submitted → In Review → Evaluated, then note it locks.
 4. **Students** directory → show the archive flow, and that it's reversible
    (restore, FR-5).
 5. **Today** dashboard → per-batch "N of M submitted" figures and the cycle
    ribbon.
-6. **Cycles** view → every active Aurora/Basalt student, confirm no score is
+6. **Cycles** view → every active student in either batch, confirm no score is
    shown (scoring/evaluation is blocked on open point O-5 — AI provider not
    yet chosen).
 7. Sign out, sign back in as **Student** → `/my-month` → own pills only, no
@@ -217,7 +270,13 @@ don't have to manually walk every day forward:
 |---|---|---|
 | `P1001: Can't reach database server` despite a healthy container | `localhost` resolved to `::1` | Use `127.0.0.1` in every connection string |
 | `PrismaConfigEnvError` on `migrate`/`generate` | Prisma CLI doesn't read `.env` | `$env:DATABASE_URL = "..."` in the current shell first |
+| `docker version` fails with `failed to connect to the docker API at npipe:...dockerDesktopLinuxEngine` | Docker Desktop isn't running (the engine, not the CLI — `docker.exe` resolves fine) | Start Docker Desktop, then re-probe until it answers. On a per-user install it is **not** under `C:\Program Files\Docker` — see the path in `handoff.md`'s local-environment table |
+| `apps/api` exits immediately: `SyntaxError: The requested module '@irp/core' does not provide an export named 'X'` | `packages/core/dist` is stale — it predates the export | `pnpm --filter @irp/core build` (§3) |
+| Turbopack **Build Error** in the browser: `Export X doesn't exist in target module … packages/client/src/index.ts` | `packages/client/src` was generated from an older `spec/openapi.yaml` | `pnpm generate`, then `pnpm --filter @irp/client build` (§3) |
+| Seed fails with `TypeError: Cannot read properties of undefined (reading 'deleteMany')` | Stale Prisma client — the undefined value is a model a newer migration added | `pnpm --filter @irp/api exec prisma generate` (§5), then re-seed |
+| `pnpm typecheck` reports `TS2322: Type '"/roster"' is not assignable to type 'Route'` (and similar for other routes) on pages that render fine | Stale `.next/types/routes.d.ts` — `typedRoutes` types come from `next build`, and `next dev` writes a copy `tsconfig` doesn't read | `$env:AUTH_DEV_BYPASS = "false"; pnpm --filter @irp/web build`, then re-typecheck. **Don't cast the href** — the code is correct |
 | Page renders but nothing is clickable | Browser pointed at `127.0.0.1:3000` | Use `http://localhost:3000` |
+| Signed in fine, then every page bounces to `/signin?reason=expired` | **Expected after any `apps/web` restart.** The dev signing keypair is generated once per *process* (`lib/dev-identity.ts`), so tokens minted by the previous process no longer verify — `apps/api` returns 401 and `lib/api-client.ts` redirects. Tokens are 8h, so this is a restart, not a timeout | Sign in again. A dev-server restart triggered by editing a workspace package (e.g. re-running `pnpm generate`) does this too, which is why it can look spontaneous |
 | Sign-in redirect lands on the wrong origin / cookie missing | Same cause as above | Use `localhost`, not `127.0.0.1`, in the browser |
 | `docker compose up` port conflict on 5432 | Another local Postgres/container already holds it | This repo standardizes on 5433 — make sure `$env:IRP_DB_PORT = "5433"` is set before `up` |
 | `next build` succeeds locally with `AUTH_DEV_BYPASS=true` | The production guard is broken — should never happen | Investigate immediately, don't ignore |

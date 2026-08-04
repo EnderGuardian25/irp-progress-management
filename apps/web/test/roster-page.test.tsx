@@ -148,7 +148,8 @@ describe("RosterPage", () => {
     });
     expect(screen.getByText("Amaya Perera")).toBeInTheDocument();
     expect(screen.getByText("On time")).toBeInTheDocument();
-    expect(screen.getByText("+2 extra")).toBeInTheDocument();
+    // "+2", not "+2 extra" -- the "Extra (cycle)" header carries the word now.
+    expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("✓ recorded")).toBeInTheDocument();
   });
 

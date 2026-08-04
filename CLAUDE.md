@@ -13,6 +13,7 @@ A progress-tracking and evaluation system for the Bistec Hearts Academy **Indust
 **Supporting docs**
 | File | What it's for |
 |---|---|
+| `ONBOARDING.md` | How to get this running locally from nothing — prerequisites, generated packages, env files, Postgres, the seed, the dev identity picker, and a troubleshooting table keyed by exact error text. **Run its §3 and §5 on a returning clone too, not just a fresh one** — all **five** generated trees are git-ignored and survive a `git pull` stale, and nothing invalidates them |
 | `docs/interview-and-prd.md` | Requirements, personas, non-goals, NFR targets, team contract, open points |
 | `docs/stakeholder-interview.md` | Raw stakeholder answers — the primary record; consult when a requirement's intent is unclear |
 | `docs/IRP_Progress_Management_System_Brief.pdf` | Original brief (v1.0 draft) |
@@ -207,6 +208,19 @@ spec §7 and remove the bypass. ADR-0012.
   (now `proxy.ts`, ADR-0013) that broke the production build for four tasks before a reviewer ran
   the real build. `pnpm --filter @irp/web build` is part of the required verification set for any
   change touching `apps/web`.
+- **It is also not *trustworthy* for `apps/web` without a preceding `next build`** — it can be
+  **falsely red**, which is the more confusing direction. `apps/web/tsconfig.json` includes
+  `.next/types/**/*.ts`, and `typedRoutes` puts the route union in `.next/types/routes.d.ts` —
+  written by **`next build`**. `next dev` writes its own copy to **`.next/dev/types/routes.d.ts`**,
+  which `tsconfig` does not include. So the file `tsc` actually reads is a snapshot from whenever
+  `next build` last ran, it is git-ignored, and nothing invalidates it: on 2026-08-04 it was three
+  days old, listed only `"/" | "/not-registered" | "/signin"`, and produced **nine** `TS2322`
+  errors of the form `Type '"/roster"' is not assignable to type 'Route'` against code that was
+  entirely correct and running fine in the browser. Running `pnpm --filter @irp/web build`
+  regenerated it and typecheck went clean with no source change. **Do not "fix" a `Route`/
+  `RouteImpl` assignability error by casting or by widening the `Link` href type** — rebuild first
+  and confirm the error survives. Visiting the pages in `next dev` does not help; it refreshes the
+  `.next/dev` copy `tsc` never reads.
 - **Next canonicalises loopback hostnames to the literal string `localhost`**
   (`NextURL.parseURL` / `REGEX_LOCALHOST_HOSTNAME` in `next/dist/server/web/next-url.js`).
   Driving a browser at `127.0.0.1` breaks two things: the dev server 403s `/_next/*` as

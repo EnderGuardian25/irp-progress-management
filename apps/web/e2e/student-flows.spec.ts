@@ -13,7 +13,7 @@ import { dayPanelByLabel, formatCivilDateLabel, signInAsStudent } from "./helper
 /**
  * Student-side flows over the seeded personas (Plan 6 spec §7). Every test
  * signs in fresh as `dev-student-1` ("Dev Student", the compliant persona,
- * Batch Aurora) via the exact dev-identity-picker selectors signin.spec.ts
+ * Batch 1) via the exact dev-identity-picker selectors signin.spec.ts
  * established -- the picker itself still only carries three entries (Plan 5
  * kept it that way; Plan 6 did not extend it), so a Student flow can only
  * ever be driven as this one persona. Every other persona in @irp/fixtures
@@ -34,7 +34,7 @@ import { dayPanelByLabel, formatCivilDateLabel, signInAsStudent } from "./helper
  * the Task 16 report for a run's full set.
  */
 
-test.describe("student flows (dev-student-1, compliant, Batch Aurora)", () => {
+test.describe("student flows (dev-student-1, compliant, Batch 1)", () => {
   test("marks and clears an absence for today, when today is still open", async ({ page }) => {
     await signInAsStudent(page);
     const today = toProgrammeDate(new Date());
