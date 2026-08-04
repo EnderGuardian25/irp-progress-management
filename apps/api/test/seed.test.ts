@@ -29,7 +29,18 @@ describe.skipIf(!dbUrl)("runSeed", () => {
     await runSeed(prisma, NOW);
     expect(await prisma.entry.count()).toBe(before);
     expect(await prisma.user.count()).toBe(12);
-  });
+    // 120s like beforeAll's own runSeed above, and for the same reason: a full
+    // seed writes ~10 personas' worth of entries, reports and absences and
+    // takes multiple seconds. Vitest's DEFAULT is 5000ms and applies per test,
+    // NOT inherited from beforeAll's override -- so this test and the one
+    // below were the only two calling runSeed on a 5s budget. On a slower
+    // machine that reads as a cascade of four unrelated failures rather than
+    // one timeout: the wipe half of runSeed commits, the test is cut off
+    // mid-rebuild, and every later test in the file then asserts against a
+    // partially seeded database (0 extra entries, a null deletedAt, only
+    // SUBMITTED reports, an Entry_studentId_fkey violation). Measured on
+    // 2026-08-04: 5006ms, i.e. exactly the budget. Do not remove.
+  }, 120_000);
 
   it("is idempotent even when a non-seed student is enrolled in a seed-owned batch", async () => {
     // Regression for a Task 16 e2e finding: the Students-page "register,
@@ -39,7 +50,7 @@ describe.skipIf(!dbUrl)("runSeed", () => {
     // their Enrolment too. The NEXT db:seed run used to throw a
     // Prisma P2003 foreign-key violation on Enrolment_batchId_fkey, because
     // the batch deleteMany only had its enrolments cleared when the STUDENT
-    // was seed-owned, not when the BATCH was. Batch Aurora/Basalt are owned
+    // was seed-owned, not when the BATCH was. The seed batches are owned
     // by the seed by name; a stray enrolment into either, from any student,
     // must not survive a reseed.
     const externalId = "not-a-seed-user";
@@ -72,12 +83,13 @@ describe.skipIf(!dbUrl)("runSeed", () => {
     await runSeed(prisma, NOW);
 
     // The seed only wipes rows it owns (SEED_EXTERNAL_IDS), so the stray
-    // user itself survives -- only Batch Aurora, and the dangling
+    // user itself survives -- only the seed batch, and the dangling
     // enrolment pointing at it, are gone.
     expect(await prisma.batch.count({ where: { name: SEED_BATCH_NAMES.A } })).toBe(1);
     expect(await prisma.enrolment.count({ where: { studentId: stray.id } })).toBe(0);
     await prisma.user.delete({ where: { id: stray.id } });
-  });
+    // Also calls runSeed — same 120s budget, same reasoning as above.
+  }, 120_000);
 
   it("the late persona has late-flagged entries; compliant has none", async () => {
     const late = SEED_STUDENTS.find((s) => s.kind === "late")!;
