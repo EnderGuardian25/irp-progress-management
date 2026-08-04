@@ -31,17 +31,28 @@ beforeEach(() => {
   apiClient.mockResolvedValue({});
   listBatches.mockResolvedValue({ data: [BATCH], error: undefined });
   cookies.mockResolvedValue({ get: () => ({ name: "irp-theme", value: "dark" }) });
+  // ThemeControl reconciles its radio from the live `<html data-theme>`
+  // attribute after mount (Plan 7B, Task 9 — see theme-control.tsx). In the
+  // real app that attribute is always stamped by the SAME root layout render
+  // that computes this page's `current` prop, from the same cookie, so the
+  // two never disagree. This test file renders SettingsPage in isolation,
+  // with no root layout in the tree to stamp the attribute, so it is cleared
+  // here as the default baseline and set explicitly wherever a test needs the
+  // page to agree with a "dark" cookie.
+  delete document.documentElement.dataset.theme;
 });
 
 describe("SettingsPage", () => {
   it("shows Appearance to a mentor", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    document.documentElement.dataset.theme = "dark";
     render(await SettingsPage());
     expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
   });
 
   it("shows Appearance to a student — it must NOT redirect them away", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(STUDENT_USER);
+    document.documentElement.dataset.theme = "dark";
     render(await SettingsPage());
     expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
   });

@@ -13,6 +13,10 @@ beforeEach(() => {
 
 describe("ThemeControl", () => {
   it("marks the current choice from its server-supplied prop", () => {
+    // The mount-time DOM reconciliation (below) reads the live attribute too,
+    // so it is set here to agree with `current` — exactly as it does in the
+    // real app, where both are read from the same cookie on the same request.
+    document.documentElement.dataset.theme = "dark";
     render(<ThemeControl current="dark" />);
     expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "Light" })).not.toBeChecked();
@@ -35,8 +39,14 @@ describe("ThemeControl", () => {
   });
 
   it("REMOVES the attribute for system rather than setting it to a string", () => {
-    render(<ThemeControl current="dark" />);
+    // Set BEFORE render, matching `current`: the mount-time DOM reconciliation
+    // (below) would otherwise read the beforeEach-cleared attribute, disagree
+    // with "dark", flip `selected` to "system", and leave the "Follow system"
+    // radio already checked — at which point clicking it fires no change
+    // event at all and the assertion below would pass for the wrong reason
+    // (nothing happened) rather than the right one (choose() ran).
     document.documentElement.dataset.theme = "dark";
+    render(<ThemeControl current="dark" />);
     fireEvent.click(screen.getByRole("radio", { name: "Follow system" }));
     // data-theme="system" would in fact still work — the media query's
     // :not([data-theme="light"]) matches it. But absence is the contract the
@@ -69,5 +79,31 @@ describe("ThemeControl", () => {
       expect(alert).toHaveTextContent(/Follow system/i);
       expect(alert).not.toHaveTextContent(/\bDark\b/);
     });
+  });
+
+  // Plan 7B, Task 9: seeding the radio from a stale server prop alone is what
+  // let it read as nothing-checked after a browser back-navigation, since
+  // Next's client router cache can replay an older `current` prop than what
+  // is actually stamped on <html> at that moment (docs/interview-and-prd.md
+  // O-16). These pin the mount-time DOM reconciliation that fixes the radio
+  // group specifically — it does not and cannot fix the page-repaint half of
+  // O-16, which needs its own ADR.
+  it("reconciles from the live DOM after mount, overriding a stale server prop", () => {
+    // The DOM says dark; the prop says system — the disagreement a stale
+    // router-cache replay of `current` produces while <html data-theme> has
+    // already moved on.
+    document.documentElement.dataset.theme = "dark";
+    render(<ThemeControl current="system" />);
+    expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Follow system" })).not.toBeChecked();
+  });
+
+  it("reconciles to Follow system when the live DOM carries no data-theme attribute", () => {
+    // "system" is stamped by ABSENCE, never the literal string — mirroring
+    // layout.tsx and the `choose` function above.
+    delete document.documentElement.dataset.theme;
+    render(<ThemeControl current="dark" />);
+    expect(screen.getByRole("radio", { name: "Follow system" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Dark" })).not.toBeChecked();
   });
 });

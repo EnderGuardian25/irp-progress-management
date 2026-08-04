@@ -124,8 +124,13 @@ export function Sidebar({
     >
       {destinations.map((d) => {
         const showCount = d.label === "Review" && reviewCount > 0;
+        // No margin here: .nav-item's `gap` already spaces every child on the
+        // row, icon-to-label and label-to-badge alike. An added `ml-2` used to
+        // double that spacing for the badge specifically, back when the badge
+        // was separated from the label by a literal " " text node instead of
+        // `gap` — see the `.nav-item` comment in globals.css.
         const badge = showCount && (
-          <span className="tabular ml-2" style={{ color: "var(--ink-muted)" }}>
+          <span className="tabular" style={{ color: "var(--ink-muted)" }}>
             {reviewCount}
           </span>
         );

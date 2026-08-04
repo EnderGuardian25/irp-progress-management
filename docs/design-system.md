@@ -221,30 +221,54 @@ Desktop only, minimum 1280px (NFR-13). No mobile layout is provided or tested. R
 behaviour is structural (sidebar collapse below 1440px), never fluid typography.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  ◆ Hearts Academy · IRP      Batch 12 ▾              Damian ▾        │  56px  --surface
-├───────────┬──────────────────────────────────────────────────────────┤
-│           │                                                          │
-│  Today    │                                                          │
-│  Roster   │                  content · --bg                          │
-│  Review 3 │                                                          │
-│  Cycles   │                                                          │
-│  Students │                                                          │
-│           │                                                          │
-│ ─────────  ← border-top rule, --line                                 │
-│  Settings │                                                          │
-│           │                                                          │
-│ 216px     │                                                          │
-│ --surface │                                                          │
-└───────────┴──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│  ❤ Hearts Academy · IRP                              Damian            │  56px  --surface
+├────────────┬───────────────────────────────────────────────────────────┤
+│            │                                                           │
+│ ▪ Today    │                                                           │
+│ ▪ Roster   │                  content · --bg                           │
+│ ▪ Review 3 │                                                           │
+│ ▪ Cycles   │                                                           │
+│ ▪ Students │                                                           │
+│            │                                                           │
+│ ─────────  ← border-top rule, --line                                   │
+│ ▪ Settings │                                                           │
+│ ▪ Sign out │                                                           │
+│            │                                                           │
+│ 216px      │                                                           │
+│ --surface  │                                                           │
+└────────────┴───────────────────────────────────────────────────────────┘
 ```
+
+The topbar mark is `BrandMark` (`variant="mark"`) on the theme-invariant `--brand-card` card,
+replacing the placeholder diamond a `◆` used to stand in for — see §3.1 and
+`apps/web/components/app-frame/brand-mark.tsx`. **The topbar now holds only the brand and the
+user's name**: no dropdown chevron, no batch switcher. Every sidebar row carries a hand-drawn
+`currentColor` icon before its label (`▪` above is a stand-in for the real glyph — calendar,
+table, check-in-circle, circular arrow, two people, sliders, door-with-arrow — see §3 and Task 5
+of the Plan 7B implementation plan for the actual set), so the icon column, not just the label,
+now carries the active-row colour change.
+
+**`Batch 12 ▾` is gone from this mock, not merely left unbuilt-but-drawn.** The previous version
+of this mock showed a switcher in the topbar that was never built and never will be under the
+current data model: `User` (`spec/openapi.yaml`) carries no batch, a mentor holds several, and
+batch selection already happens per-page via the Roster and Cycles chips (§13 keeps the full
+record of that decision — it is not repeated or removed here). Drawing an unbuilt control in a
+mock captioned "the app frame" reads as a description of the running app, which it would not be;
+now that the topbar's contract is "brand and name, nothing else," showing the switcher here would
+directly contradict the sentence above it. If a global batch context is ever built, this mock
+gets a third element and §13's entry is closed, not reopened.
 
 Settings sits pinned to the bottom of the 216px column with `mt-auto`, separated from the primary
 destinations above it by a `border-top` rule (`--line`) — never appended to the destination list
-itself, which would sit it directly under the last primary item instead. It appears on **both**
-roles' frames: appearance (theme) is a personal preference, not a mentor privilege. The page it
-links to gates its own sections rather than the route bouncing a Student away — Settings shows
-Appearance to everyone and Register/Create batch only to a mentor (ADR-0022).
+itself, which would sit it directly under the last primary item instead. **Sign out is pinned
+below Settings inside that same divider group** — a peer of Settings, not a stray button loose in
+the frame — rather than living in the topbar it occupied before this slice (O-15). Settings
+appears on **both** roles' frames: appearance (theme) is a personal preference, not a mentor
+privilege. The page it links to gates its own sections rather than the route bouncing a Student
+away — Settings shows Appearance to everyone and **Register** only to a mentor (ADR-0022);
+**Create batch** lives on Students instead, per **ADR-0023**, which supersedes that part of
+ADR-0022's scope.
 
 ---
 
