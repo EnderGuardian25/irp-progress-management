@@ -143,7 +143,9 @@ describe("StudentsPage", () => {
     // specified finds two elements and throws.
     expect(screen.getAllByText("Transfer").length).toBeGreaterThan(0);
     expect(screen.getByText("People")).toBeInTheDocument();
+    // People lists both roles read back — a student and a mentor.
     expect(screen.getByText("Amaya Perera")).toBeInTheDocument();
+    expect(screen.getByText("Dev Mentor")).toBeInTheDocument();
   });
 
   it("sends a reader to Settings when nobody is registered yet", async () => {

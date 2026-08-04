@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import SettingsPage from "@/app/(app)/settings/page";
 
 const { getCurrentUserOrRedirect, apiClient } = vi.hoisted(() => ({
@@ -75,5 +75,54 @@ describe("SettingsPage", () => {
     cookies.mockResolvedValue({ get: () => undefined });
     render(await SettingsPage());
     expect(screen.getByRole("radio", { name: "Follow system" })).toBeChecked();
+  });
+
+  // Relocated from students-page.test.tsx by Task 7's fix round 1: RegisterForm
+  // and CreateBatchForm moved to Settings (ADR-0022), and this behaviour is the
+  // components' own -- unchanged by the move -- not the Students page's, so it
+  // belongs wherever the components render now.
+  it("RegisterForm hides batch/startDate for the Mentor role and omits the enrolment key entirely", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    createUser.mockResolvedValue({ error: undefined, data: { id: "m2" } });
+
+    render(await SettingsPage());
+
+    // Student is the default role -- assert batch/start date are actually
+    // PRESENT first. Checking only the post-change Admin state would also
+    // pass against a form that never rendered these fields at all.
+    expect(screen.getByLabelText("Batch")).toBeInTheDocument();
+    expect(screen.getByLabelText("Start date")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Admin" } });
+
+    expect(screen.queryByLabelText("Batch")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Start date")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new.mentor@bistecglobal.com" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "New Mentor" } });
+    fireEvent.change(screen.getByLabelText("External id"), { target: { value: "oid-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await screen.findByRole("status");
+
+    expect(createUser).toHaveBeenCalledTimes(1);
+    const callArgs = createUser.mock.calls[0]?.[0] as { body: Record<string, unknown> } | undefined;
+    expect(callArgs?.body.role).toBe("Admin");
+    expect(callArgs?.body).not.toHaveProperty("enrolment");
+  });
+
+  // Relocated from students-page.test.tsx alongside the test above, same reason.
+  it("surfaces a successful batch creation with a role=status success line", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    createBatch.mockResolvedValue({ error: undefined, data: BATCH });
+
+    render(await SettingsPage());
+
+    fireEvent.change(screen.getByLabelText("Batch name"), { target: { value: "Batch Bramble" } });
+    fireEvent.change(screen.getByLabelText("Batch start date"), { target: { value: "2026-09-10" } });
+    fireEvent.change(screen.getByLabelText("Batch end date"), { target: { value: "2027-03-09" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create batch" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Batch created.");
   });
 });
