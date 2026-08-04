@@ -35,7 +35,42 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
-**Last updated:** 2026-07-29, **Plan 3 merged as PR #6**. Slice 1 needs only Plan 4 (infra,
+### 2026-08-04 — roster legibility pass (FR-19, FR-28, FR-33)
+
+A small post-Plan-7 slice, not a plan of its own. Three things, plus two defects it surfaced.
+
+- **Seed batches renamed** `Batch Aurora`/`Batch Basalt` → **`Batch 1`/`Batch 2`**, at
+  `SEED_BATCH_NAMES` in `packages/fixtures`. The Playwright suite now imports that constant instead
+  of hardcoding the strings — the rename had to touch five literals, which is the argument.
+  **The seed owns its batches by NAME, so a rename orphans the old rows rather than migrating
+  them**; an existing dev DB keeps both sets and the picker shows four chips. Deleted the two old
+  rows by name once, by hand. Written up in `run-seed.ts` and ONBOARDING §8.
+- **Roster's `Entries` column header** was a plain `<Th>` against a `<Td numeric>`, so the header
+  sat left while its count sat right and read as belonging to `Extra`. Fixed.
+- **`Extra` → `Extra (cycle)`.** The value was never per-day: `roster-service.ts` counts `isExtra`
+  across every day in the cycle containing the roster date (as `RosterRow.extraCountThisCycle` in
+  the spec says), so it is identical on every date within a cycle while every other column on the
+  row is date-scoped. The header was the whole defect; the number was always right.
+- **The shared `Table` moved `px-2` → `px-3`.** Alignment alone could not fix the crowding: at 8px
+  padding any right-then-left column pair puts its content 16px apart, so fixing the header merely
+  moved the collision from `Entries`/`Extra` to `Extra`/`Absence reason`. 12px is the top of
+  design-system §5's sanctioned "8–12px row padding"; vertical density deliberately unchanged.
+- **Pre-existing, found by this work:** `apps/api/test/seed.test.ts` budgets `runSeed` at 120s in
+  `beforeAll` but two tests call it again on Vitest's **default 5000ms**. It timed out at 5006ms
+  mid-seed — the wipe commits, the rebuild is cut off, and the next four tests assert against a
+  half-seeded database, so **one timeout presents as four unrelated failures**. Both tests now
+  carry the 120s budget the file already used. Same trap as Playwright's default timeout.
+- **Open, not diagnosed:** `mentor-flows.spec.ts`'s "roster -> review -> record -> transition ->
+  lock" failed once in a full suite run, then passed in isolation and passed 24/24 on a full re-run
+  from a fresh seed. It walks a report to Evaluated, which is irreversible, so it is inherently
+  state-sensitive. Not reproduced; watch it in CI.
+
+Verified: typecheck 6/6 · core 113 · api 269 · web 198 · eslint clean · `next build` 12 routes ·
+Playwright 24/24.
+
+### 2026-07-29 — Plan 3
+
+**Plan 3 merged as PR #6**. Slice 1 needs only Plan 4 (infra,
 deploy, observability) to be complete.
 
 **Plan 3 shipped a working web app.** A browser signs in, a real RS256 JWT is minted, `apps/api`
@@ -653,10 +688,42 @@ because this is the plan that makes it real.
    the resume map.** Then **`docs/adr/0012-dev-auth-bypass-by-issuer-swap.md`**, which is the single
    most important document for anyone touching auth, and
    `docs/superpowers/specs/2026-07-29-plan-3-auth-and-web-shell-design.md` §7 for the Entra cutover.
-2. Bring the clone up. **`prisma generate` needs `DATABASE_URL` in the shell environment first** —
+2. Bring the clone up. **`ONBOARDING.md` is the step-by-step version of this** — env files, the
+   Postgres container, the seed, the dev identity picker, and a troubleshooting table keyed by the
+   exact error text. Use it; this step is the compressed form.
+
+   **`prisma generate` needs `DATABASE_URL` in the shell environment first** —
    Prisma 7 dropped implicit `.env` loading, and `prisma.config.ts` resolves `env("DATABASE_URL")`
    from the real process env, so a bare `prisma generate` fails `PrismaConfigEnvError` on a fresh
    clone. The value only has to *parse*; `generate` never connects.
+
+   **Run every step below on a *returning* clone too, not just a fresh one.** There are **five**
+   git-ignored generated trees — `packages/types`, `packages/client`, `packages/core/dist`,
+   `apps/api/src/generated/prisma`, and `apps/web/.next/types` — so they all survive a `git pull` at
+   whatever version they were last built from, and nothing invalidates them. `pnpm install`
+   succeeds and `pnpm dev` starts; the staleness surfaces as four failures that all read as broken
+   application code:
+
+   | Symptom | Actually stale | Fix |
+   |---|---|---|
+   | `apps/api` exits at boot on `SyntaxError: The requested module '@irp/core' does not provide an export named …` | `packages/core/dist` | `pnpm --filter @irp/core build` |
+   | Turbopack **Build Error** in the browser: `Export … doesn't exist in target module … packages/client/src/index.ts` | `packages/client/src` (generated from an older `spec/openapi.yaml`) | `pnpm generate`, then `pnpm --filter @irp/client build` |
+   | Seed dies on `TypeError: Cannot read properties of undefined (reading 'deleteMany')` | `apps/api/src/generated/prisma` — the undefined value is a model a newer migration added | `pnpm --filter @irp/api exec prisma generate` |
+   | `pnpm typecheck` fails in `apps/web` with `TS2322: Type '"/roster"' is not assignable to type 'Route'` (nine of them) on code that runs correctly | `apps/web/.next/types/routes.d.ts` | `pnpm --filter @irp/web build` (see below) |
+
+   All four were hit in one sitting on 2026-08-04 bringing an existing clone up after Plan 7 — each
+   one only at the point the process that needed it actually ran, which is why they arrive one at a
+   time rather than all at once.
+
+   **The fourth row is the nastiest and is new**, because it is the only one that fails *closed* in
+   the wrong direction — a green gate going red against correct code, rather than a broken thing
+   erroring. `apps/web/tsconfig.json` includes `.next/types/**/*.ts`, and `typedRoutes` writes the
+   route union to `.next/types/routes.d.ts` from **`next build`**. `next dev` writes a *different*
+   copy at `.next/dev/types/routes.d.ts` that `tsconfig` does not include. The Aug-1 build-time copy
+   still listed only `"/" | "/not-registered" | "/signin"`; every Plan 6/7 route was missing from it.
+   `pnpm --filter @irp/web build` fixed all nine errors with **zero source changes**. Visiting the
+   pages in `next dev` does not help — that only refreshes the copy `tsc` never reads. Recorded in
+   `CLAUDE.md`'s hard-won-facts list; **never resolve one of these errors with a cast**.
 
    ```powershell
    pnpm install
@@ -729,6 +796,7 @@ repository rules, but rediscovering them is expensive.
 | **Host port 5432 is held by an unrelated project's container** (`designer-postgres-1`) | `apps/api/docker-compose.yml` parameterises the host port as `${IRP_DB_PORT:-5432}`; local runs use **5433**. CI is unaffected — a GitHub runner's service container binds 5432 with nothing to conflict. **Do not "fix" the workflow to 5433** |
 | Local connection string | `postgresql://irp:irp@127.0.0.1:5433/irp?schema=public` |
 | `docker info` hung past 120s once, mid-session | Probe with `docker version --format '{{.Server.Version}}'` under a timeout instead |
+| **Docker Desktop is a per-user install**, at `$env:LOCALAPPDATA\Programs\DockerDesktop\Docker Desktop.exe` | Not `C:\Program Files\Docker\Docker\Docker Desktop.exe` — that path does not exist on this machine. `docker.exe` still resolves (`…\Programs\DockerDesktop\resources\bin`), so the CLI works and only the *engine* is missing: the tell is `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`. Start the app, then poll `docker version` until it answers — the engine was ready within 5s of launch on 2026-08-04, but do not assume it |
 
 ### Hard-won constraints discovered *during* Plan 2B
 
