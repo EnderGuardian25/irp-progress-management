@@ -212,10 +212,19 @@ Specific things to check rather than assume:
 - Focus rings against `--surface` in dark (§12 requires a visible 2px `--primary` ring)
 - The new `RibbonKey` swatches, whose whole job is to be distinguishable
 
-**Guard:** a second Playwright project, `chromium-dark`, with `colorScheme: "dark"`, running the
-existing specs. This roughly doubles e2e wall-clock; with `workers: 1` pinned (see
-`playwright.config.ts`) that is a real CI cost and is accepted deliberately as the price of dark
-not rotting.
+**Guard:** a second Playwright project, `chromium-dark`, with `colorScheme: "dark"`.
+
+**Corrected 2026-08-04 while writing Plan 7A** — an earlier draft of this section said the dark
+project runs *the existing specs*. That would have reintroduced the defect fixed one PR earlier.
+`mentor-flows` and `student-flows` **mutate shared state**: they submit an entry for today, walk a
+report irreversibly to Evaluated, and call `reseed()` mid-run. Running them a second time inside
+one serial run means the second pass meets state the first pass consumed — the exact
+state-dependence that produced 24/24, 23/24, 19/24 before `workers: 1` was pinned.
+
+So the dark project is scoped by `testMatch` to **one new read-only spec**, `dark-theme.spec.ts`,
+which signs in, visits each view, and asserts rendering only — no submissions, no transitions, no
+reseed. Cost is one extra sign-in chain rather than a doubled suite, and the mutating specs keep
+running exactly once, in light, where they were verified.
 
 ## 8. Testing
 
