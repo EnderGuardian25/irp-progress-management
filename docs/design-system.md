@@ -145,11 +145,18 @@ Dark is user-reachable as of ADR-0021, selected by `data-theme` on `<html>`:
 
 - `data-theme="dark"` forces dark; `data-theme="light"` forces light; **no attribute means
   follow the OS**.
-- The CSS applies three rules in a fixed order, and the order is load-bearing: the light
-  `:root` first (the base), then `@media (prefers-color-scheme: dark)` scoped with
-  `:not([data-theme="light"])` (follow the OS, unless the user explicitly chose light), then
-  `:root[data-theme="dark"]` last, so an explicit dark choice can override an OS that reports
-  light — which it can only do by being the rule that comes after the media query.
+- The CSS applies three rules, in this order: the light `:root` first (the base), then
+  `@media (prefers-color-scheme: dark)` scoped with `:not([data-theme="light"])` (follow the
+  OS, unless the user explicitly chose light), then `:root[data-theme="dark"]` (an explicit
+  dark choice). The load-bearing part is the `:not([data-theme="light"])` guard on the second
+  rule — that is what lets an explicit light choice suppress a dark OS; deleting it would make
+  OS-dark plus an explicit light choice render dark, a real bug. The order of the second and
+  third rules is **not** load-bearing: both selectors carry equal specificity (`:root` plus one
+  pseudo-class or attribute selector each), so source order decides an outcome only when *both*
+  match at once — OS-dark **and** `data-theme="dark"` together — and in that case the two blocks
+  are identical (see the parity test below), so the result is the same regardless of which one
+  wins. Rule three coming after rule two is therefore defensive rather than load-bearing: it
+  costs nothing and only matters if the two blocks are ever edited to legitimately diverge.
 - The token block above is duplicated verbatim in `globals.css`, once inside the media query
   and once under `:root[data-theme="dark"]`, because CSS cannot combine a media query with a
   selector list and this project uses no preprocessor. `apps/web/test/theme-tokens.test.ts`
