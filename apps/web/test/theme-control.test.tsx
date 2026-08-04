@@ -59,7 +59,15 @@ describe("ThemeControl", () => {
     render(<ThemeControl current="system" />);
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/not a theme/i);
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(/not a theme/i);
+      // The reversion clause must name the ORIGINAL current prop ("system" ->
+      // "Follow system"), not the newly clicked option ("dark" -> "Dark"). The
+      // positive assertion alone would stay green even if the component were
+      // edited to close over the new selection instead of `current` — the
+      // negative half is what actually pins that distinction.
+      expect(alert).toHaveTextContent(/Follow system/i);
+      expect(alert).not.toHaveTextContent(/\bDark\b/);
     });
   });
 });
