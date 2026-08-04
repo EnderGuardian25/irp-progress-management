@@ -14,10 +14,20 @@
  * uses 8–12px row padding" range, while vertical stays `py-2` (8px). At
  * `px-2` both ways a right-aligned column's value ended up 16px from the next
  * left-aligned column's — the roster's Entries count read as though it were
- * in Extra. 12px gives 24px between adjacent content, which is what actually
- * separates a right-then-left column pair; alignment alone cannot, since the
- * two are aligned toward each other by construction. Vertical density is the
- * "dense core" signal in §5 and is deliberately not loosened with it.
+ * in Extra. Vertical density is the "dense core" signal in §5 and is
+ * deliberately not loosened with it.
+ *
+ * A `numeric` cell then takes `pr-6` (24px) instead of `pr-3`, so its
+ * right-aligned value is INSET from the boundary rather than parked against
+ * it. §5's 12px ceiling is a row-padding budget and 12px symmetric was not
+ * enough here: a right-then-left column pair aligns its two values TOWARD
+ * each other by construction, so a short glyph on each side of the boundary
+ * reads as one unit however wide the columns are. The roster's `—` under
+ * Extra (cycle) and `—` under Absence reason were the case that proved it —
+ * 24px apart and still reading as the pair `— —`. Header and cell both carry
+ * it, so they stay aligned with each other; the numeric column's own LEFT
+ * gap stays 12px, because the column before it is left-aligned and its text
+ * ends nowhere near the boundary.
  */
 import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 
@@ -38,7 +48,7 @@ export function Th({
     <th
       {...rest}
       scope="col"
-      className={`px-3 py-2 font-normal ${numeric ? "text-right" : "text-left"}`}
+      className={`py-2 pl-3 font-normal ${numeric ? "pr-6 text-right" : "pr-3 text-left"}`}
       style={{ color: "var(--ink-muted)" }}
     >
       {children}
@@ -52,7 +62,7 @@ export function Td({
   ...rest
 }: { children: ReactNode; numeric?: boolean } & TdHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td {...rest} className={`px-3 py-2 ${numeric ? "tabular text-right" : ""}`}>
+    <td {...rest} className={`py-2 pl-3 ${numeric ? "pr-6 tabular text-right" : "pr-3"}`}>
       {children}
     </td>
   );
