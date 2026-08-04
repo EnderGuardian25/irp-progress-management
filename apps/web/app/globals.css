@@ -219,6 +219,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); }
    the app that never said where you were — while the Roster and Cycles filter
    chips did. §3.1 assigns --primary-weak to "selected rows, active nav". */
 .nav-item {
+  /* A flex row so an icon and its label sit on one baseline-aligned line, with
+     `gap` doing the spacing. Before the icons landed, the review-count badge
+     was separated from the label by a literal " " text node; `gap` replaces it,
+     and that space has been removed rather than left as a no-op. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border-radius: var(--radius-control);
   padding: 8px 12px;
   color: var(--ink-muted);

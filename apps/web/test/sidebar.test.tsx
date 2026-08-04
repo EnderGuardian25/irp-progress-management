@@ -58,4 +58,34 @@ describe("Sidebar Settings entry", () => {
       .filter((label) => label !== "Settings");
     expect(primary).toHaveLength(2);
   });
+
+  it("renders an icon for every destination", () => {
+    const { container } = render(<Sidebar role="Admin" />);
+    // Five primary destinations + Settings = six rows, six icons.
+    expect(container.querySelectorAll("nav svg")).toHaveLength(6);
+  });
+
+  it("keeps the accessible name as the text label alone — icons are decorative", () => {
+    render(<Sidebar role="Admin" />);
+    // If an icon ever contributed to the name, this exact-match query breaks.
+    // That is the assertion that proves the icons are aria-hidden.
+    for (const label of ["Today", "Roster", "Review", "Cycles", "Students", "Settings"]) {
+      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("marks every icon aria-hidden", () => {
+    const { container } = render(<Sidebar role="Admin" />);
+    for (const svg of container.querySelectorAll("nav svg")) {
+      expect(svg).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
+  it("draws icons with currentColor, so they follow hover and active states", () => {
+    const { container } = render(<Sidebar role="Admin" />);
+    // A hardcoded stroke would not flip with .nav-item[data-active] or in dark.
+    for (const svg of container.querySelectorAll("nav svg")) {
+      expect(svg.getAttribute("stroke")).toBe("currentColor");
+    }
+  });
 });
