@@ -197,7 +197,10 @@ test.describe("mentor flows (dev-admin-1)", () => {
     page,
   }) => {
     await signInAsMentor(page);
-    await page.goto("/students");
+    // Register moved to /settings (ADR-0022, Task 7) -- the People directory
+    // (the <li> list Archive lives on, checked below) stayed on /students,
+    // so this test now legitimately spans both pages.
+    await page.goto("/settings");
 
     const stamp = String(Date.now());
     const email = `e2e.throwaway.${stamp}@dev.local`;
@@ -216,6 +219,10 @@ test.describe("mentor flows (dev-admin-1)", () => {
     await page.getByLabel("Start date", { exact: true }).fill(today);
     await page.getByRole("button", { name: "Register" }).click();
     await expect(page.getByText("Registered.")).toBeVisible();
+
+    // The People directory itself is on /students, not /settings -- confirm
+    // the new row landed there before checking the roster and archiving.
+    await page.goto("/students");
     await expect(page.locator("li").filter({ hasText: displayName })).toBeVisible();
 
     await page.goto("/roster");

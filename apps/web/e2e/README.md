@@ -1,13 +1,42 @@
 # End-to-end suite
 
-Four spec files, one Playwright config, one seeded database:
+Six spec files, one Playwright config with **two** projects, one seeded database:
 
 | Spec | Proves |
 |---|---|
 | `signin.spec.ts` | The chain this slice exists to prove: browser → Auth.js → encrypted cookie → decrypt → `@irp/client` → `apps/api` → Postgres → rendered user. Every dev-identity-picker branch, including the unregistered-user 403 and the never-a-token-in-the-browser assertion. |
 | `student-flows.spec.ts` | The Plan 6 student surface — on-time submission, the legal submission window (never older than the previous weekday), the absence round-trip, FR-20's lock from the student's own view, the mentor-page redirect, and sign-out. Signed in as `dev-student-1` ("Dev Student") only — see "Personas" below for why. |
-| `mentor-flows.spec.ts` | The Plan 6 mentor surface — Roster (row-per-student, the weekend persona's Extra badge), Roster → Review → attendance/tasks record → Submitted → In Review → Evaluated → locked, the Students directory's archive flow, and registering + archiving a throwaway student. Signed in as `dev-admin-1` ("Dev Mentor"). |
+| `mentor-flows.spec.ts` | The Plan 6 mentor surface — Roster (row-per-student, the weekend persona's Extra badge), Roster → Review → attendance/tasks record → Submitted → In Review → Evaluated → locked, the Students directory's archive flow, and registering + archiving a throwaway student. Registration itself happens on `/settings` (ADR-0022, Plan 7A) — the People directory on `/students` only lists and archives. Signed in as `dev-admin-1` ("Dev Mentor"). |
 | `dashboard-flows.spec.ts` | The Plan 7 dashboards — mentor Today's per-batch figures and ribbon, the Cycles view, and FR-29/FR-30's student My month. Signed in as `dev-admin-1` for the mentor side and `dev-student-1` for the student side; see its own section further below for the full test table. |
+| `dark-theme.spec.ts` | The Plan 7A dark guard — every view renders, and its landmark content is present, with the OS reporting dark. Read-only, and runs under the `chromium-dark` project only; see "Two projects, not one" below. |
+| `settings.spec.ts` | The Plan 7A Settings page — the theme switch's cookie round trip (attribute survives a reload only if the server actually read the cookie) and, since the fix wave, that the attribute genuinely applies the dark tokens; and that a student reaches Settings with Appearance only, no mentor sections. Runs in the default `chromium` project (light), signed in as both `dev-admin-1` and `dev-student-1`. |
+
+## Two projects, not one
+
+`playwright.config.ts` defines `chromium` (light, the default, `testIgnore`s `dark-theme.spec.ts`)
+and `chromium-dark` (`colorScheme: "dark"`, `testMatch`ed to `dark-theme.spec.ts` alone).
+
+**The dark project must never be widened to the mutating specs.** `mentor-flows.spec.ts` and
+`student-flows.spec.ts` submit an entry for today, walk a report irreversibly to Evaluated, and
+`mentor-flows`' archive test calls `reseed()` mid-run. `workers: 1` already pins this suite to one
+serial schedule so state consumed by one pass is not met unexpectedly by another (see the config's
+own comment on the 24/24 → 23/24 → 19/24 history); running any of those three specs a second time
+under `chromium-dark` would be exactly that hazard again, deliberately reintroduced. `dark-theme.spec.ts`
+is read-only for this reason, not by accident — it navigates and asserts rendering, nothing else.
+
+### What proves dark works — four layers, none redundant
+
+Easy to conflate; each one is the only thing that proves its own claim:
+
+| Layer | Proves |
+|---|---|
+| `apps/web/test/theme-tokens.test.ts` | The two `dark-tokens` blocks in `globals.css` (media query and `:root[data-theme="dark"]`) stay byte-identical. Says nothing about whether either block ever applies. |
+| `chromium-dark` (`dark-theme.spec.ts`) | The **media-query** path: with the OS reporting dark and no explicit choice, every view renders. Does not touch the cookie or the explicit-choice path at all. |
+| `settings.spec.ts` (cookie round trip) | The **explicit-choice** path persists: choosing Dark stamps the attribute, and it survives a reload only if the server read the cookie back. Says nothing about whether the attribute then does anything visually. |
+| `settings.spec.ts` (computed-style assertion, added in the pre-merge fix wave) | The attribute actually **applies** — `getComputedStyle(document.documentElement).getPropertyValue("--bg")` reads `#121212` after choosing Dark, in the light `chromium` project where the media query cannot be the cause. Before this assertion existed, typoing or deleting the `:root[data-theme="dark"]` selector left every other layer green. |
+
+No single layer implies another; a change that breaks dark can pass three of these four and still
+be caught by the fourth.
 
 ## Personas
 

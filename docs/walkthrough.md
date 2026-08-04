@@ -129,12 +129,30 @@ picker.
 
 ### 5. Students
 
-`Students`. Register a mentor or a student, create a batch, transfer a student, archive one.
+`Students`. Transfer a student between batches, and archive one. **Register** and **Create batch**
+are no longer here — see the next section.
 
-- Registering a student takes a batch and a start date in the same step — there is no orphan state
-  where a student exists but belongs nowhere.
 - The archive view lists archived students read-only. Archiving revokes access without deleting
   identity or history.
+
+### 6. Settings (ADR-0021, ADR-0022)
+
+`Settings`, pinned at the bottom of the sidebar. Two things happened here in this slice.
+
+- **Register a mentor or a student, and create a batch.** Both moved off Students (ADR-0022):
+  Students is now the *management* surface (Transfer, People/archive), Settings is the
+  *registration* surface. Registering a student still takes a batch and a start date in the same
+  step — there is no orphan state where a student exists but belongs nowhere.
+- **Appearance — Light / Dark / Follow system.** This is worth demoing specifically because **dark
+  was unreachable before this slice.** ADR-0002 shipped dark tokens with full contrast audits, but
+  the only way to see them was to change the operating system's own theme — there was no in-app
+  switch. ADR-0021 makes it a first-class, persisted choice: pick **Dark**, and the whole app
+  repaints instantly (no reload, because the control writes the DOM directly), and the choice
+  survives a reload and a fresh sign-in because it is stored server-side in a cookie, not
+  `localStorage`. Every mentor screen in this walkthrough is worth a second pass in dark once you've
+  shown it in light.
+- **Settings is on both roles' sidebars.** Appearance belongs to everyone; the registration section
+  gates itself out for a Student rather than the page redirecting them away.
 
 ---
 
@@ -142,7 +160,7 @@ picker.
 
 Sign out, then sign in as **Student** (Dev Student, Batch 1, fully compliant).
 
-### 6. Today
+### 7. Today
 
 - The composer offers **only legal target dates** — today and the previous weekday. There is no
   date field to type a wrong date into; the rule is enforced by construction in the interface as
@@ -152,7 +170,7 @@ Sign out, then sign in as **Student** (Dev Student, Batch 1, fully compliant).
   there is no approval workflow anywhere (a confirmed non-goal).
 - Try a day the mentor has marked `Evaluated`: it is locked and the composer will not offer it.
 
-### 7. My month (FR-29, FR-30)
+### 8. My month (FR-29, FR-30)
 
 `My month` in the sidebar.
 
@@ -170,11 +188,11 @@ on this surface. That is FR-30, and it is enforced at the API, not just hidden i
 endpoint this page calls takes no student identifier at all, so there is no parameter to tamper
 with.
 
-### 8. The negative checks — worth doing live
+### 9. The negative checks — worth doing live
 
 | Do this | You should see |
 |---|---|
-| As the student, look at the sidebar | Two items only: `Today`, `My month`. No mentor destination is offered. |
+| As the student, look at the sidebar | Three items: `Today`, `My month`, `Settings`. No mentor destination is offered. |
 | As the student, type `/cycles` into the address bar | Redirected home. Not a 403 page — the API is the security boundary, this is just the wrong screen. |
 | Sign in as **Unregistered user** | The terminal 403 page. Not a redirect loop. |
 | As the mentor, look for Tharindu on Roster or Cycles | Absent from both. His history is intact in the database; he simply cannot be worked on (FR-5). |

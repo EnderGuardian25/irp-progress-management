@@ -115,6 +115,27 @@ toward indigo, they do not warm.
 
 Status colours are **re-tuned, not reused** — see §3.2.
 
+Dark is user-reachable as of ADR-0021, selected by `data-theme` on `<html>`:
+
+- `data-theme="dark"` forces dark; `data-theme="light"` forces light; **no attribute means
+  follow the OS**.
+- The CSS applies three rules in a fixed order, and the order is load-bearing: the light
+  `:root` first (the base), then `@media (prefers-color-scheme: dark)` scoped with
+  `:not([data-theme="light"])` (follow the OS, unless the user explicitly chose light), then
+  `:root[data-theme="dark"]` last, so an explicit dark choice can override an OS that reports
+  light — which it can only do by being the rule that comes after the media query.
+- The token block above is duplicated verbatim in `globals.css`, once inside the media query
+  and once under `:root[data-theme="dark"]`, because CSS cannot combine a media query with a
+  selector list and this project uses no preprocessor. `apps/web/test/theme-tokens.test.ts`
+  keeps the two copies honest — it fails if they ever drift apart.
+- Each theme rule also sets the CSS `color-scheme` property (`light` on the base `:root`,
+  `dark` in both dark rules) alongside its tokens. This is the one declaration that reaches
+  **native** controls — the `type="date"` calendar indicator, scrollbars, `<select>`
+  dropdowns — which are drawn by the browser, not by us, and so are not reachable by any
+  token. Without it, dark mode paints a dark calendar icon on a dark field. It sits outside
+  the `dark-tokens:start`/`:end` markers, since those are asserted to hold exactly the 13
+  tokens above.
+
 ### 3.4 The Bistec slot
 
 `--primary` is a placeholder pending the actual brand value. To swap: replace the single
@@ -177,10 +198,20 @@ behaviour is structural (sidebar collapse below 1440px), never fluid typography.
 │  Cycles   │                                                          │
 │  Students │                                                          │
 │           │                                                          │
+│ ─────────  ← border-top rule, --line                                 │
+│  Settings │                                                          │
+│           │                                                          │
 │ 216px     │                                                          │
 │ --surface │                                                          │
 └───────────┴──────────────────────────────────────────────────────────┘
 ```
+
+Settings sits pinned to the bottom of the 216px column with `mt-auto`, separated from the primary
+destinations above it by a `border-top` rule (`--line`) — never appended to the destination list
+itself, which would sit it directly under the last primary item instead. It appears on **both**
+roles' frames: appearance (theme) is a personal preference, not a mentor privilege. The page it
+links to gates its own sections rather than the route bouncing a Student away — Settings shows
+Appearance to everyone and Register/Create batch only to a mentor (ADR-0022).
 
 ---
 
@@ -394,5 +425,6 @@ Each names at least three rejected alternatives:
 | [0002](adr/0002-light-default-with-dark-support.md) | Light default, dark supported, both contrast-verified |
 | [0003](adr/0003-cycle-ribbon-as-fr-28-summary.md) | Cycle ribbon as the FR-28 summary surface |
 | [0020](adr/0020-collapsed-ribbon-key-on-the-mentor-dashboard.md) | A collapsed, mentor-only key for the cycle ribbon (§7) |
+| [0021](adr/0021-theme-persistence-by-cookie.md) | Theme persistence by server-readable cookie; dark becomes user-reachable (§3.3) |
 
 Changing anything in §3–§7 means amending the ADR that governs it, not just this file.
