@@ -61,9 +61,9 @@ work to avoid building one cookie read.
 
 ## Consequences
 
-- Reading a cookie in the root layout forces dynamic rendering for every route under it. `/`
-  and `/not-registered` stop being statically prerendered; this is a deliberate, named cost of
-  reachability, not a regression to chase back out.
+- Reading a cookie in the root layout forces dynamic rendering for every route under it.
+  `/_not-found` and `/not-registered` stop being statically prerendered; this is a deliberate,
+  named cost of reachability, not a regression to chase back out.
 - The dark token block in `globals.css` now has to be kept honest against the light block by
   something other than a comment. A parity test — not a person re-reading the file on every
   change — is what stops the two blocks from drifting apart once a second person, or a future
