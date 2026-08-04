@@ -28,9 +28,25 @@
 /* docs/design-system.md §3.3. Light is the default (ADR-0002); dark is
    supported, never the default. §3.3's canvas is deliberately chroma-0
    near-black (#121212 is R=G=B=18) — surfaces lift toward indigo, the
-   canvas does not. */
+   canvas does not.
+
+   ADR-0021 made dark user-reachable. Three rules, and THE ORDER MATTERS:
+
+     1. :root above — light, always the base.
+     2. the media query below — "follow the OS", suppressed by
+        :not([data-theme="light"]) when the user has explicitly chosen light.
+     3. :root[data-theme="dark"] LAST — an explicit dark choice must beat an
+        OS that says light, which it can only do by coming after the query.
+
+   No attribute at all means "system", which is why the media query needs no
+   [data-theme="system"] case.
+
+   The block is duplicated because CSS cannot combine a media query with a
+   selector list and there is no preprocessor here. test/theme-tokens.test.ts
+   asserts the two copies stay identical — do not edit one without the other. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    /* dark-tokens:start */
     --bg: #121212;
     --surface: #1c1e23;
     --surface-sunk: #16171b;
@@ -40,13 +56,30 @@
     --ink-muted: #a7aab4;
     --primary: #8a9ff0;
     --primary-weak: #262c45;
-
     --st-ok: #65c98c;
     --st-late: #eeac53;
     --st-absent: #9a9eaa;
     --st-missed: #ed7473;
-    --st-review: var(--primary);
+    /* dark-tokens:end */
   }
+}
+
+:root[data-theme="dark"] {
+  /* dark-tokens:start */
+  --bg: #121212;
+  --surface: #1c1e23;
+  --surface-sunk: #16171b;
+  --line: #313339;
+  --line-strong: #656974;
+  --ink: #f2f3f6;
+  --ink-muted: #a7aab4;
+  --primary: #8a9ff0;
+  --primary-weak: #262c45;
+  --st-ok: #65c98c;
+  --st-late: #eeac53;
+  --st-absent: #9a9eaa;
+  --st-missed: #ed7473;
+  /* dark-tokens:end */
 }
 
 @theme inline {

@@ -115,6 +115,20 @@ toward indigo, they do not warm.
 
 Status colours are **re-tuned, not reused** — see §3.2.
 
+Dark is user-reachable as of ADR-0021, selected by `data-theme` on `<html>`:
+
+- `data-theme="dark"` forces dark; `data-theme="light"` forces light; **no attribute means
+  follow the OS**.
+- The CSS applies three rules in a fixed order, and the order is load-bearing: the light
+  `:root` first (the base), then `@media (prefers-color-scheme: dark)` scoped with
+  `:not([data-theme="light"])` (follow the OS, unless the user explicitly chose light), then
+  `:root[data-theme="dark"]` last, so an explicit dark choice can override an OS that reports
+  light — which it can only do by being the rule that comes after the media query.
+- The token block above is duplicated verbatim in `globals.css`, once inside the media query
+  and once under `:root[data-theme="dark"]`, because CSS cannot combine a media query with a
+  selector list and this project uses no preprocessor. `apps/web/test/theme-tokens.test.ts`
+  keeps the two copies honest — it fails if they ever drift apart.
+
 ### 3.4 The Bistec slot
 
 `--primary` is a placeholder pending the actual brand value. To swap: replace the single
