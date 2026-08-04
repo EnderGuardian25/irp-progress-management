@@ -147,8 +147,23 @@ export default async function RosterPage({
               <tr>
                 <Th>Student</Th>
                 <Th>Status</Th>
-                <Th>Entries</Th>
-                <Th>Extra</Th>
+                {/*
+                  `numeric` here as well as on the cell, or the header sits
+                  left while its right-aligned count drifts to the far edge of
+                  the column and reads as though it belongs to Extra. Cycles'
+                  `Required`/`Compliance` columns already pair the two.
+                */}
+                <Th numeric>Entries</Th>
+                {/*
+                  "(cycle)" is load-bearing. Every other column on this row
+                  describes the ONE selected date; extraCountThisCycle spans
+                  the whole cycle containing it (roster-service.ts, and
+                  RosterRow.extraCountThisCycle in the spec), so it is
+                  identical on every date within a cycle. Unqualified next to
+                  a per-date "Entries" count it reads as "extra entries
+                  today". Matches the dashboard's "+N extra this cycle".
+                */}
+                <Th numeric>Extra (cycle)</Th>
                 <Th>Absence reason</Th>
                 <Th>Recorded</Th>
                 <Th>Review</Th>
@@ -171,11 +186,9 @@ export default async function RosterPage({
                     )}
                   </Td>
                   <Td numeric>{row.day.entries.length}</Td>
-                  <Td>
+                  <Td numeric>
                     {row.extraCountThisCycle > 0 ? (
-                      <span className="tabular" style={{ color: "var(--ink-muted)" }}>
-                        +{row.extraCountThisCycle} extra
-                      </span>
+                      <span style={{ color: "var(--ink-muted)" }}>+{row.extraCountThisCycle}</span>
                     ) : (
                       <span style={{ color: "var(--ink-muted)" }}>—</span>
                     )}

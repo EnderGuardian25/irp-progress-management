@@ -6,7 +6,18 @@
  *
  * `numeric` on a cell selects right alignment and tabular figures — a column
  * of counts that does not line up is the specific thing §4's tabular-figures
- * rule exists to prevent.
+ * rule exists to prevent. Pass it on the `Th` as well as the `Td`, or the
+ * header sits left while its value sits right and reads as belonging to the
+ * next column along.
+ *
+ * Horizontal padding is `px-3` (12px), the TOP of design-system §5's "roster
+ * uses 8–12px row padding" range, while vertical stays `py-2` (8px). At
+ * `px-2` both ways a right-aligned column's value ended up 16px from the next
+ * left-aligned column's — the roster's Entries count read as though it were
+ * in Extra. 12px gives 24px between adjacent content, which is what actually
+ * separates a right-then-left column pair; alignment alone cannot, since the
+ * two are aligned toward each other by construction. Vertical density is the
+ * "dense core" signal in §5 and is deliberately not loosened with it.
  */
 import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 
@@ -27,7 +38,7 @@ export function Th({
     <th
       {...rest}
       scope="col"
-      className={`px-2 py-2 font-normal ${numeric ? "text-right" : "text-left"}`}
+      className={`px-3 py-2 font-normal ${numeric ? "text-right" : "text-left"}`}
       style={{ color: "var(--ink-muted)" }}
     >
       {children}
@@ -41,7 +52,7 @@ export function Td({
   ...rest
 }: { children: ReactNode; numeric?: boolean } & TdHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td {...rest} className={`px-2 py-2 ${numeric ? "tabular text-right" : ""}`}>
+    <td {...rest} className={`px-3 py-2 ${numeric ? "tabular text-right" : ""}`}>
       {children}
     </td>
   );
