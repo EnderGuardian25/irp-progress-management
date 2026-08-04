@@ -46,11 +46,28 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
   });
 
-  it("shows Register and Create batch to a mentor", async () => {
+  it("no longer carries Create batch — it went back to Students (ADR-0023)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    render(await SettingsPage());
+    expect(screen.queryByLabelText("Batch name")).not.toBeInTheDocument();
+  });
+
+  it("still carries Register for a mentor", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     render(await SettingsPage());
     expect(screen.getByLabelText("Role")).toBeInTheDocument();
-    expect(screen.getByLabelText("Batch name")).toBeInTheDocument();
+  });
+
+  it("surfaces a batch-read failure instead of rendering an empty select", async () => {
+    // Deferred in Plan 7A because nothing else touched this page. This task
+    // edits it, so the gap closes here.
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    listBatches.mockResolvedValue({
+      data: undefined,
+      error: { title: "Bad Gateway", detail: "Batch service unavailable." },
+    });
+    render(await SettingsPage());
+    expect(screen.getByRole("alert")).toHaveTextContent("Batch service unavailable.");
   });
 
   it("omits Register and Create batch from a student's markup entirely", async () => {
@@ -109,20 +126,5 @@ describe("SettingsPage", () => {
     const callArgs = createUser.mock.calls[0]?.[0] as { body: Record<string, unknown> } | undefined;
     expect(callArgs?.body.role).toBe("Admin");
     expect(callArgs?.body).not.toHaveProperty("enrolment");
-  });
-
-  // Relocated from students-page.test.tsx alongside the test above, same reason.
-  it("surfaces a successful batch creation with a role=status success line", async () => {
-    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
-    createBatch.mockResolvedValue({ error: undefined, data: BATCH });
-
-    render(await SettingsPage());
-
-    fireEvent.change(screen.getByLabelText("Batch name"), { target: { value: "Batch Bramble" } });
-    fireEvent.change(screen.getByLabelText("Batch start date"), { target: { value: "2026-09-10" } });
-    fireEvent.change(screen.getByLabelText("Batch end date"), { target: { value: "2027-03-09" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create batch" }));
-
-    expect(await screen.findByRole("status")).toHaveTextContent("Batch created.");
   });
 });

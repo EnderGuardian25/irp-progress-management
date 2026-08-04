@@ -16,10 +16,12 @@ vi.mock("@/lib/api-client", () => ({ getCurrentUserOrRedirect, apiClient }));
 // treatment of review-actions.ts) imports createUser/createBatch/
 // transferStudent/archiveUser/restoreUser as a single module; page.tsx itself
 // calls listBatches/listUsers. All seven are mocked here so the whole tree
-// runs without a real client or network access -- createUser and createBatch
-// stay mocked even though RegisterForm and CreateBatchForm no longer render
-// on this page (ADR-0022, they moved to Settings), because admin-actions.ts's
-// module-level import still pulls both names out of @irp/client.
+// runs without a real client or network access -- createUser stays mocked
+// even though RegisterForm no longer renders on this page (ADR-0022, it moved
+// to Settings and stayed there), because admin-actions.ts's module-level
+// import still pulls it out of @irp/client. createBatch is mocked for the
+// same reason AND is exercised directly: CreateBatchForm moved to Settings
+// alongside Register in ADR-0022, then moved back here in ADR-0023.
 const {
   listBatches,
   listUsers,
@@ -118,7 +120,7 @@ describe("StudentsPage", () => {
     expect(listBatches).not.toHaveBeenCalled();
   });
 
-  it("no longer carries Register or Create batch — they live in Settings now (ADR-0022)", async () => {
+  it("carries Create batch again — it fills the column Transfer leaves short (ADR-0023)", async () => {
     getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
     apiClient.mockResolvedValue({});
     listBatches.mockResolvedValue({ data: [BATCH], error: undefined });
@@ -126,8 +128,19 @@ describe("StudentsPage", () => {
 
     render(await StudentsPage({ searchParams: Promise.resolve({}) }));
 
+    expect(screen.getByLabelText("Batch name")).toBeInTheDocument();
+  });
+
+  it("still does NOT carry Register — that stayed in Settings (ADR-0022)", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    listBatches.mockResolvedValue({ data: [BATCH], error: undefined });
+    listUsers.mockResolvedValue({ data: [STUDENT_DETAIL, MENTOR_DETAIL], error: undefined });
+
+    render(await StudentsPage({ searchParams: Promise.resolve({}) }));
+
+    // ADR-0023 supersedes only part of 0022. Register must not come back too.
     expect(screen.queryByLabelText("Role")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Batch name")).not.toBeInTheDocument();
   });
 
   it("keeps Transfer and People, which are the management half", async () => {
@@ -232,5 +245,24 @@ describe("StudentsPage", () => {
     fireEvent.click(archiveButtons[0]!);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("A mentor cannot archive their own account.");
+  });
+
+  // Relocated from settings-page.test.tsx by Task 7 (ADR-0023): CreateBatchForm
+  // moved back to this page. Plan 7A had moved this exact test the other way,
+  // to settings-page.test.tsx, when Create batch lived there (ADR-0022).
+  it("surfaces a successful batch creation with a role=status success line", async () => {
+    getCurrentUserOrRedirect.mockResolvedValue(ADMIN_USER);
+    apiClient.mockResolvedValue({});
+    defaultReads();
+    createBatch.mockResolvedValue({ error: undefined, data: BATCH });
+
+    render(await StudentsPage({ searchParams: searchParams() }));
+
+    fireEvent.change(screen.getByLabelText("Batch name"), { target: { value: "Batch Bramble" } });
+    fireEvent.change(screen.getByLabelText("Batch start date"), { target: { value: "2026-09-10" } });
+    fireEvent.change(screen.getByLabelText("Batch end date"), { target: { value: "2027-03-09" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create batch" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Batch created.");
   });
 });
