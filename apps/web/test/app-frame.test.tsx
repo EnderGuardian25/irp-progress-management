@@ -144,21 +144,11 @@ describe("Sidebar", () => {
     // Task 5 (Plan 7B) made `.nav-item` `display: flex` with `gap: 8px`
     // doing the label-to-badge spacing, and deleted the literal " " text
     // node that used to sit between them — so the rendered DOM has no space
-    // between "Review" and the count. Asserting the exact string "Review 3"
-    // would be asserting a layout detail, not the behaviour this test is
-    // for, and would break again the next time the spacing mechanism
-    // changes. A whitespace-tolerant match proves the same intent (the
-    // count is present, and only when there is something to review)
-    // without depending on how the gap is produced.
-    //
-    // Counter-intuitively, real-browser accessibility is not degraded by
-    // the missing text node: flex items are blockified, and a real
-    // browser's accessible-name computation inserts a separator between
-    // the label and the badge, so a screen reader still announces them as
-    // distinct segments. jsdom performs no layout, so dom-accessibility-api
-    // has no such signal and concatenates the two bare as "Review3" — which
-    // is exactly why this assertion must not encode jsdom's flattened view
-    // of the DOM as if it were the real one.
+    // between "Review" and the count. The spacing between the label and the
+    // badge is now CSS `gap`, not a text node, so asserting the exact string
+    // "Review 3" would couple this test to a layout implementation detail.
+    // The regex asserts the intent — the count is on the Review link —
+    // without encoding how the space is produced.
     const { rerender } = render(<Sidebar role="Admin" reviewCount={3} />);
     const withCount = screen.getByRole("link", { name: /^Review/ });
     expect(withCount).not.toHaveAttribute("aria-disabled");

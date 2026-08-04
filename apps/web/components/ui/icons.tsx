@@ -14,9 +14,9 @@
  * design-system §12 satisfied (nothing conveys meaning by colour or glyph
  * alone).
  */
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 
-function Icon({ children }: { children: React.ReactNode }): ReactElement {
+function Icon({ children }: { children: ReactNode }): ReactElement {
   return (
     <svg
       aria-hidden="true"
