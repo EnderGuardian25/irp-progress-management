@@ -51,4 +51,24 @@ export const DEV_IDENTITIES: readonly DevIdentity[] = [
   { id: "unknown", label: "Unregistered user (expect 403)", oid: "dev-unknown-1", email: "nobody@dev.local", name: "Unregistered" },
 ];
 
-export const DEV_ISSUER = "http://localhost:3000/api/dev-jwks";
+/**
+ * The `iss` claim the dev bypass stamps on every token it mints.
+ *
+ * **It is an opaque identifier, not a network target.** `apps/api` STRING-
+ * COMPARES it against `JWT_ISSUER`; the address it actually fetches keys from
+ * is `JWKS_URI`, which is a separate variable and deliberately differs
+ * (`127.0.0.1`, because `localhost` prefers `::1` on the Windows dev machines).
+ *
+ * Because it is a constant and not derived from `AUTH_URL`, moving the web dev
+ * server to another port does NOT move this string — the two are only coupled
+ * by every copy being edited together. It must stay byte-identical to
+ * `JWT_ISSUER` in all THREE places that set one for the dev chain:
+ * `apps/api/.env` (yours, git-ignored), `apps/web/playwright.config.ts`'s `api`
+ * webServer, and the e2e step in `.github/workflows/ci.yml` — and to the value
+ * `ONBOARDING.md` §4 and `apps/web/e2e/README.md` tell a newcomer to type.
+ * (`apps/api/.env.example` is not one of them: it ships the real Entra issuer,
+ * which §4 then tells you to replace.) A mismatch is not
+ * a startup error — the API boots fine and returns 401 on every request, which
+ * reads as "my session expired" rather than "a config value disagrees".
+ */
+export const DEV_ISSUER = "http://localhost:3100/api/dev-jwks";

@@ -85,12 +85,19 @@ services:
       HOSTNAME: 0.0.0.0
       # Local-only. A real deployment injects this from a secret store.
       AUTH_SECRET: compose-only-secret-at-least-32-bytes
-      AUTH_URL: http://localhost:3000
+      # Matches the PUBLISHED port below, not PORT above — this is the origin
+      # the browser uses, and Auth.js resolves its base from the request URL.
+      AUTH_URL: http://localhost:3100
       API_BASE_URL: http://api:3001
       # AUTH_DEV_BYPASS is deliberately ABSENT. Setting it true here makes the
       # container refuse to start — see the guard test in the CI images job.
     ports:
-      - "3000:3000"
+      # 3100 on the HOST, 3000 inside. The repo-wide convention moved the web
+      # app to 3100 so nothing a developer runs binds 3000, and that is a
+      # host-side concern only: no other process competes for a port inside a
+      # container, so PORT above and the healthcheck below stay 3000 — as does
+      # infra/main.bicep's targetPort, which must equal the container's PORT.
+      - "3100:3000"
     depends_on:
       api:
         condition: service_healthy

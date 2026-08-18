@@ -90,7 +90,7 @@ describe("proxy behavior", () => {
     // NextAuth's `auth()` wrapper reads `request.nextUrl`, a NextRequest-only
     // convenience the plain web Request does not have — a bare Request makes it
     // crash before it reaches the authorized() check.
-    const request = new NextRequest("http://localhost:3000/");
+    const request = new NextRequest("http://localhost:3100/");
     // Unavoidable double assertion, not a stylistic one: `auth`'s declared type
     // is an intersection of five overload branches (NextApiRequest/
     // NextApiResponse, no-args, GetServerSidePropsContext, an AppRouteHandlerFn

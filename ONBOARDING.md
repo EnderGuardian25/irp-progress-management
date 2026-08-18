@@ -100,8 +100,8 @@ Copy-Item apps/web/.env.example apps/web/.env.local
 bypass's tokens instead of expecting real Entra ID tokens:
 
 ```
-JWKS_URI=http://localhost:3000/api/dev-jwks
-JWT_ISSUER=http://localhost:3000/api/dev-jwks
+JWKS_URI=http://localhost:3100/api/dev-jwks
+JWT_ISSUER=http://localhost:3100/api/dev-jwks
 ```
 
 Leave `DATABASE_URL` as the example's `127.0.0.1:5433` value (see §5 for why
@@ -178,10 +178,24 @@ Set-Location apps/api; pnpm dev
 Set-Location apps/web; pnpm dev
 ```
 
-Open **`http://localhost:3000`** — not `127.0.0.1`. Next.js canonicalises
+Open **`http://localhost:3100`** — not `127.0.0.1`. Next.js canonicalises
 loopback hostnames to the literal string `localhost`; hitting `127.0.0.1` in
 the browser breaks HMR (page renders via SSR but never hydrates, so nothing
 is clickable) and breaks the Auth.js sign-in redirect.
+
+Why **3100** and not Next's default 3000: the same reason Postgres is on 5433
+and not 5432 — the default is routinely already held by something else on a
+developer machine. `pnpm dev` carries the port, so there is nothing to pass.
+The API stays on **3001**.
+
+**If you ever move that port, it is not one setting.** `JWKS_URI` and
+`JWT_ISSUER` in `apps/api/.env` both name it, and so does `DEV_ISSUER` in
+`apps/web/lib/dev-identities.ts` — a hardcoded constant, not something derived
+from `AUTH_URL`. `JWT_ISSUER` is string-compared against what `DEV_ISSUER`
+stamped on the token, so if those two disagree the API starts perfectly and
+returns 401 to everything, and the app bounces you to
+`/signin?reason=expired` as though your session had simply timed out.
+`CLAUDE.md`'s **Local ports** rule lists every file involved.
 
 ---
 
@@ -294,13 +308,15 @@ don't have to manually walk every day forward:
 | Turbopack **Build Error** in the browser: `Export X doesn't exist in target module … packages/client/src/index.ts` | `packages/client/src` was generated from an older `spec/openapi.yaml` | `pnpm generate`, then `pnpm --filter @irp/client build` (§3) |
 | Seed fails with `TypeError: Cannot read properties of undefined (reading 'deleteMany')` | Stale Prisma client — the undefined value is a model a newer migration added | `pnpm --filter @irp/api exec prisma generate` (§5), then re-seed |
 | `pnpm typecheck` reports `TS2322: Type '"/roster"' is not assignable to type 'Route'` (and similar for other routes) on pages that render fine | Stale `.next/types/routes.d.ts` — `typedRoutes` types come from `next build`, and `next dev` writes a copy `tsconfig` doesn't read | `$env:AUTH_DEV_BYPASS = "false"; pnpm --filter @irp/web build`, then re-typecheck. **Don't cast the href** — the code is correct |
-| Page renders but nothing is clickable | Browser pointed at `127.0.0.1:3000` | Use `http://localhost:3000` |
+| Page renders but nothing is clickable | Browser pointed at `127.0.0.1:3100` | Use `http://localhost:3100` |
 | Signed in fine, then every page bounces to `/signin?reason=expired` | **Expected after any `apps/web` restart.** The dev signing keypair is generated once per *process* (`lib/dev-identity.ts`), so tokens minted by the previous process no longer verify — `apps/api` returns 401 and `lib/api-client.ts` redirects. Tokens are 8h, so this is a restart, not a timeout | Sign in again. A dev-server restart triggered by editing a workspace package (e.g. re-running `pnpm generate`) does this too, which is why it can look spontaneous |
 | Sign-in redirect lands on the wrong origin / cookie missing | Same cause as above | Use `localhost`, not `127.0.0.1`, in the browser |
 | `docker compose up` port conflict on 5432 | Another local Postgres/container already holds it | This repo standardizes on 5433 — make sure `$env:IRP_DB_PORT = "5433"` is set before `up` |
 | `next build` succeeds locally with `AUTH_DEV_BYPASS=true` | The production guard is broken — should never happen | Investigate immediately, don't ignore |
 | `pnpm --filter @irp/web build` fails locally | `.env.local` sets `AUTH_DEV_BYPASS=true`, and `next build` forces `NODE_ENV=production` | This is the guard working as intended. Run with `AUTH_DEV_BYPASS=false` explicitly for a local production build |
 | Demo data missing/wrong after running tests | `apps/api`'s test suite truncates the seeded tables | Re-run `pnpm --filter @irp/api run db:seed` |
+| `TS2307: Cannot find module '@/assets/….png'` in CI, on a branch that typechecks locally | The declaration for image imports lives in `next-env.d.ts`, which is **generated and git-ignored** — present locally the moment `next dev`/`next build` has run, absent in a fresh clone. CI typechecks before it builds | Already fixed for images by `apps/web/types/static-image-assets.d.ts`. If you add the first import of a **new** asset type, add its reference there — and verify by moving `next-env.d.ts` aside first, because a warm working tree cannot reproduce this |
+| Sign-in appears to work, then every page bounces to `/signin?reason=expired` **immediately**, and the API log shows 401s | `JWT_ISSUER` in `apps/api/.env` does not byte-match `DEV_ISSUER` in `apps/web/lib/dev-identities.ts`. Usually a half-finished port change. Distinct from the restart case above, which only strikes after `apps/web` restarts | Make the two strings identical (both `http://localhost:3100/api/dev-jwks` today). Note `JWKS_URI` is a **different** variable and is fetched, so it says `127.0.0.1` — that mismatch is deliberate |
 | A database/API command run through an AI coding agent's sandboxed shell fails to connect even though the container is healthy | Some sandboxed shells can't open TCP connections to localhost ports | Run database/dev-server commands in a real terminal, not a network-sandboxed one |
 
 ---

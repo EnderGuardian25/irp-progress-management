@@ -35,6 +35,43 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
+### 2026-08-18 — PR #17's red CI, and the web dev server moves to 3100
+
+Two things, both outside any plan.
+
+**1. The first static asset import broke CI, and no local check could have caught it.**
+Plan 7B's brand mark landed `import mark from "@/assets/hearts-academy-mark.png"`. All three
+timezone legs failed at Typecheck with `TS2307: Cannot find module …` while the branch was green
+locally through a full `next build`. The declaration that makes a PNG import resolve —
+`/// <reference types="next/image-types/global" />` — lives in `apps/web/next-env.d.ts`, which is
+**generated and git-ignored**: present on any machine where `next dev` or `next build` has ever
+run, absent in a fresh clone. CI typechecks *before* it builds, so nothing had generated it.
+
+Fixed by committing the reference as `apps/web/types/static-image-assets.d.ts`. Rejected:
+committing `next-env.d.ts` itself (it carries `import "./.next/types/routes.d.ts"`, a path into
+another git-ignored tree — one TS2307 traded for another), and reordering CI's Typecheck after the
+build (makes a plain `tsc` gate depend on a full Next build). Plan 7B Task 3 Step 6 asserted the
+opposite in writing and was corrected at source.
+
+**The generalisable shape:** a git-ignored generated file that a *local* check silently depends on
+is invisible to that check. This is the same class as the stale `.next/types/routes.d.ts` trap
+already recorded — same file, opposite direction: there, staleness made typecheck **falsely red**;
+here, presence made it **falsely green**.
+
+**2. `apps/web` now runs on 3100, not 3000** — the same reasoning that put Postgres on 5433.
+Mentor's call, repo-wide from here on.
+
+The trap found while doing it: **`DEV_ISSUER` is a hardcoded constant, not derived from
+`AUTH_URL`.** Move the port without it and `apps/api` string-compares an `iss` claim that no longer
+matches — it boots clean, 401s everything, and the app reports `?reason=expired`, so it reads as a
+session problem rather than a config one. Every copy is listed in CLAUDE.md's **Local ports** rule
+and in the constant's own docblock.
+
+**Container-internal ports deliberately stay 3000**: `Dockerfile`'s `web` `PORT`/`EXPOSE`,
+`compose.yaml`'s `PORT` and healthcheck, and `infra/main.bicep`'s `targetPort` — which must equal
+the image's `PORT`. The collision 3100 avoids is host-side. `compose.yaml` publishes `3100:3000`,
+so nothing a developer runs binds 3000 either way.
+
 ### 2026-08-04 — Plan 7B: frame and brand, and its Task 9 follow-up (O-15)
 
 **Shipped:** the Bistec Hearts Academy mark in the app frame — `BrandMark`, a small `variant="mark"`
@@ -966,7 +1003,7 @@ because this is the plan that makes it real.
 
    To run the Playwright suite, copy `apps/web/.env.example` to `.env.local`, set
    `AUTH_DEV_BYPASS=true`, point `apps/api/.env`'s `JWKS_URI`/`JWT_ISSUER` at
-   `http://localhost:3000/api/dev-jwks`, then **seed the dev users** — `apps/web/e2e/README.md` has
+   `http://localhost:3100/api/dev-jwks`, then **seed the dev users** — `apps/web/e2e/README.md` has
    the exact SQL. The API suites `TRUNCATE` the `User` table, so re-seed after running them.
 
    ```powershell

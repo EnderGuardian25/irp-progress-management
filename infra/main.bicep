@@ -265,6 +265,10 @@ resource webApp 'Microsoft.App/containerApps@2024-03-01' = {
       activeRevisionsMode: 'Single'
       ingress: {
         external: true
+        // 3000, NOT the 3100 the developer-facing convention uses: this must
+        // equal the web image's PORT (Dockerfile, `web` stage). 3100 exists to
+        // avoid collisions on a developer's machine, which is not a thing that
+        // happens inside a container. Ingress is reached on 443 regardless.
         targetPort: 3000
         transport: 'auto'
         allowInsecure: false
