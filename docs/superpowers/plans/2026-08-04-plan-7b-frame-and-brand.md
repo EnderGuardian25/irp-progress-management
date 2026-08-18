@@ -413,7 +413,9 @@ export function BrandMark({ variant }: { variant: "mark" | "lockup" }) {
 Run: `pnpm --filter @irp/web exec vitest run test/brand-mark.test.tsx`
 Expected: PASS, 4 tests.
 
-If the `.png` imports fail to resolve under Vitest, the fix is a Vitest alias or asset stub — **not** deleting the import. `apps/web/next-env.d.ts` already references Next's image type declarations, so `tsc` is satisfied; Vitest is a separate concern. Record whatever you add in your report.
+If the `.png` imports fail to resolve under Vitest, the fix is a Vitest alias or asset stub — **not** deleting the import. Vitest is a separate concern from `tsc`. Record whatever you add in your report.
+
+> **CORRECTION (from PR #17's red CI).** This step originally read "`apps/web/next-env.d.ts` already references Next's image type declarations, so `tsc` is satisfied." That is true on a developer machine and **false in CI**, and none of this plan's verification commands could catch the difference. `next-env.d.ts` is GENERATED and git-ignored (`.gitignore:6`): it exists locally the moment `next dev` or `next build` has ever run, and does not exist in a fresh clone. CI runs `Typecheck` **before** `Build @irp/web`, so nothing had generated it yet and all three timezone legs failed with `TS2307: Cannot find module '@/assets/hearts-academy-mark.png'` while the branch was green locally. The fix is `apps/web/types/static-image-assets.d.ts`, a committed file carrying Next's own `/// <reference types="next/image-types/global" />`. **Any task that adds the first import of a new non-code asset type must verify with `next-env.d.ts` moved aside**, not merely run `pnpm typecheck` on a warm working tree.
 
 - [ ] **Step 7: Put the mark in the topbar**
 
