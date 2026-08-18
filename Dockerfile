@@ -216,6 +216,11 @@ CMD ["node", "dist/index.js"]
 
 ###############################  web  ###############################
 FROM base AS web
+# PORT stays 3000 even though the repo-wide DEVELOPER convention is 3100. The
+# reason 3100 exists is host-side port collisions; nothing competes for a port
+# inside a container. compose.yaml publishes this as 3100 on the host, and
+# infra/main.bicep's ingress targetPort must equal the value below — change one
+# without the other and Container Apps routes to a port nothing is listening on.
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0

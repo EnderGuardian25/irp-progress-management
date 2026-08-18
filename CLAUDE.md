@@ -139,6 +139,24 @@ irp-progress-management/
 
 **No hand-written fetch in the frontend.** `apps/web` imports only from `packages/client`. A raw `fetch()` to our own API is a bug.
 
+**Local ports: web on 3100, API on 3001, Postgres on 5433.** The web app moved off 3000 on
+2026-08-18 for the same reason Postgres moved off 5432 — those defaults are routinely already held
+by something else on a developer machine. **3100 is not a single setting.** Changing it means
+changing, together: `apps/web/package.json`'s `dev` and `start` scripts, `AUTH_URL` (yours and
+`.env.example`), `JWKS_URI` and `JWT_ISSUER` in `apps/api/.env`, `DEV_ISSUER` in
+`apps/web/lib/dev-identities.ts`, five values in `apps/web/playwright.config.ts`, and five in
+`.github/workflows/ci.yml`. `DEV_ISSUER` is the one that bites: it is a **hardcoded constant, not
+derived from `AUTH_URL`**, so moving the port without it leaves the API string-comparing an `iss`
+claim that no longer matches — it boots clean and 401s every request, which presents as "my
+session expired", not as a config error.
+
+**Container-internal ports stay 3000**, deliberately: `Dockerfile`'s `web` stage `PORT`/`EXPOSE`,
+`compose.yaml`'s `PORT` and healthcheck, and `infra/main.bicep`'s ingress `targetPort` — which
+**must equal the image's `PORT`** or Container Apps routes to a port nothing listens on. The
+collision 3100 avoids is host-side; nothing competes for a port inside a container. `compose.yaml`
+publishes `3100:3000`, so nothing a developer runs binds 3000 either way. Do not "tidy" those
+three 3000s to match.
+
 **The dev auth bypass is temporary and must be deleted, not left dormant.**
 `AUTH_DEV_BYPASS=true` makes `apps/web` mint tokens with a local key. It swaps
 the token *issuer* — `apps/api` still validates every token with its real `jose`

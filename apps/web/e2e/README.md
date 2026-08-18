@@ -126,8 +126,8 @@ skipped more than expected.
 
    ```bash
    # apps/api/.env
-   JWKS_URI=http://localhost:3000/api/dev-jwks
-   JWT_ISSUER=http://localhost:3000/api/dev-jwks
+   JWKS_URI=http://localhost:3100/api/dev-jwks
+   JWT_ISSUER=http://localhost:3100/api/dev-jwks
    JWT_AUDIENCE=api://irp-progress-management
    ```
 
@@ -145,7 +145,7 @@ pnpm --filter @irp/web e2e
 
 If the JWKS fetch fails, `apps/api` returns **503** rather than 401 (Task
 11's behaviour). Check `JWKS_URI` in `apps/api/.env` points at
-`http://localhost:3000/api/dev-jwks` and that `apps/web` is up.
+`http://localhost:3100/api/dev-jwks` and that `apps/web` is up.
 
 ## `dashboard-flows.spec.ts` (Plan 7)
 

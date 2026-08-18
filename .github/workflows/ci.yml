@@ -47,7 +47,7 @@ jobs:
       # apps/web. AUTH_DEV_BYPASS is deliberately absent — the unit suite must
       # not depend on it, and Task 5's guard test sets NODE_ENV itself.
       AUTH_SECRET: ci-only-secret-at-least-32-bytes-xx
-      AUTH_URL: http://localhost:3000
+      AUTH_URL: http://localhost:3100
       API_BASE_URL: http://localhost:3001
     steps:
       - uses: actions/checkout@v4
@@ -212,8 +212,8 @@ jobs:
       - name: End-to-end suite
         env:
           AUTH_DEV_BYPASS: "true"
-          JWKS_URI: http://127.0.0.1:3000/api/dev-jwks
-          JWT_ISSUER: http://localhost:3000/api/dev-jwks
+          JWKS_URI: http://127.0.0.1:3100/api/dev-jwks
+          JWT_ISSUER: http://localhost:3100/api/dev-jwks
           JWT_AUDIENCE: api://irp-progress-management
         run: pnpm --filter @irp/web e2e
 
@@ -489,7 +489,7 @@ jobs:
           set +e
           output=$(timeout 60 docker run --rm \
             -e AUTH_SECRET=ci-only-secret-at-least-32-bytes-xx \
-            -e AUTH_URL=http://localhost:3000 \
+            -e AUTH_URL=http://localhost:3100 \
             -e API_BASE_URL=http://localhost:3001 \
             -e AUTH_DEV_BYPASS=true \
             irp-web:ci 2>&1)
@@ -542,7 +542,7 @@ jobs:
           }
 
       - name: The web app serves its sign-in page
-        run: curl -fsS -o /dev/null http://localhost:3000/signin
+        run: curl -fsS -o /dev/null http://localhost:3100/signin
 
       # ADR-0009 D5 scales to zero, so this is a routine event, not a
       # deploy-time one. A 137 here is a SIGKILL: dropped in-flight requests on

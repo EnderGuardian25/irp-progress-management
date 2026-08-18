@@ -78,7 +78,7 @@ export default defineConfig({
     // parseURL rewrites any of 127.x.x.x, [::1] and localhost to the literal
     // string "localhost" (next/dist/server/web/next-url.js,
     // REGEX_LOCALHOST_HOSTNAME), and NextRequest.url is built from that. So
-    // Auth.js always computes its base origin as http://localhost:3000 no
+    // Auth.js always computes its base origin as http://localhost:3100 no
     // matter which loopback address the browser used — even AUTH_URL cannot
     // override it, because next-auth's reqWithEnvURL rewrites the origin and
     // then hands the result to NextRequest, which normalises it straight back.
@@ -92,7 +92,7 @@ export default defineConfig({
     //      renders perfectly via SSR, no click handler is ever attached, and
     //      nothing throws. It presents as "the button does nothing".
     //   2. Even hydrated, the credentials callback's redirect target
-    //      http://127.0.0.1:3000/ is a different origin from Auth.js's
+    //      http://127.0.0.1:3100/ is a different origin from Auth.js's
     //      localhost base, so the default `redirect` callback discards it and
     //      returns the base — the browser lands on localhost without the
     //      cookie that was just set on 127.0.0.1, and bounces back to /signin.
@@ -101,7 +101,7 @@ export default defineConfig({
     // but it applies to servers we bind ourselves: Fastify listens on IPv4
     // only, so apps/api is still addressed as 127.0.0.1 below. Next's dev
     // server listens on both families, so `localhost` resolves either way.
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3100",
     // Desktop only, min 1280px (NFR-13).
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
@@ -152,18 +152,18 @@ export default defineConfig({
           process.env.DATABASE_URL ?? "postgresql://irp:irp@127.0.0.1:5433/irp?schema=public",
         // JWKS_URI is FETCHED, so it must be an address that resolves — 127.0.0.1,
         // because `localhost` prefers ::1 on the Windows dev machines.
-        JWKS_URI: "http://127.0.0.1:3000/api/dev-jwks",
+        JWKS_URI: "http://127.0.0.1:3100/api/dev-jwks",
         // JWT_ISSUER is STRING-COMPARED against the token's `iss` claim, so it
         // must equal DEV_ISSUER in apps/web/lib/dev-identities.ts exactly —
         // which says `localhost`. These two deliberately differ: one is a
         // network target, the other is an opaque identifier.
-        JWT_ISSUER: "http://localhost:3000/api/dev-jwks",
+        JWT_ISSUER: "http://localhost:3100/api/dev-jwks",
         JWT_AUDIENCE: "api://irp-progress-management",
       },
     },
     {
       command: "pnpm --filter @irp/web dev",
-      url: "http://127.0.0.1:3000/signin",
+      url: "http://127.0.0.1:3100/signin",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
       stdout: "pipe",
@@ -175,7 +175,7 @@ export default defineConfig({
         // AUTH_URL is silently ignored and the post-callback redirect lands on
         // a different origin than the session cookie. Next does not override
         // already-set process.env values, so this wins over .env.local.
-        AUTH_URL: "http://localhost:3000",
+        AUTH_URL: "http://localhost:3100",
         AUTH_DEV_BYPASS: "true",
         // Server-side fetch target, so 127.0.0.1 for the same ::1 reason.
         API_BASE_URL: "http://127.0.0.1:3001",

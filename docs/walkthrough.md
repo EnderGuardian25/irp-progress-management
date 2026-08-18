@@ -22,10 +22,10 @@ pnpm --filter @irp/api db:seed
 
 # 3. Both servers
 pnpm --filter @irp/api dev      # :3001
-pnpm --filter @irp/web dev      # :3000, needs AUTH_DEV_BYPASS=true
+pnpm --filter @irp/web dev      # :3100, needs AUTH_DEV_BYPASS=true
 ```
 
-Open **`http://localhost:3000`** — `localhost`, never `127.0.0.1`. Next canonicalises loopback
+Open **`http://localhost:3100`** — `localhost`, never `127.0.0.1`. Next canonicalises loopback
 hostnames, so driving the browser at `127.0.0.1` breaks hydration and the auth callback lands on
 an origin without the session cookie. The page will render and the buttons will silently do
 nothing. This has cost hours before.
