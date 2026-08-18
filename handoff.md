@@ -37,7 +37,8 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ### 2026-08-18 — PR #17's red CI, and the web dev server moves to 3100
 
-Two things, both outside any plan.
+Two things, both outside any plan. **Both merged the same day — #17 then #18 — and `main` is now at
+`5e99498` with nothing in flight.**
 
 **1. The first static asset import broke CI, and no local check could have caught it.**
 Plan 7B's brand mark landed `import mark from "@/assets/hearts-academy-mark.png"`. All three
@@ -350,9 +351,9 @@ on this machine, version 2.88.0 — see `docs/manual-setup-steps.md` §1.2's cur
 
 **Documentation**
 - **Stakeholder interview** — `docs/stakeholder-interview.md`.
-- **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-13.
+- **Deliverable 1 — Interview Record + Problem Statement + PRD + Team Contract** — `docs/interview-and-prd.md`. 33 numbered FRs, 15 NFRs, 12 non-goals, traceability table. Open points now run O-1 to O-16.
 - **`docs/design-system.md`** — visual system. Palette verified by script: 35 pairs across light and dark pass WCAG AA, all tokens in sRGB gamut.
-- **Nineteen ADRs** — `docs/adr/0001`–`0019`. Each names at least two rejected alternatives.
+- **Twenty-three ADRs** — `docs/adr/0001`–`0023`. Each names at least two rejected alternatives.
   **0010** Auth.js v5 over MSAL — records that `next-auth` is pinned to `5.0.0-beta.32`, a beta,
   because `latest` is `4.24.15`, an *older* major with no App Router support;
   **0011** Microsoft Graph Bicep extension over a committed bootstrap script — supersedes slice-1
@@ -516,6 +517,11 @@ required locally after any spec change — CI is unaffected, since it already ru
 
 ### Not started
 
+> **Corrected 2026-08-18.** `infra/` is **no longer** in this list — Plan 4B wrote `main.bicep`,
+> `deploy.yml` and the runbook, and the Bicep gate is green in CI (PR #9). It is *written but not
+> applied*, which §3 covers. **`tests/load/` is the only genuinely-not-started item here**, and it
+> stays blocked on the runbook §1 bootstrap, since k6's NFR-1/NFR-2 targets need a deployed URL.
+
 `infra/`, `tests/load/`. Plan 4 needs the Entra directory below before its Graph Bicep can deploy
 from CI — but note the dev bypass means **nothing is blocked on it for building or demoing**.
 
@@ -578,7 +584,9 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 4B · Infra, deploy, observability | T-19, T-20, T-21 (rest), T-22, T-23 | D3 | ✅ **Merged, PR #9.** `infra/entra.bicep` stayed **out of scope** — its fourth deferral, a governance call now that the tenant premise is corrected (see §3) — not a technical blocker |
 | **2 — The product** | 5 · Full data model + seed | T-05 (full), T-07 | D2 | ✅ **Merged, PR #10.** Plan: `docs/superpowers/plans/2026-08-02-plan-5-data-model-and-seed.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
 | | 6 · Submission + review flows | T-08 (full), T-12, T-13 | — | ✅ **Merged, PR #11.** Plan: `docs/superpowers/plans/2026-08-02-plan-6-submission-and-review.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md`. Opened with the repo error contract, the entry-vs-absence race fix, and the transfer-day inclusivity decision deferred from Plan 5's pre-PR pass |
-| | 7 · Dashboards | T-14, T-15 | SC-4 | ⏳ **Complete on branch, PR not yet opened** — branch `feat/plan-7-dashboards`; three dashboard endpoints, mentor Today + Cycles, student My month, the typography migration audit, `dashboard-flows.spec.ts`, and `docs/walkthrough.md`. Plan: `docs/superpowers/plans/2026-08-03-plan-7-dashboards.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
+| | 7 · Dashboards | T-14, T-15 | SC-4 | ✅ **Merged, PR #12.** Three dashboard endpoints, mentor Today + Cycles, student My month, the typography migration audit, `dashboard-flows.spec.ts`, and `docs/walkthrough.md`. Plan: `docs/superpowers/plans/2026-08-03-plan-7-dashboards.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
+| | *(UI follow-ups to 7 — no new T-numbers)* | — | — | ✅ **Merged, PRs #13–#17.** Design-system pass (#13); roster legibility + `Batch 1`/`Batch 2` seed rename (#14); the collapsed ribbon key and `workers: 1` (#15, ADR-0020); **7A** Settings page, theme by cookie, verified dark (#16, ADR-0021/0022); **7B** frame and brand — sidebar icons, the logo, Sign out relocated, `Create batch` returned to Students (#17, ADR-0023). 7A and 7B carry their own plan/spec pairs under `docs/superpowers/` |
+| | *(developer-environment chore)* | — | — | ✅ **Merged, PR #18.** Web dev server moved 3000 → **3100**; container-internal ports deliberately unchanged. No FR — see CLAUDE.md's **Local ports** rule |
 | **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
 | | 10 · Winner + PDF | T-18 | — | Not started |
@@ -659,18 +667,37 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Plan 7 complete on `feat/plan-7-dashboards`** — three dashboard endpoints (`GET
+**Everything through Plan 7B is merged. `main` is at PR #18 (`5e99498`, 2026-08-18) and there is no
+work in flight** — no open branch, no open PR, nothing half-landed.
+
+Plan 7 itself merged as **PR #12** (three dashboard endpoints — `GET
 /api/v1/batches/{id}/dashboard/today`, `GET /api/v1/batches/{id}/dashboard/summary`, `GET
-/api/v1/me/dashboard`), mentor Today and Cycles, student My month, the typography migration audit
-across every page, `dashboard-flows.spec.ts`, and `docs/walkthrough.md`. Task 3's review also found
-and fixed a real scoring defect in `countCycle` (see §1's "What exists now"). The branch is not yet
-merged — Task 12, this documentation sweep, is the last task before the whole-branch review and PR.
+/api/v1/me/dashboard` — mentor Today and Cycles, student My month, the typography migration audit,
+`dashboard-flows.spec.ts`, and `docs/walkthrough.md`; Task 3's review also fixed a real scoring
+defect in `countCycle`). Six further PRs landed on top of it, none adding a T-number: **#13**
+design-system pass · **#14** roster legibility and the `Batch 1`/`Batch 2` seed rename · **#15** the
+collapsed ribbon key and `workers: 1` · **#16** Plan 7A, the Settings page and theme-by-cookie ·
+**#17** Plan 7B, the frame and brand · **#18** the dev-server port move to 3100. See §2a for what
+each covers.
+
+**The next action is a decision, not a task.** Slice 2 is complete and slice 3's three plans are
+either not started (8, 10) or blocked (9, on O-5). The two things that would unblock the most are
+both outside the code: running the deploy runbook's §1 bootstrap (Deliverable 3 is still
+apply-ready, not applied — see below) and getting a decision on **O-5**, the AI provider, which
+gates Plan 9 and touches personal data. Neither is something the next session can simply pick up
+and start writing.
+
+**Housekeeping owed before the next plan starts:** archive `.superpowers/sdd/` into
+`.superpowers/sdd/plan-7b/` and reset `progress.md`, per CLAUDE.md. The directory is git-ignored,
+so nothing recovers it once the next plan overwrites the fixed filenames — this is exactly how
+Plan 1's ledger was lost.
+
 Everything below this paragraph, up to and including the "Azure and Entra" material, predates
 Plans 5, 6 and 7 and describes Plan 4B's state at merge; read it as history, not current status.
 
 **Slice 2 ("The product") now contains everything it was ever scoped to cover, and nothing more.**
 Plan 5 built the full data model and seed; Plan 6 shipped submission and review (merged, PR #11);
-Plan 7 shipped both dashboards (this branch). What slice 2 does **not** contain, by the spec's own
+Plan 7 shipped both dashboards (PR #12), and PRs #13–#17 refined that UI without widening scope. What slice 2 does **not** contain, by the spec's own
 D2/D3 decisions: no AI evaluation (Plan 9, blocked on O-5), no notifications (Plan 8), no winner
 computation or PDF (Plan 10). The `Evaluation`/`Override`/`Award` tables exist as schema only —
 zero rows in the seed — and the student My month page renders the designed empty state ("No
@@ -678,12 +705,21 @@ evaluation yet — your first summary appears after your cycle closes") rather t
 score. There is still no reject state, no configurable rubric, and no student-visible score or
 rank; nothing in Plan 7 touches those non-goals.
 
-**Deliverable 3's status is unchanged by Plan 7 — still apply-ready, not applied.** Plan 7 touched
-only `apps/api` and `apps/web`; it made no infra, deploy, or observability change. The
-apply-ready-versus-applied distinction the Plan 4B paragraph below establishes — the Bicep gate
-being green and the files existing is not the same as the resource providers being registered or
-anything actually running in Azure — still holds verbatim. Do not infer from "dashboards shipped"
-that anything is deployed.
+**Deliverable 3's status is unchanged by everything since Plan 4B — still apply-ready, not
+applied.** Plan 7 and its follow-ups touched only `apps/api` and `apps/web`. PR #18 is the one
+exception and it is not a real one: it edited `infra/main.bicep`, `Dockerfile` and `compose.yaml`
+to add **comments** explaining why the container-internal port stays 3000 while the developer-facing
+port moved to 3100, and changed no deployed value — `targetPort` is still 3000, as it must be to
+equal the image's `PORT`. The apply-ready-versus-applied distinction the Plan 4B paragraph below
+establishes — the Bicep gate being green and the files existing is not the same as the resource
+providers being registered or anything actually running in Azure — still holds verbatim. Do not
+infer from "dashboards shipped" that anything is deployed.
+
+> **Historical as of 2026-08-18 — the line below described the position while Plan 4B was still on
+> its branch.** Plan 4B has since merged as PR #9, and nine further PRs have landed on top of it.
+> Current position is the top of this section. **What has *not* changed is the apply-ready-versus-
+> applied distinction the next paragraph draws** — that is still live and still the reason
+> Deliverable 3 is incomplete.
 
 **Branch:** `feat/plan-4b-infra-deploy-observability` · **Last merged:** Plan 4A as **PR #8**
 (merge commit `720b387`, 2026-07-30) · **Plan 4B: all ten tasks complete, apply-ready, not yet
