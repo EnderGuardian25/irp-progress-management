@@ -62,6 +62,16 @@ list the seed and the dev sign-in picker both read.
 
 Sign in as **Mentor (Admin)**.
 
+**The frame itself, before the screens.** The topbar carries the Bistec Hearts Academy mark — a
+small `BrandMark` card, theme-invariant so the logo's own contrast is never at the mercy of dark
+mode — next to your name, and nothing else — no batch switcher (`docs/design-system.md` §13
+records why: `User` carries no batch, and a mentor holds several, so batch selection stays
+per-page via the Roster and Cycles chips instead). Every sidebar row now carries a hand-drawn icon
+before its label,
+and the active row's icon changes colour with its label, not just the label alone. **Sign out**
+sits in the sidebar too, pinned directly below **Settings** inside the same divider rule — it is
+no longer a topbar control.
+
 ### 1. Today — the must-ship screen (FR-28, SC-4)
 
 You land here. One block per batch, each with a cycle ribbon and the figures beneath it.
@@ -129,20 +139,27 @@ picker.
 
 ### 5. Students
 
-`Students`. Transfer a student between batches, and archive one. **Register** and **Create batch**
-are no longer here — see the next section.
+`Students`. Transfer a student between batches, archive one, and **create a batch** — back here as
+a third panel stacked under `Transfer` (ADR-0023). **Register** is not here — see the next section.
 
 - The archive view lists archived students read-only. Archiving revokes access without deleting
   identity or history.
+- **Why `Create batch` came back.** ADR-0022 moved it to Settings along with `Register`, but with
+  only `Transfer` and `People` left on this page, `Transfer` — a short form — sat in the left half
+  of a two-column grid next to `People`'s much taller directory, leaving visible dead space below
+  it. ADR-0023 narrows ADR-0022's scope rather than reversing it: `Register` stays on Settings,
+  `Create batch` comes back here, and the left column now runs to a height comparable with `People`.
 
-### 6. Settings (ADR-0021, ADR-0022)
+### 6. Settings (ADR-0021, ADR-0022, ADR-0023)
 
 `Settings`, pinned at the bottom of the sidebar. Two things happened here in this slice.
 
-- **Register a mentor or a student, and create a batch.** Both moved off Students (ADR-0022):
-  Students is now the *management* surface (Transfer, People/archive), Settings is the
-  *registration* surface. Registering a student still takes a batch and a start date in the same
-  step — there is no orphan state where a student exists but belongs nowhere.
+- **Register a mentor or a student.** Moved off Students (ADR-0022): Students is the *management*
+  surface (Transfer, Create batch, People/archive), Settings is the *registration* surface.
+  Registering a student still takes a batch and a start date in the same step — there is no orphan
+  state where a student exists but belongs nowhere. `Create batch` itself is **not** here — ADR-0023
+  sent it back to Students once the two-panel Settings/Students split proved to leave Students with
+  a visibly empty column (see the previous section).
 - **Appearance — Light / Dark / Follow system.** This is worth demoing specifically because **dark
   was unreachable before this slice.** ADR-0002 shipped dark tokens with full contrast audits, but
   the only way to see them was to change the operating system's own theme — there was no in-app
@@ -150,7 +167,9 @@ are no longer here — see the next section.
   repaints instantly (no reload, because the control writes the DOM directly), and the choice
   survives a reload and a fresh sign-in because it is stored server-side in a cookie, not
   `localStorage`. Every mentor screen in this walkthrough is worth a second pass in dark once you've
-  shown it in light.
+  shown it in light. **One caveat, not fixed in this slice:** choosing Dark and then pressing the
+  browser's Back button can render the page back in the pre-choice theme until the next reload —
+  logged as O-16, see `handoff.md`.
 - **Settings is on both roles' sidebars.** Appearance belongs to everyone; the registration section
   gates itself out for a Student rather than the page redirecting them away.
 
@@ -158,7 +177,8 @@ are no longer here — see the next section.
 
 ## Student walkthrough
 
-Sign out, then sign in as **Student** (Dev Student, Batch 1, fully compliant).
+**Sign out** — the sidebar control below Settings, not a topbar menu — then sign in as **Student**
+(Dev Student, Batch 1, fully compliant).
 
 ### 7. Today
 

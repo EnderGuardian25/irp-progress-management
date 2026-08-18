@@ -6,7 +6,7 @@ import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { SectionLabel } from "@/components/ui/section-label";
 import { EmptyState } from "@/components/ui/empty-state";
-import { TransferForm, ArchiveButton, RestoreButton } from "./forms";
+import { TransferForm, CreateBatchForm, ArchiveButton, RestoreButton } from "./forms";
 
 /**
  * The mentor's directory of people and batches (FR-3, FR-5, FR-6, FR-8).
@@ -14,13 +14,15 @@ import { TransferForm, ArchiveButton, RestoreButton } from "./forms";
  * gate -- a Student hitting this route is bounced to "/" rather than shown
  * a 403 page.
  *
- * Register and Create batch moved to Settings (ADR-0022) -- this page is the
- * management surface for people and batches that already exist, not where
- * they're created.
+ * Register moved to Settings (ADR-0022) and stayed there. Create batch moved
+ * to Settings alongside it in that same ADR, then moved back here (ADR-0023)
+ * -- a batch is not a person, and `grid-cols-2` with Transfer alone left this
+ * column visibly empty below it, because People is several times taller.
  *
- * `?view=archived` renders the FR-5 archive list instead of the two working
+ * `?view=archived` renders the FR-5 archive list instead of the three working
  * panels -- names, emails, and a Restore control per row. It carries no other
- * actions: everything else (transfer, re-registration) needs an active user.
+ * actions: everything else (transfer, batch creation, re-registration) needs
+ * an active user.
  */
 export default async function StudentsPage({
   searchParams,
@@ -85,11 +87,12 @@ export default async function StudentsPage({
     );
   }
 
-  // The default view's two panels (Transfer, People) both draw from the same
-  // two reads -- every active (non-archived, the default) user and every
-  // batch -- rather than each panel issuing its own request. Register and
-  // Create batch moved to Settings (ADR-0022); `batches` is still read here
-  // because Transfer needs its options.
+  // The default view's three panels (Transfer, Create batch, People) all
+  // draw from the same two reads -- every active (non-archived, the default)
+  // user and every batch -- rather than each panel issuing its own request.
+  // Register moved to Settings and stayed there (ADR-0022); Create batch
+  // moved there too and then came back (ADR-0023). `batches` is read here
+  // both for Transfer's options and because Create batch now lives here.
   const [{ data: batches, error: batchesError }, { data: users, error: usersError }] =
     await Promise.all([
       listBatches({ client }),
@@ -121,16 +124,29 @@ export default async function StudentsPage({
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <Panel>
-          <SectionLabel>Transfer</SectionLabel>
-          <div className="mt-3">
-            {studentOptions.length === 0 || batchOptions.length === 0 ? (
-              <EmptyState title="No active student or batch to transfer yet." />
-            ) : (
-              <TransferForm students={studentOptions} batches={batchOptions} />
-            )}
-          </div>
-        </Panel>
+        <div className="flex flex-col gap-6">
+          <Panel>
+            <SectionLabel>Transfer</SectionLabel>
+            <div className="mt-3">
+              {studentOptions.length === 0 || batchOptions.length === 0 ? (
+                <EmptyState title="No active student or batch to transfer yet." />
+              ) : (
+                <TransferForm students={studentOptions} batches={batchOptions} />
+              )}
+            </div>
+          </Panel>
+
+          {/* ADR-0023. `grid-cols-2` with Transfer alone left this column
+              visibly empty below it, because People is several times taller.
+              A batch is also not a person, so this sits better here than
+              under a heading about registering people. */}
+          <Panel>
+            <SectionLabel>Create batch</SectionLabel>
+            <div className="mt-3">
+              <CreateBatchForm />
+            </div>
+          </Panel>
+        </div>
 
         <Panel>
           <div className="flex items-center justify-between">

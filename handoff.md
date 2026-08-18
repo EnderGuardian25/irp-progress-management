@@ -35,6 +35,98 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
+### 2026-08-04 — Plan 7B: frame and brand, and its Task 9 follow-up (O-15)
+
+**Shipped:** the Bistec Hearts Academy mark in the app frame — `BrandMark`, a small `variant="mark"`
+card in the topbar and the full stacked `variant="lockup"` on `/signin` and `/not-registered` —
+replacing the placeholder diamond everywhere it appeared. Every sidebar row now carries a
+hand-drawn `currentColor` icon before its label, including the label-only branch reserved for a
+future destination. **Sign out** moved out of the topbar into the sidebar, pinned directly below
+Settings inside the same `border-top` divider group, as a peer of the nav rows rather than a
+loose control. **`Create batch` returned to Students**, stacked under `Transfer` in the left
+column, per **ADR-0023** — which narrows **ADR-0022**'s scope for `Create batch` specifically
+(ADR-0022 itself is unedited; its reasoning about `Register` and the Students/registration naming
+mismatch stands) after the two-panel Settings/Students split left `Transfer` alone in a
+grid-cols-2 left column next to `People`'s much taller directory, reading as a rendering fault
+rather than a deliberate trim. None of this maps to an FR: it is logged as **O-15**, on the same
+footing as O-14 (theme), with sign-off outstanding and non-blocking.
+
+**`--brand-card` is the one token exempt from the light/dark pairing rule, deliberately.** Every
+other token in `globals.css` is declared once in the light `:root` and again inside the
+`dark-tokens:start`/`:end` markers `theme-tokens.test.ts` asserts hold exactly thirteen pairs.
+`--brand-card` sits **outside** those markers and is never overridden, so it resolves to the same
+`#ffffff` in both themes. This is not an oversight the pairing rule should have caught — the brand
+lockup is a supplied asset with its own internal contrast (near-black wordmark on a light field)
+that is not ours to re-verify, and a card that followed the theme would put that wordmark on
+`#1c1e23` and erase it. It exists for the brand card alone and is not a general-purpose surface.
+
+**Task 9's visual pass (performed directly against the running app, both themes, fresh seed data —
+see `.superpowers/sdd/2026-08-04-plan-7b-frame-and-brand/task-9-visual-findings.md`): five of six
+checks pass outright** — the topbar mark reads as intentional in both themes at 32px, all six
+sidebar icons align on one baseline and the active row's icon recolours with its label, Sign out
+matches the nav rows exactly including its full-width focus ring, `/students` now runs `Transfer`
+and `Create batch` to a height comparable with `People` (the FR-3 deliverable ADR-0023 exists for),
+and the `/signin`/`/not-registered` lockup card is uniformly white with no seam in dark.
+
+**One latent spacing inconsistency was found and fixed.** The Review-count badge carried
+`className="tabular ml-2"` on top of `.nav-item`'s `gap: 8px`, so label→badge spacing was
+`gap + ml-2` while icon→label spacing was `gap` alone — invisible in every screenshot because the
+seeded data leaves nothing pending review, so the badge never rendered. Fixed by dropping the
+redundant `ml-2` (`apps/web/components/app-frame/sidebar.tsx`); `sidebar.test.tsx` and
+`app-frame.test.tsx` both re-run clean, the latter's `/^Review\s*3$/` assertion being
+whitespace-tolerant by design.
+
+**A second latent defect was found and fixed in the same pass: a dev-console `next/image`
+mismatch warning on the lockup (`55ec68e`).** The `Image`'s declared `height: 134` was hand-set
+against `hearts-academy-lockup.png`'s pixel dimensions at the time it was chosen, and Task 3's
+transparent-field trim changed those dimensions without the declared height being recomputed to
+match — next/image's dev-only warning compares the declared `height`/`width` HTML attributes
+against the actual rendered size, not CSS, so the mismatch fired on every load. A `style={{
+height: "auto" }}` override was tried and measured (via a real browser) to be a no-op: Tailwind's
+preflight already forces `height: auto` on every `<img>`. Fixed by recomputing the declared height
+from the asset's true pixel ratio (see `brand-mark.tsx`'s comment for the exact figures); `height:
+133` is what actually silences the check, because it is what the browser already renders.
+
+**The back/forward theme question Plan 7A left open reproduces, and it is worse than 7A's review
+predicted — logged as new open point O-16.** 7A expected the page to *stay* dark while only the
+radio might misread "Follow system." Measured with the OS reporting light (so any dark rendering
+could only come from the explicit choice): choosing **Dark**, navigating away, then pressing
+**Back** renders the page itself in the **pre-choice (light) theme**, not just the radio — Next's
+client router cache replays an `<html data-theme>` snapshot from before the cookie changed. It
+self-heals on a full reload. This is **pre-existing from Plan 7A / ADR-0021**, not introduced by
+Plan 7B — `theme-control.tsx`/`theme-actions.ts` were untouched by this plan apart from Task 9's
+fix below. A real fix is an ADR-level decision: the theme cookie is deliberately `httpOnly`
+(ADR-0021), so the client cannot read it to re-stamp the attribute on restore, and every candidate
+(drop `httpOnly`, add `revalidatePath`, introduce a client-readable store) either needs its own ADR
+or is the exact thing `theme-actions.ts`'s docblock rejects — it would force a server round trip
+and re-render on every switch, contradicting ADR-0021's flash-free Decision. Not fixed here on
+purpose — see `docs/interview-and-prd.md` O-16.
+
+**What Task 9 did fix: the radio group's half of that defect.** `ThemeControl` seeded its checked
+state from the server-supplied `current` prop alone, which is exactly what a stale router-cache
+replay can serve out of step with the live DOM. It now reconciles from
+`document.documentElement.dataset.theme` in a `useEffect` that runs once after mount — after
+hydration, not during it, so the first render is still byte-identical to the server's and no
+hydration mismatch is introduced structurally. **This was not verified in a browser console**
+(no dev server was started for this task per its instructions); the claim is architectural, not
+empirically confirmed against a live hydration warning. `revalidatePath` was not touched, and the
+cookie stays `httpOnly`. Covered by two new cases in `apps/web/test/theme-control.test.tsx`, and two
+existing tests (there and in `settings-page.test.tsx`) needed updating to set the live DOM
+attribute consistent with their `current` prop, since that consistency is exactly what the real
+app guarantees and a page-only unit test does not exercise for free.
+
+**`/not-registered` remains the one view of eleven with no dark e2e cover.** `e2e/helpers.ts` has
+no unregistered-identity sign-in helper and inventing one was out of scope for Plan 7B; already
+recorded in `apps/web/e2e/README.md`.
+
+Verified (full detail in
+`.superpowers/sdd/2026-08-04-plan-7b-frame-and-brand/task-9-report.md`): typecheck 6/6 projects
+(both before AND after `next build`, so the route-typing trap `CLAUDE.md` records could not have
+hidden anything) · core 113/113 · api 269/269 · web 260/260 · `pnpm lint` exit 0 · `next build`
+(`AUTH_DEV_BYPASS=false`) — 13 routes, all `ƒ` · Playwright 31 tests/1 skipped (the documented
+`student-flows.spec.ts:38` gap), 30 passed · the two colour-literal/Tailwind-utility greps, zero
+matches · `hearts-academy` mark and lockup assets present under `apps/web/.next/static/media/`.
+
 ### 2026-08-04 — roster legibility pass (FR-19, FR-28, FR-33)
 
 A small post-Plan-7 slice, not a plan of its own. Three things, plus two defects it surfaced.

@@ -4,12 +4,14 @@ import { getCurrentUserOrRedirect, apiClient } from "@/lib/api-client";
 import { PageTitle } from "@/components/ui/page-title";
 import { Panel } from "@/components/ui/panel";
 import { THEME_COOKIE, parseTheme } from "@/lib/theme";
-import { RegisterForm, CreateBatchForm } from "../students/forms";
+import { RegisterForm } from "../students/forms";
 import { ThemeControl } from "./theme-control";
 
 /**
  * Settings — appearance for everyone, registration for mentors (FR-3).
- * ADR-0021 (theme by cookie), ADR-0022 (registration lives here).
+ * ADR-0021 (theme by cookie), ADR-0022 (registration lives here), ADR-0023
+ * (Create batch moved here alongside Register, then moved back to Students --
+ * this page keeps Register only).
  *
  * THE GATING PATTERN HERE IS NEW AND DELIBERATE. Every other mentor page
  * bounces the whole route:
@@ -64,10 +66,6 @@ export default async function SettingsPage() {
 
         <Panel title="Register">
           <RegisterForm batches={batchOptions} />
-        </Panel>
-
-        <Panel title="Create batch">
-          <CreateBatchForm />
         </Panel>
       </div>
     </div>

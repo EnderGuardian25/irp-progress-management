@@ -1,8 +1,30 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Sidebar } from "@/components/app-frame/sidebar";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+
+/**
+ * D5's whole point is that `signOut` (from `@/auth`, server-only) never
+ * reaches this Client Component — it is handed in as a `signOutSlot`
+ * `ReactNode` instead. Importing `@/auth` here would be a Next.js build
+ * error (a Client Component cannot import server-only code), so a
+ * regression would surface only at `next build`, not in this test suite.
+ * This is a source-level assertion, in the style `test/theme-tokens.test.ts`
+ * uses for `globals.css`, so it fails fast in `pnpm test` instead.
+ */
+describe("sidebar.tsx never imports @/auth", () => {
+  const source = readFileSync(
+    path.join(import.meta.dirname, "..", "components", "app-frame", "sidebar.tsx"),
+    "utf8",
+  );
+
+  it("has no import referencing @/auth", () => {
+    expect(source).not.toMatch(/from\s+["']@\/auth["']/);
+  });
+});
 
 describe("Sidebar Settings entry", () => {
   it("offers Settings to a mentor", () => {
@@ -57,5 +79,59 @@ describe("Sidebar Settings entry", () => {
       .map((a) => a.textContent?.trim())
       .filter((label) => label !== "Settings");
     expect(primary).toHaveLength(2);
+  });
+
+  it("renders an icon for every destination", () => {
+    const { container } = render(<Sidebar role="Admin" />);
+    // Five primary destinations + Settings = six rows, six icons.
+    expect(container.querySelectorAll("nav svg")).toHaveLength(6);
+  });
+
+  it("keeps the accessible name as the text label alone — icons are decorative", () => {
+    render(<Sidebar role="Admin" />);
+    // If an icon ever contributed to the name, this exact-match query breaks.
+    // That is the assertion that proves the icons are aria-hidden.
+    for (const label of ["Today", "Roster", "Review", "Cycles", "Students", "Settings"]) {
+      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("marks every icon aria-hidden", () => {
+    const { container } = render(<Sidebar role="Admin" />);
+    for (const svg of container.querySelectorAll("nav svg")) {
+      expect(svg).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
+  it("draws icons with currentColor, so they follow hover and active states", () => {
+    const { container } = render(<Sidebar role="Admin" />);
+    // A hardcoded stroke would not flip with .nav-item[data-active] or in dark.
+    for (const svg of container.querySelectorAll("nav svg")) {
+      expect(svg.getAttribute("stroke")).toBe("currentColor");
+    }
+  });
+
+  it("renders whatever sign-out slot the server layout hands it", () => {
+    render(
+      <Sidebar role="Admin" signOutSlot={<button type="submit">Sign out</button>} />,
+    );
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("puts the sign-out slot in the bottom group, AFTER Settings", () => {
+    render(
+      <Sidebar role="Admin" signOutSlot={<button type="submit">Sign out</button>} />,
+    );
+    const settings = screen.getByRole("link", { name: "Settings" });
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const wrapper = settings.parentElement!;
+    // Same wrapper, and Settings first. DOCUMENT_POSITION_FOLLOWING === 4.
+    expect(wrapper.contains(signOut)).toBe(true);
+    expect(settings.compareDocumentPosition(signOut) & 4).toBeTruthy();
+  });
+
+  it("renders nothing extra when no slot is supplied", () => {
+    render(<Sidebar role="Admin" />);
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 });

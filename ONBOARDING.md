@@ -252,17 +252,19 @@ don't have to manually walk every day forward:
 3. **Review** → pick Chamodi Herath (or any recent Submitted report) → walk
    it Submitted → In Review → Evaluated, then note it locks.
 4. **Students** directory → show the archive flow, and that it's reversible
-   (restore, FR-5). Note that **Register** and **Create batch** are no longer
-   here — they moved to **Settings** (ADR-0022); Students now carries only
-   **Transfer** and **People**.
-5. **Settings** → **Register** a throwaway student or mentor and **Create
-   batch**, then switch to **Appearance** and pick **Dark**. Dark was shipped
-   with ADR-0002 but was only reachable by changing the OS theme until this
-   slice (ADR-0021) — it's worth demoing precisely because it was previously
-   unreachable. The repaint is instant (no reload), and it survives a reload
-   because the choice is a server-readable cookie, not `localStorage`. Switch
-   back to **Follow system** (or **Light**) before continuing, so the rest of
-   the walkthrough isn't accidentally done in the wrong theme.
+   (restore, FR-5). Note that **Register** moved to **Settings** (ADR-0022),
+   while **Create batch** came back here as a third panel stacked under
+   **Transfer** (ADR-0023, which narrows ADR-0022's scope rather than
+   reversing it) — Students now carries **Transfer**, **Create batch**, and
+   **People**.
+5. **Settings** → **Register** a throwaway student or mentor, then switch to
+   **Appearance** and pick **Dark**. Dark was shipped with ADR-0002 but was
+   only reachable by changing the OS theme until this slice (ADR-0021) — it's
+   worth demoing precisely because it was previously unreachable. The repaint
+   is instant (no reload), and it survives a reload because the choice is a
+   server-readable cookie, not `localStorage`. Switch back to **Follow
+   system** (or **Light**) before continuing, so the rest of the walkthrough
+   isn't accidentally done in the wrong theme.
 6. **Today** dashboard → per-batch "N of M submitted" figures and the cycle
    ribbon. Open **"How to read this"** underneath: it names the eight ribbon
    marks and states the aggregation rule — each bar is the **worst** outcome in
@@ -271,10 +273,12 @@ don't have to manually walk every day forward:
 7. **Cycles** view → every active student in either batch, confirm no score is
    shown (scoring/evaluation is blocked on open point O-5 — AI provider not
    yet chosen).
-8. Sign out, sign back in as **Student** → `/my-month` → own pills only, no
-   rank, no peer names, no score (FR-29/FR-30). Note **Settings** is on the
-   student sidebar too, showing **Appearance** only — the theme is a personal
-   preference, not a mentor privilege.
+8. **Sign out** — in the sidebar now, pinned directly below **Settings**
+   inside the same divider group, not in the topbar (O-15) — then sign back
+   in as **Student** → `/my-month` → own pills only, no rank, no peer names,
+   no score (FR-29/FR-30). Note **Settings** is on the student sidebar too,
+   showing **Appearance** only — the theme is a personal preference, not a
+   mentor privilege.
 9. Sign in as **Unregistered user** → confirm the 403 → `/not-registered`.
 
 ---

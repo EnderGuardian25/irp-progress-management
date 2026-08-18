@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DevIdentityPicker } from "@/app/(auth)/signin/dev-identity-picker";
 import { SignInPanel } from "@/app/(auth)/signin/sign-in-panel";
+import SignInPage from "@/app/(auth)/signin/page";
 import NotRegisteredPage from "@/app/(auth)/not-registered/page";
 
 vi.mock("next-auth/react", () => ({
@@ -10,9 +11,12 @@ vi.mock("next-auth/react", () => ({
 
 // Real next-auth (imported transitively via @/auth) needs `next/server`,
 // which isn't resolvable under Vitest's environment — mock the app's thin
-// wrapper instead of the whole next-auth package.
+// wrapper instead of the whole next-auth package. SignInPage (imported below)
+// also imports `signIn` from this same module, so the mock must cover both
+// named exports the two pages under test actually use.
 vi.mock("@/auth", () => ({
   signOut: vi.fn(),
+  signIn: vi.fn(),
 }));
 
 describe("DevIdentityPicker", () => {
@@ -39,6 +43,32 @@ describe("NotRegisteredPage", () => {
     render(<NotRegisteredPage />);
     expect(screen.queryByRole("link", { name: /sign in/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
+  });
+});
+
+describe("SignInPage", () => {
+  // SignInPage is a plain synchronous function component (unlike the async
+  // server-component pages elsewhere in this suite), so it is rendered as
+  // JSX like NotRegisteredPage above rather than invoked and awaited.
+  it("uses the logo as the page heading, so there is still exactly one h1", () => {
+    // Deleting <h1>Hearts Academy</h1> outright would leave this page with no
+    // heading at all. The lockup becomes the heading's content instead.
+    const { container } = render(<SignInPage />);
+    const headings = container.querySelectorAll("h1");
+    expect(headings).toHaveLength(1);
+    expect(headings[0]!.querySelector("img")).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Bistec Hearts Academy" })).toBeInTheDocument();
+  });
+
+  it("no longer renders the blue diamond", () => {
+    const { container } = render(<SignInPage />);
+    // U+25C6. It was decorative and the logo replaces it.
+    expect(container.textContent).not.toContain("◆");
+  });
+
+  it("keeps the programme tagline below the logo", () => {
+    render(<SignInPage />);
+    expect(screen.getByText("Industry Readiness Programme")).toBeInTheDocument();
   });
 });
 

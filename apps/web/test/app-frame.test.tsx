@@ -3,14 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { Topbar } from "@/components/app-frame/topbar";
 import { Sidebar } from "@/components/app-frame/sidebar";
 
-// Topbar now imports signOut from @/auth for its sign-out form. Real
-// next-auth (pulled in transitively via @/auth) needs `next/server`, which
-// isn't resolvable under Vitest's environment — mock the app's thin wrapper,
-// same as signin.test.tsx does for NotRegisteredPage. The inline `"use
-// server"` action is asserted by presence, never invoked.
-vi.mock("@/auth", () => ({
-  signOut: vi.fn(),
-}));
+// No `@/auth` mock here: sign-out moved to the sidebar (O-15) as a
+// `signOutSlot` the SERVER layout builds and passes down — neither Topbar
+// nor Sidebar imports `@/auth` themselves, so there is nothing left in this
+// file for such a mock to intercept.
 
 // Sidebar became a Client Component to read usePathname — that is the only
 // way it can know which destination is current, since a layout does not
@@ -34,10 +30,10 @@ describe("Topbar", () => {
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
   });
 
-  it("offers a sign-out control", () => {
-    render(<Topbar userName="A" />);
-    expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
-  });
+  // Sign-out moved out of the Topbar and into the Sidebar (O-15): it is no
+  // longer this component's control to offer. Coverage that the app frame
+  // offers sign-out now lives on Sidebar — see "renders whatever sign-out
+  // slot the server layout hands it" in test/sidebar.test.tsx.
 });
 
 describe("Sidebar", () => {
@@ -139,13 +135,20 @@ describe("Sidebar", () => {
   it("shows a review count on the Review link only when there is something to review", () => {
     // Task 14 turned Review into a real Link; the badge logic itself
     // (sidebar.tsx's showCount/badge) is unchanged and applies inside
-    // whichever element wraps the label, link or span. Reading
-    // textContent confirms the rendered name is "Review 3" with a space,
-    // not "Review3" run together.
+    // whichever element wraps the label, link or span.
+    //
+    // Task 5 (Plan 7B) made `.nav-item` `display: flex` with `gap: 8px`
+    // doing the label-to-badge spacing, and deleted the literal " " text
+    // node that used to sit between them — so the rendered DOM has no space
+    // between "Review" and the count. The spacing between the label and the
+    // badge is now CSS `gap`, not a text node, so asserting the exact string
+    // "Review 3" would couple this test to a layout implementation detail.
+    // The regex asserts the intent — the count is on the Review link —
+    // without encoding how the space is produced.
     const { rerender } = render(<Sidebar role="Admin" reviewCount={3} />);
     const withCount = screen.getByRole("link", { name: /^Review/ });
     expect(withCount).not.toHaveAttribute("aria-disabled");
-    expect(withCount.textContent).toBe("Review 3");
+    expect(withCount.textContent).toMatch(/^Review\s*3$/);
 
     rerender(<Sidebar role="Admin" reviewCount={0} />);
     const withoutCount = screen.getByRole("link", { name: /^Review/ });

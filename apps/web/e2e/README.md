@@ -8,7 +8,7 @@ Six spec files, one Playwright config with **two** projects, one seeded database
 | `student-flows.spec.ts` | The Plan 6 student surface — on-time submission, the legal submission window (never older than the previous weekday), the absence round-trip, FR-20's lock from the student's own view, the mentor-page redirect, and sign-out. Signed in as `dev-student-1` ("Dev Student") only — see "Personas" below for why. |
 | `mentor-flows.spec.ts` | The Plan 6 mentor surface — Roster (row-per-student, the weekend persona's Extra badge), Roster → Review → attendance/tasks record → Submitted → In Review → Evaluated → locked, the Students directory's archive flow, and registering + archiving a throwaway student. Registration itself happens on `/settings` (ADR-0022, Plan 7A) — the People directory on `/students` only lists and archives. Signed in as `dev-admin-1` ("Dev Mentor"). |
 | `dashboard-flows.spec.ts` | The Plan 7 dashboards — mentor Today's per-batch figures and ribbon, the Cycles view, and FR-29/FR-30's student My month. Signed in as `dev-admin-1` for the mentor side and `dev-student-1` for the student side; see its own section further below for the full test table. |
-| `dark-theme.spec.ts` | The Plan 7A dark guard — every view renders, and its landmark content is present, with the OS reporting dark. Read-only, and runs under the `chromium-dark` project only; see "Two projects, not one" below. |
+| `dark-theme.spec.ts` | The Plan 7A dark guard — every reachable view renders, and its landmark content is present, with the OS reporting dark: the six mentor views plus `/review/<id>` (reached via the Roster's own "Review" link, the way `mentor-flows.spec.ts` does), the two student views, and the bare `/signin` frame. Read-only, and runs under the `chromium-dark` project only; see "Two projects, not one" below. |
 | `settings.spec.ts` | The Plan 7A Settings page — the theme switch's cookie round trip (attribute survives a reload only if the server actually read the cookie) and, since the fix wave, that the attribute genuinely applies the dark tokens; and that a student reaches Settings with Appearance only, no mentor sections. Runs in the default `chromium` project (light), signed in as both `dev-admin-1` and `dev-student-1`. |
 
 ## Two projects, not one
@@ -23,6 +23,19 @@ serial schedule so state consumed by one pass is not met unexpectedly by another
 own comment on the 24/24 → 23/24 → 19/24 history); running any of those three specs a second time
 under `chromium-dark` would be exactly that hazard again, deliberately reintroduced. `dark-theme.spec.ts`
 is read-only for this reason, not by accident — it navigates and asserts rendering, nothing else.
+`testMatch` is what scopes `chromium-dark` to this one file; do not widen it, and do not add any
+navigation here that submits, transitions, or reseeds.
+
+### One view still unguarded
+
+`/not-registered` is not reachable by this suite. It needs the unregistered dev identity, and
+`e2e/helpers.ts` exposes sign-in helpers only for the two registered personas
+(`signInAsStudent`, `signInAsMentor`) — no helper exists for the unregistered one, and adding
+one here would be scope creep for what this spec is for. So of the eleven views the app
+serves, ten are covered by the dark walk (the six mentor views, `/review/<id>`, the two student
+views, and `/signin`) and `/not-registered` is the one that is not. Whoever adds an
+unregistered-identity helper for another suite should extend `dark-theme.spec.ts` at the same
+time.
 
 ### What proves dark works — four layers, none redundant
 

@@ -1,13 +1,15 @@
-import { signOut } from "@/auth";
-import { Button } from "@/components/ui/button";
+import { BrandMark } from "./brand-mark";
 
 /**
  * The app frame's topbar. Semantic `banner` landmark, 56px tall, on
  * `--surface` — docs/design-system.md §6. Desktop only (NFR-13); no mobile
  * treatment is provided.
  *
- * Server Component (no "use client"), so the inline `"use server"` sign-out
- * action below is valid here without any extra wiring.
+ * Still a Server Component (no "use client") — nothing here needs
+ * client-side interactivity. Sign out moved to the sidebar (O-15): it is
+ * built as a form in `app/(app)/layout.tsx`, the actual Server Component
+ * that owns the inline `"use server"` action, and passed down as a slot. Do
+ * not restore a sign-out control here.
  *
  * §6's frame sketches a `Batch 12 ▾` switcher in this bar. It is deliberately
  * absent: `User` (spec/openapi.yaml) carries no batch, a mentor holds several
@@ -27,9 +29,7 @@ export function Topbar({ userName }: { userName: string }) {
       style={{ height: "56px", background: "var(--surface)", borderColor: "var(--line)" }}
     >
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" style={{ color: "var(--primary)" }}>
-          &#9670;
-        </span>
+        <BrandMark variant="mark" />
         <span className="font-semibold" style={{ color: "var(--ink)" }}>
           Hearts Academy &middot; IRP
         </span>
@@ -37,14 +37,6 @@ export function Topbar({ userName }: { userName: string }) {
 
       <div className="flex items-center gap-6">
         <span style={{ color: "var(--ink)" }}>{userName}</span>
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/signin" });
-          }}
-        >
-          <Button type="submit" variant="quiet">Sign out</Button>
-        </form>
       </div>
     </header>
   );

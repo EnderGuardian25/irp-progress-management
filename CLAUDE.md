@@ -248,6 +248,34 @@ spec §7 and remove the bypass. ADR-0012.
   variable. **CI is unaffected**: `.env.local` is git-ignored and CI never sets the flag, which
   is why the CI build step deliberately runs with it absent. If a local `next build` ever
   succeeds with `AUTH_DEV_BYPASS=true`, guard one has broken — investigate immediately.
+- **`next/image` cannot infer `height` from a static import under Vitest, even though it can in
+  production.** In production, omitting `height` and supplying only `width` against a statically
+  imported image is sound: `next/dist/shared/lib/get-img-props.js` computes
+  `height = round(staticImageData.height * width / staticImageData.width)` because
+  `isStaticImport(src)` is true for the object a static import resolves to. Under Vitest it is
+  **not** — Vite resolves a PNG import to a plain URL **string**, not a `{src, width, height}`
+  object, so `isStaticImport(src)` is false, the inference branch never runs, and all four
+  `brand-mark.test.tsx` cases fail with *"Image with src … is missing required `height`
+  property."* This was measured (Plan 7B's whole-branch review), not theorised. Adopting the
+  inference would need a Vitest asset stub for PNG imports first; until then, declare both
+  `width` and `height` explicitly on every statically imported `next/image`, and do not "simplify"
+  one by dropping `height` on the assumption Next will infer it — the test suite exercises the
+  string-`src` path, not the static-import path, so that regression would only surface here, not
+  in production.
+- **A local `pnpm typecheck` cannot see a missing `next-env.d.ts`, and CI has none.** That file is
+  generated and git-ignored (`.gitignore:6`), so it is present on any machine where `next dev` or
+  `next build` has ever run and absent in a fresh clone — and it is what carries
+  `/// <reference types="next/image-types/global" />`, the declaration that makes
+  `import mark from "@/assets/x.png"` resolve. CI runs `Typecheck` **before** `Build @irp/web`
+  (deliberately — see the step's comment), so the first static image import in the repo made all
+  three timezone legs fail `TS2307: Cannot find module '@/assets/hearts-academy-mark.png'` on a
+  branch that was green locally and had passed a full `next build`. The reference is now committed
+  as `apps/web/types/static-image-assets.d.ts`, so it no longer depends on generated output. **Do
+  not "fix" a future instance by committing `next-env.d.ts` itself** — it carries
+  `import "./.next/types/routes.d.ts"`, a path written by `next build` into another git-ignored
+  tree, so committing it trades one `TS2307` for another. **When adding the first import of a new
+  non-code asset type, verify with `next-env.d.ts` moved aside** — a warm working tree cannot
+  reproduce what CI does.
 
 **Container facts from Plan 4A:**
 

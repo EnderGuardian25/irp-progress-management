@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { THEMES, type Theme } from "@/lib/theme";
+import { useEffect, useState, useTransition } from "react";
+import { THEMES, parseTheme, type Theme } from "@/lib/theme";
 import { setTheme } from "./theme-actions";
 
 /**
@@ -33,6 +33,37 @@ export function ThemeControl({ current }: { current: Theme }) {
   const [selected, setSelected] = useState<Theme>(current);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  // Re-seed from the LIVE DOM after mount, on top of the `current` server prop
+  // the initial render already used. This is NOT the same as trusting the
+  // prop: on a browser back/forward navigation, Next's client router cache
+  // can replay an older cached render of this whole tree — this component's
+  // own `current` prop included — while `<html data-theme>` is a shared,
+  // uncontrolled DOM node that the SAME stale replay independently rewrites.
+  // The two are supposed to agree (both are ultimately sourced from the same
+  // cookie on the same request) but a stale replay can desynchronise them, so
+  // "what does the live attribute say right now" is the more trustworthy
+  // source of truth than a prop this component cannot tell is fresh or stale.
+  // See docs/interview-and-prd.md O-16 for the rendering-level defect this
+  // does NOT fix (the page itself can still repaint in the pre-choice theme;
+  // this only keeps the radio group honest about what is actually on screen).
+  //
+  // This MUST run in an effect, not during render: render must produce the
+  // exact same output the server did or React logs a hydration mismatch, and
+  // `document` does not exist during SSR at all. Seeding `useState` from
+  // `current` keeps the first render identical on both sides; this effect
+  // only adjusts the value AFTER hydration has already completed. Do not
+  // "simplify" this into seeding `useState` from the DOM directly — that
+  // would run during the client's first render, before hydration finishes,
+  // and reintroduce the exact mismatch this comment warns against.
+  //
+  // Do not replace this with `revalidatePath` in theme-actions.ts. That would
+  // force a server round trip and re-render on every switch, contradicting
+  // ADR-0021's instant-repaint reasoning — a decision this fix must not
+  // relitigate.
+  useEffect(() => {
+    setSelected(parseTheme(document.documentElement.dataset.theme));
+  }, []);
 
   function choose(next: Theme): void {
     setSelected(next);

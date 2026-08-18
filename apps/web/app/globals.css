@@ -10,6 +10,15 @@
      style everything we draw ourselves; color-scheme is the one declaration
      that reaches controls the browser draws for us. */
   color-scheme: light;
+  /* The ONE deliberately theme-invariant colour in the system. Declared here
+     and never overridden, so it stays #ffffff in dark — that is the whole
+     point, not an oversight.
+     The brand lockup is near-black green on a light field (it is a supplied
+     asset, not our palette), so a card that followed the theme would put that
+     wordmark on #1c1e23 and erase it. Kept OUTSIDE the dark-tokens markers
+     because it needs no dark entry; putting it inside would break the
+     13-declaration count. test/theme-tokens.test.ts enforces both. */
+  --brand-card: #ffffff;
   --bg: #ffffff;
   --surface: #f6f7fb;
   --surface-sunk: #fafbfe;
@@ -35,13 +44,26 @@
    near-black (#121212 is R=G=B=18) — surfaces lift toward indigo, the
    canvas does not.
 
-   ADR-0021 made dark user-reachable. Three rules, and THE ORDER MATTERS:
+   ADR-0021 made dark user-reachable. Three rules:
 
      1. :root above — light, always the base.
      2. the media query below — "follow the OS", suppressed by
         :not([data-theme="light"]) when the user has explicitly chosen light.
-     3. :root[data-theme="dark"] LAST — an explicit dark choice must beat an
-        OS that says light, which it can only do by coming after the query.
+     3. :root[data-theme="dark"] — an explicit dark choice.
+
+   The load-bearing part is that :not([data-theme="light"]) guard on rule 2,
+   not the order of rules 2 and 3. It is what lets an explicit light choice
+   suppress a dark OS. Do NOT delete it — without it, OS-dark plus an
+   explicit light choice would render dark, a real bug.
+
+   Rules 2 and 3 have equal specificity (:root plus one pseudo-class or
+   attribute selector each), so source order only decides an outcome when
+   BOTH match at once — which needs OS-dark AND data-theme="dark" — and the
+   parity test below guarantees the two blocks are identical in that case, so
+   the result is the same regardless of which one CSS picks. Rule 3 coming
+   after rule 2 is therefore defensive, not load-bearing: it costs nothing
+   today and only matters if the two blocks are ever edited to legitimately
+   diverge.
 
    No attribute at all means "system", which is why the media query needs no
    [data-theme="system"] case.
@@ -210,6 +232,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); }
    the app that never said where you were — while the Roster and Cycles filter
    chips did. §3.1 assigns --primary-weak to "selected rows, active nav". */
 .nav-item {
+  /* A flex row so an icon and its label sit on one baseline-aligned line, with
+     `gap` doing the spacing. Before the icons landed, the review-count badge
+     was separated from the label by a literal " " text node; `gap` replaces it,
+     and that space has been removed rather than left as a no-op. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border-radius: var(--radius-control);
   padding: 8px 12px;
   color: var(--ink-muted);

@@ -64,6 +64,32 @@ Every pair below was verified with a WCAG contrast script against the sRGB conve
 | `--ink-muted` | `oklch(0.50 0.018 272)` | `#5f636e` | Labels, secondary text, placeholders — 6.01:1 |
 | `--primary` | `oklch(0.45 0.14 272)` | `#3c4ba2` | **Bistec slot.** Indigo ink. Primary actions, selection, focus — 7.71:1 |
 | `--primary-weak` | `oklch(0.95 0.022 272)` | `#e9eefe` | Selected rows, active nav, primary-tinted fills. |
+| `--brand-card` | — | `#ffffff` | The card behind the Bistec Hearts Academy logo. **Theme-invariant** — see below. |
+
+`--brand-card` is the only token that is **identical in light and dark**, by never being
+overridden. **Why:** the brand lockup is a supplied asset whose own internal contrast is not
+ours to re-verify, and it carries near-black text on a light field — a card that followed the
+theme would put that wordmark on `#1c1e23` and erase it. It therefore sits outside the
+`dark-tokens` markers in `globals.css`, and `apps/web/test/theme-tokens.test.ts` enforces that.
+It is **not** a general-purpose surface — it exists for the brand card and nothing else.
+
+**Derivation of the two brand assets** (`apps/web/assets/hearts-academy-{mark,lockup}.png`, from
+the supplied `hearts-academy.png`, 1080×1031 RGBA with an **opaque** near-white field —
+`(248,249,250)`, not `#ffffff` and not transparent). A plain rectangular `extract()` of the mark
+**cannot work**: the heart is an L-shaped silhouette (two circles above a diagonal paddle) and
+"BISTEC" sits in the notch of that L, so every rectangle wide and tall enough to hold the whole
+heart also holds part of the "B" — do not "simplify" the mark back to a rectangular crop, that
+regresses this defect. `hearts-academy-mark.png` is instead an 8-connected flood-fill mask (seed at
+pixel `(300,400)`, inside the paddle; background threshold `|Δr|,|Δg|,|Δb| ≤ 8` from the field
+colour), bbox `104,106`–`610,546`, padded 10px on every side and composited onto a **transparent** canvas — never
+the source's own field colour — before a `fit:"contain"` resize to 64px. `hearts-academy-lockup.png`
+keeps the whole asset (resized to 320px wide) but runs the *same* field threshold over the whole
+image first: the field is opaque, and 16px of `--brand-card` white around an opaque near-white
+asset reads as a faint rectangle in both themes, since the card never re-themes. Both files are
+transparent-background PNGs for this reason. The lockup additionally requires
+`png({ palette: true })` — a plain (non-palette) encode measured **~50 KB against the 40 KB
+ceiling**; without `palette: true` it silently blows the budget.
+Anything else needing a fixed light surface is a new design decision, not a reuse of this.
 
 ### 3.2 Status vocabulary
 
@@ -119,11 +145,18 @@ Dark is user-reachable as of ADR-0021, selected by `data-theme` on `<html>`:
 
 - `data-theme="dark"` forces dark; `data-theme="light"` forces light; **no attribute means
   follow the OS**.
-- The CSS applies three rules in a fixed order, and the order is load-bearing: the light
-  `:root` first (the base), then `@media (prefers-color-scheme: dark)` scoped with
-  `:not([data-theme="light"])` (follow the OS, unless the user explicitly chose light), then
-  `:root[data-theme="dark"]` last, so an explicit dark choice can override an OS that reports
-  light — which it can only do by being the rule that comes after the media query.
+- The CSS applies three rules, in this order: the light `:root` first (the base), then
+  `@media (prefers-color-scheme: dark)` scoped with `:not([data-theme="light"])` (follow the
+  OS, unless the user explicitly chose light), then `:root[data-theme="dark"]` (an explicit
+  dark choice). The load-bearing part is the `:not([data-theme="light"])` guard on the second
+  rule — that is what lets an explicit light choice suppress a dark OS; deleting it would make
+  OS-dark plus an explicit light choice render dark, a real bug. The order of the second and
+  third rules is **not** load-bearing: both selectors carry equal specificity (`:root` plus one
+  pseudo-class or attribute selector each), so source order decides an outcome only when *both*
+  match at once — OS-dark **and** `data-theme="dark"` together — and in that case the two blocks
+  are identical (see the parity test below), so the result is the same regardless of which one
+  wins. Rule three coming after rule two is therefore defensive rather than load-bearing: it
+  costs nothing and only matters if the two blocks are ever edited to legitimately diverge.
 - The token block above is duplicated verbatim in `globals.css`, once inside the media query
   and once under `:root[data-theme="dark"]`, because CSS cannot combine a media query with a
   selector list and this project uses no preprocessor. `apps/web/test/theme-tokens.test.ts`
@@ -188,30 +221,54 @@ Desktop only, minimum 1280px (NFR-13). No mobile layout is provided or tested. R
 behaviour is structural (sidebar collapse below 1440px), never fluid typography.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  ◆ Hearts Academy · IRP      Batch 12 ▾              Damian ▾        │  56px  --surface
-├───────────┬──────────────────────────────────────────────────────────┤
-│           │                                                          │
-│  Today    │                                                          │
-│  Roster   │                  content · --bg                          │
-│  Review 3 │                                                          │
-│  Cycles   │                                                          │
-│  Students │                                                          │
-│           │                                                          │
-│ ─────────  ← border-top rule, --line                                 │
-│  Settings │                                                          │
-│           │                                                          │
-│ 216px     │                                                          │
-│ --surface │                                                          │
-└───────────┴──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│  ❤ Hearts Academy · IRP                              Damian            │  56px  --surface
+├────────────┬───────────────────────────────────────────────────────────┤
+│            │                                                           │
+│ ▪ Today    │                                                           │
+│ ▪ Roster   │                  content · --bg                           │
+│ ▪ Review 3 │                                                           │
+│ ▪ Cycles   │                                                           │
+│ ▪ Students │                                                           │
+│            │                                                           │
+│ ─────────  ← border-top rule, --line                                   │
+│ ▪ Settings │                                                           │
+│ ▪ Sign out │                                                           │
+│            │                                                           │
+│ 216px      │                                                           │
+│ --surface  │                                                           │
+└────────────┴───────────────────────────────────────────────────────────┘
 ```
+
+The topbar mark is `BrandMark` (`variant="mark"`) on the theme-invariant `--brand-card` card,
+replacing the placeholder diamond a `◆` used to stand in for — see §3.1 and
+`apps/web/components/app-frame/brand-mark.tsx`. **The topbar now holds only the brand and the
+user's name**: no dropdown chevron, no batch switcher. Every sidebar row carries a hand-drawn
+`currentColor` icon before its label (`▪` above is a stand-in for the real glyph — calendar,
+table, check-in-circle, circular arrow, two people, sliders, door-with-arrow — see
+`apps/web/components/ui/icons.tsx` for the actual set), so the icon column, not just the label,
+now carries the active-row colour change.
+
+**`Batch 12 ▾` is gone from this mock, not merely left unbuilt-but-drawn.** The previous version
+of this mock showed a switcher in the topbar that was never built and never will be under the
+current data model: `User` (`spec/openapi.yaml`) carries no batch, a mentor holds several, and
+batch selection already happens per-page via the Roster and Cycles chips (§13 keeps the full
+record of that decision — it is not repeated or removed here). Drawing an unbuilt control in a
+mock captioned "the app frame" reads as a description of the running app, which it would not be;
+now that the topbar's contract is "brand and name, nothing else," showing the switcher here would
+directly contradict the sentence above it. If a global batch context is ever built, this mock
+gets a third element and §13's entry is closed, not reopened.
 
 Settings sits pinned to the bottom of the 216px column with `mt-auto`, separated from the primary
 destinations above it by a `border-top` rule (`--line`) — never appended to the destination list
-itself, which would sit it directly under the last primary item instead. It appears on **both**
-roles' frames: appearance (theme) is a personal preference, not a mentor privilege. The page it
-links to gates its own sections rather than the route bouncing a Student away — Settings shows
-Appearance to everyone and Register/Create batch only to a mentor (ADR-0022).
+itself, which would sit it directly under the last primary item instead. **Sign out is pinned
+below Settings inside that same divider group** — a peer of Settings, not a stray button loose in
+the frame — rather than living in the topbar it occupied before this slice (O-15). Settings
+appears on **both** roles' frames: appearance (theme) is a personal preference, not a mentor
+privilege. The page it links to gates its own sections rather than the route bouncing a Student
+away — Settings shows Appearance to everyone and **Register** only to a mentor (ADR-0022);
+**Create batch** lives on Students instead, per **ADR-0023**, which supersedes that part of
+ADR-0022's scope.
 
 ---
 
@@ -408,7 +465,7 @@ Non-negotiable, verified rather than assumed.
 | # | Item | Effect |
 |---|---|---|
 | — | **Bistec brand colour** | `--primary` is a placeholder. One-token swap; see §3.4 for hue constraints. |
-| — | **§6's topbar batch switcher is not built** | `Batch 12 ▾` in the §6 frame has no data behind it: `User` in `spec/openapi.yaml` carries no batch, and a mentor holds several, so one name in a global slot would be wrong for the primary audience. Batch selection is per-page instead, via the Roster and Cycles chips. Revisit only if a global batch context is ever genuinely needed; it would need a spec change first. |
+| — | **§6's topbar batch switcher is not built** | `Batch 12 ▾` would have appeared in the §6 frame with no data behind it: `User` in `spec/openapi.yaml` carries no batch, and a mentor holds several, so one name in a global slot would be wrong for the primary audience. Batch selection is per-page instead, via the Roster and Cycles chips. Revisit only if a global batch context is ever genuinely needed; it would need a spec change first. |
 | O-6 | Rubric criteria wording | Blocks the evaluation surface layout — five criteria need real labels before that screen is designed. |
 | O-7 | Absence/lateness penalty | `--st-absent` is neutral on the stated assumption. If leadership rules that absence penalises the score, this token and its copy change. |
 | O-5 | AI provider | Blocks every evaluation-output surface. Nothing here depends on it yet. |

@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Route } from "next";
+import type { ReactElement, ReactNode } from "react";
+import {
+  TodayIcon, RosterIcon, ReviewIcon, CyclesIcon, StudentsIcon, SettingsIcon,
+} from "@/components/ui/icons";
 
 /**
  * The app frame's primary navigation. `navigation` landmark, 216px wide, on
@@ -38,26 +42,31 @@ import type { Route } from "next";
  * rendering path would fail to typecheck even though it must stay reachable
  * for a future label-only entry.
  */
+/** Every destination carries an icon, including the label-only branch — a
+    future entry rendering without one would sit misaligned against every
+    other row. */
 interface LinkedDestination {
   readonly label: string;
   readonly href: Route;
+  readonly icon: () => ReactElement;
 }
 interface LabelOnlyDestination {
   readonly label: string;
+  readonly icon: () => ReactElement;
 }
 type Destination = LinkedDestination | LabelOnlyDestination;
 
 const MENTOR_DESTINATIONS: readonly Destination[] = [
-  { label: "Today", href: "/" },
-  { label: "Roster", href: "/roster" },
-  { label: "Review", href: "/review" },
-  { label: "Cycles", href: "/cycles" },
-  { label: "Students", href: "/students" },
+  { label: "Today", href: "/", icon: TodayIcon },
+  { label: "Roster", href: "/roster", icon: RosterIcon },
+  { label: "Review", href: "/review", icon: ReviewIcon },
+  { label: "Cycles", href: "/cycles", icon: CyclesIcon },
+  { label: "Students", href: "/students", icon: StudentsIcon },
 ];
 
 const STUDENT_DESTINATIONS: readonly Destination[] = [
-  { label: "Today", href: "/" },
-  { label: "My month", href: "/my-month" },
+  { label: "Today", href: "/", icon: TodayIcon },
+  { label: "My month", href: "/my-month", icon: CyclesIcon },
 ];
 
 /**
@@ -69,7 +78,7 @@ const STUDENT_DESTINATIONS: readonly Destination[] = [
  * page gates its mentor-only sections itself (settings/page.tsx). A Student
  * following this link gets a page with one section, not a redirect.
  */
-const SETTINGS_DESTINATION: LinkedDestination = { label: "Settings", href: "/settings" };
+const SETTINGS_DESTINATION: LinkedDestination = { label: "Settings", href: "/settings", icon: SettingsIcon };
 
 /**
  * "/" must match exactly — every other path also starts with it, so a prefix
@@ -85,9 +94,17 @@ function isActive(pathname: string, href: Route): boolean {
 export function Sidebar({
   role,
   reviewCount = 0,
+  signOutSlot,
 }: {
   role: "Admin" | "Student";
   reviewCount?: number;
+  /**
+   * The sign-out form, rendered by the SERVER layout and passed in. This
+   * component is a Client Component (usePathname), and `signOut` from
+   * `@/auth` is server-side — importing it here would be a build error. A
+   * ReactNode slot keeps the existing inline `"use server"` action intact.
+   */
+  signOutSlot?: ReactNode;
 }) {
   const destinations = role === "Admin" ? MENTOR_DESTINATIONS : STUDENT_DESTINATIONS;
   // usePathname is why this is a client component. The alternative — threading
@@ -107,14 +124,20 @@ export function Sidebar({
     >
       {destinations.map((d) => {
         const showCount = d.label === "Review" && reviewCount > 0;
+        // No margin here: .nav-item's `gap` already spaces every child on the
+        // row, icon-to-label and label-to-badge alike. An added `ml-2` used to
+        // double that spacing for the badge specifically, back when the badge
+        // was separated from the label by a literal " " text node instead of
+        // `gap` — see the `.nav-item` comment in globals.css.
         const badge = showCount && (
-          <span className="tabular ml-2" style={{ color: "var(--ink-muted)" }}>
+          <span className="tabular" style={{ color: "var(--ink-muted)" }}>
             {reviewCount}
           </span>
         );
 
         if ("href" in d) {
           const active = isActive(pathname, d.href);
+          const Glyph = d.icon;
           return (
             <Link
               key={d.label}
@@ -126,17 +149,18 @@ export function Sidebar({
               className="nav-item"
               data-active={active || undefined}
             >
+              <Glyph />
               {d.label}
-              {showCount && " "}
               {badge}
             </Link>
           );
         }
 
+        const Glyph = d.icon;
         return (
           <span key={d.label} aria-disabled="true" className="nav-item">
+            <Glyph />
             {d.label}
-            {showCount && " "}
             {badge}
           </span>
         );
@@ -151,18 +175,22 @@ export function Sidebar({
         <Link
           href={SETTINGS_DESTINATION.href}
           aria-current={isActive(pathname, SETTINGS_DESTINATION.href) ? "page" : undefined}
-          // The .map()-rendered links above are direct children of the nav's
-          // `flex flex-col`, so they are blockified as flex items. This one sits
-          // inside a plain `div` wrapper instead and stays inline by default:
-          // .nav-item's vertical padding would not affect the wrapper's height,
-          // and its hover/data-active background would paint outside the line
-          // box — plausibly bleeding into the border-t divider just above it.
-          // `block` makes it box identically to the flex-item links.
+          // `.nav-item` (globals.css) is itself `display: flex`, so this link is
+          // already boxed identically to the .map()-rendered flex-item links
+          // above regardless of the wrapper it sits in. The `block` utility
+          // class below is a retained no-op, not load-bearing: `.nav-item`'s
+          // declaration is unlayered CSS, which outranks `@layer utilities`
+          // regardless of specificity, so Tailwind's `.block{display:block}`
+          // never wins against it. Kept rather than removed so a future change
+          // to `.nav-item` that drops its own `display` does not silently
+          // un-blockify this one link with nothing here to catch it.
           className="nav-item block"
           data-active={isActive(pathname, SETTINGS_DESTINATION.href) || undefined}
         >
+          <SettingsIcon />
           {SETTINGS_DESTINATION.label}
         </Link>
+        {signOutSlot}
       </div>
     </nav>
   );

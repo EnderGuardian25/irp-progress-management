@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { signInAsMentor } from "./helpers";
+import { signInAsMentor, signInAsStudent } from "./helpers";
 
 /**
  * The dark guard. Runs ONLY under the `chromium-dark` project
@@ -39,6 +39,51 @@ test.describe("dark theme renders every view", () => {
       await page.goto(path);
       await expect(page.getByRole("heading", { name: heading, level: 1 })).toBeVisible();
     }
+
+    // /review/<id>: unlike the six views above, this route needs a real
+    // student id, so it isn't a bare path -- reach it the way
+    // mentor-flows.spec.ts does, via the Roster's per-row "Review" link.
+    // Batch A is already the default selection, so no switchToBatch call is
+    // needed. Nuwan Perera (seed-student-a2, "late") is picked over
+    // dev-student-1 only because a non-compliant persona is more likely to
+    // have a rendered day to look at; either would prove the route renders.
+    await page.goto("/roster");
+    const nuwanRow = page.locator("table tbody tr").filter({ hasText: "Nuwan Perera" });
+    await nuwanRow.getByRole("link", { name: "Review" }).click();
+    await expect(page).toHaveURL(/\/review\//);
+    await expect(page.getByRole("heading", { name: /^Review/, level: 1 })).toBeVisible();
+    // The day list itself: page.tsx always renders at least one Panel here,
+    // either a real day (Panel with a date title) or the "no days on record"
+    // EmptyState -- both are wrapped in the same Panel class, so asserting
+    // one is visible proves the day list rendered without depending on which
+    // branch a given persona/run date happens to take.
+    await expect(
+      page.locator('div[class*="rounded-[var(--radius-panel)]"]').first(),
+    ).toBeVisible();
+  });
+
+  test("the student's views render with the OS in dark", async ({ page }) => {
+    await signInAsStudent(page);
+
+    for (const [path, heading] of [
+      ["/", "Today"],
+      ["/my-month", "My month"],
+    ] as const) {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { name: heading, level: 1 })).toBeVisible();
+    }
+  });
+
+  test("the bare frames render with the OS in dark", async ({ page }) => {
+    // /signin is reachable signed out. /not-registered needs the unregistered
+    // dev identity, and helpers.ts exposes no helper for that persona (only
+    // signInAsStudent/signInAsMentor exist) -- adding one here would be scope
+    // creep for this task. So /not-registered stays unguarded by this suite;
+    // see e2e/README.md for the record of that gap. Both are outside the
+    // (app) route group and so carry no app chrome, which is what makes them
+    // worth a separate check from the six/two views above.
+    await page.goto("/signin");
+    await expect(page.getByRole("img", { name: "Bistec Hearts Academy" })).toBeVisible();
   });
 
   test("the ribbon's marks are still drawn when the canvas is dark", async ({ page }) => {

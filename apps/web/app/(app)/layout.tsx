@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { signOut } from "@/auth";
 import { Topbar } from "@/components/app-frame/topbar";
 import { Sidebar } from "@/components/app-frame/sidebar";
+import { SignOutIcon } from "@/components/ui/icons";
 import { getCurrentUserOrRedirect } from "@/lib/api-client";
 
 // The (app) route group carries the app frame; (auth) does not. That split
@@ -26,7 +28,31 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         on <main> never has anything to clip.
       */}
       <div className="flex min-h-0 flex-1">
-        <Sidebar role={user.role} />
+        <Sidebar
+          role={user.role}
+          signOutSlot={
+            /* Built HERE, in a Server Component, so the inline "use server"
+               action stays valid — the sidebar is a client component and
+               cannot import `@/auth`. No unit test covers this call site
+               wiring the real form in; e2e/signin.spec.ts:35 and
+               e2e/student-flows.spec.ts:207 are what would catch its
+               removal or a revert to `<Sidebar role={user.role} />`. */
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/signin" });
+              }}
+            >
+              {/* Styled as a nav row, not a Button, so the bottom group reads
+                  as two peers. Still a form submit, so it is a real action
+                  rather than a link. */}
+              <button type="submit" className="nav-item w-full">
+                <SignOutIcon />
+                Sign out
+              </button>
+            </form>
+          }
+        />
         {/*
           NFR-13 sets a 1280px floor, not a ceiling, and nothing capped the
           content width — so on a wide monitor the composer textarea and the
