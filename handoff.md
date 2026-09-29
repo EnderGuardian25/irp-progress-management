@@ -35,6 +35,83 @@ Copies of the PRD, the interview record, and the brief also sit directly under t
 
 ## 1. State of play
 
+### 2026-09-29 — Cycle calendar replaces the ribbon (O-17), and the abd-production spec backlog
+
+`docs/superpowers/specs/2026-09-15-cycle-calendar-design.md` was one of five specs authored
+2026-09-15 on a separate `abd-production` branch that never merged to `main`. Of the five, only
+this one is independent of the per-submission-scoring model (built on `feat/plan-9-per-submission-review`,
+then formally withdrawn — see `docs/adr/0027-stakeholder-interview-governs-over-consolidation-task-list.md`);
+the other four (`student-feedback-visibility`, `per-submission-review`, `monthly-score-calculation`,
+`monthly-winner-pdf`) are dead as written and were deliberately not brought over.
+
+**Shipped:** `CycleCalendar` (`apps/web/components/cycle-calendar/`), a month-grid replacing
+`CycleRibbon` at its two live call sites — `mentor-today.tsx` (now single-batch-selected with
+chip-style switching, D3) and `student-today.tsx`. `CycleRibbon` itself is untouched and unimported,
+kept as the revert path (ADR-0030, superseding ADR-0003). Plan:
+`docs/superpowers/plans/2026-09-29-cycle-calendar.md`.
+
+**Two real gaps from the spec's own premises, found during the audit and resolved with the spec
+lead before writing the plan, not built around silently:**
+- The spec's third call site, `my-month/page.tsx`, never carried a ribbon and has no cycle-picker
+  for a student's own dashboard (`getMyDashboard` takes no query params) — dropped from scope.
+- `extraAfter` is Friday-anchored, one flag per weekend, and cannot say which of Saturday/Sunday
+  was worked — the mentor's calendar marks both cells of a flagged weekend identically. The
+  student's calendar does not share this limit: `listMyDays` already returns real per-day status
+  for every calendar date, so its weekend cells resolve independently.
+
+**Two known, deliberate deviations, not regressions:** the mentor-only `RibbonKey` legend
+(ADR-0020) has no calendar equivalent yet — every cell still carries a full accessible name, so
+the accessibility floor holds, but the visible on-screen key is gone pending a design pass. And
+the ribbon's staggered load animation (§10) does not carry over — `CycleCalendar` reuses the same
+160ms rise animation per cell but applies no per-cell delay, so a calendar's marks rise
+simultaneously rather than sweeping left-to-right.
+
+**Verified:** `pnpm --filter @irp/web test -- --run` (283/283 after the fix pass below),
+`pnpm --filter @irp/web typecheck` clean both before and after `AUTH_DEV_BYPASS=false pnpm
+--filter @irp/web build` (12 routes, all `ƒ`). **Not verified this session:** the e2e suite
+(`apps/web/e2e/dashboard-flows.spec.ts`, `dark-theme.spec.ts`) was updated for the new grid
+semantics but not run — it needs a reseeded local database, and the local dev Postgres was left
+in a schema state from an unrelated branch (`refactor/review-flow-rework`) that `prisma migrate
+reset` would fix, but that command is destructive and Prisma's own AI-agent guard correctly
+refused to run it without the developer's explicit confirmation. **Run the full e2e suite and
+the NFR-13 no-scroll check (spec §7, plan Task 8) before merging.**
+
+**A fresh-context whole-branch review (opus) found two Critical and five Important issues before
+any of this shipped, all now fixed except where noted:**
+- **C-1 (fixed):** `dark-theme.spec.ts` still asserted on the retired `ribbon-bar`/`ribbon-key`
+  testids — would have failed CI outright. Retargeted to the calendar's grid semantics; the key
+  test is removed (no calendar-equivalent key exists, per the RibbonKey gap above).
+- **C-2 (fixed):** `student-today.tsx`'s widened `listMyDays` query (above) silently narrowed
+  away a real, previously-fixed boundary bug — on a cycle-boundary day like Monday the 10th, the
+  open submission window still targets the previous cycle's Friday, which a query scoped to only
+  the current cycle's bounds never fetches. Fixed via a new pure helper,
+  `apps/web/lib/history-range.ts` (`historyRangeFor`), and the plan corrected at source.
+- **C-3 (half resolved):** PR #6's CI (all three timezone `verify` legs, which run the full
+  Playwright suite against a freshly-seeded CI database) went green, confirming the
+  `dark-theme.spec.ts`/`dashboard-flows.spec.ts` rewrites for real. The NFR-13 no-scroll check
+  (spec §7) is a manual visual step no CI job performs, and still needs the local Postgres reset
+  above before it can be run.
+- **I-1 (fixed):** the mentor calendar rang the dashboard's *reported* day (which falls back to
+  the last required day on a weekend) as "today", not the real today — a weekend cell existed on
+  the grid and was never the one that actually rang. Now passes the real `toProgrammeDate(new
+  Date())`.
+- **I-2 (fixed):** the grid had no weekday column headers and adjacent-month padding was fully
+  blank rather than dimmed with its day number, contrary to the spec, ADR-0030 and this file's own
+  §7 mock. Both added.
+- **I-3 (documented, not fixed):** a pre-enrolment weekday (post-transfer) reads identically to a
+  genuinely future day — carried over unchanged from the ribbon, and recorded in §7 rather than
+  given an invented, unreviewed visual treatment.
+- **I-4 (fixed):** `CycleCalendar` re-declared `MARK_COLOR` instead of importing it from
+  `cycle-ribbon.tsx`, which explicitly asks callers not to.
+- **I-5 (fixed):** the calendar had no equivalent of the ribbon's remount-on-change key, so a
+  submission landing changed a cell's colour with no animation. Now keyed on every cell's drawn
+  state, same technique as the ribbon.
+
+Eight Minor findings were reviewed and deferred rather than fixed in this pass (per house style, a
+Minor does not enter the fix pass) — the full list is in the SDD ledger,
+`.superpowers/sdd/2026-09-29-cycle-calendar/progress.md`, kept (not deleted) alongside this branch
+until C-3 is resolved and the branch is actually ready to merge.
+
 ### 2026-08-18 — PR #17's red CI, and the web dev server moves to 3100
 
 Two things, both outside any plan. **Both merged the same day — #17 then #18 — and `main` is now at
@@ -587,7 +664,7 @@ begins. Plans live in `docs/superpowers/plans/`, specs in `docs/superpowers/spec
 | | 7 · Dashboards | T-14, T-15 | SC-4 | ✅ **Merged, PR #12.** Three dashboard endpoints, mentor Today + Cycles, student My month, the typography migration audit, `dashboard-flows.spec.ts`, and `docs/walkthrough.md`. Plan: `docs/superpowers/plans/2026-08-03-plan-7-dashboards.md` · Spec: `docs/superpowers/specs/2026-08-02-slice-2-product-design.md` |
 | | *(UI follow-ups to 7 — no new T-numbers)* | — | — | ✅ **Merged, PRs #13–#17.** Design-system pass (#13); roster legibility + `Batch 1`/`Batch 2` seed rename (#14); the collapsed ribbon key and `workers: 1` (#15, ADR-0020); **7A** Settings page, theme by cookie, verified dark (#16, ADR-0021/0022); **7B** frame and brand — sidebar icons, the logo, Sign out relocated, `Create batch` returned to Students (#17, ADR-0023). 7A and 7B carry their own plan/spec pairs under `docs/superpowers/` |
 | | *(developer-environment chore)* | — | — | ✅ **Merged, PR #18.** Web dev server moved 3000 → **3100**; container-internal ports deliberately unchanged. No FR — see CLAUDE.md's **Local ports** rule |
-| **3 — Evaluation** | 8 · Notifications | T-16 | — | Not started |
+| **3 — Evaluation** | 8 · Notifications | T-16 | — | 🚧 **PR #2 open, not yet merged.** `NotificationService` + Teams webhook + SMTP senders, wired fire-and-forget into entry submission, absence marking, and daily-report transitions; full test suite green. Plan: `docs/superpowers/plans/2026-09-15-plan-8-notifications.md` · Spec: `docs/superpowers/specs/2026-09-11-plan-8-notifications-design.md` · ADRs: 0024 (Teams webhook), 0025 (SMTP via M365) |
 | | 9 · AI evaluation | T-17 | — | **Blocked on O-5** |
 | | 10 · Winner + PDF | T-18 | — | Not started |
 | **4 — Proving it** | 11 · Load test + retro | T-24 – T-26 | D4 | Not started — and cannot start meaningfully until the deploy runbook's §1 bootstrap is run: NFR-1/NFR-2's k6 targets need a deployed URL, and NFR-3 needs the Entra directory this plan deferred a fourth time |
@@ -667,8 +744,9 @@ Fix every P1/P2 from the stakeholder demo · Dependabot + weekly patch rotation 
 
 ## 3. Current position
 
-**Everything through Plan 7B is merged. `main` is at PR #18 (`5e99498`, 2026-08-18) and there is no
-work in flight** — no open branch, no open PR, nothing half-landed.
+**Everything through Plan 7B is merged. `main` is at PR #18 (`5e99498`, 2026-08-18).** Plan 8
+(Notifications) is implemented on branch `feat/plan-8-notifications` (2026-09-15) and open as
+**PR #2**, awaiting review and merge — see the row in §2a and the "next action" note below.
 
 Plan 7 itself merged as **PR #12** (three dashboard endpoints — `GET
 /api/v1/batches/{id}/dashboard/today`, `GET /api/v1/batches/{id}/dashboard/summary`, `GET
@@ -680,12 +758,13 @@ collapsed ribbon key and `workers: 1` · **#16** Plan 7A, the Settings page and 
 **#17** Plan 7B, the frame and brand · **#18** the dev-server port move to 3100. See §2a for what
 each covers.
 
-**The next action is a decision, not a task.** Slice 2 is complete and slice 3's three plans are
-either not started (8, 10) or blocked (9, on O-5). The two things that would unblock the most are
-both outside the code: running the deploy runbook's §1 bootstrap (Deliverable 3 is still
-apply-ready, not applied — see below) and getting a decision on **O-5**, the AI provider, which
-gates Plan 9 and touches personal data. Neither is something the next session can simply pick up
-and start writing.
+**The next action is reviewing and merging Plan 8's PR #2** — the branch is implemented and its
+full test suite is green. After that, slice 3's remaining two plans are either not started
+(10, and it depends on Plan 9's scores) or blocked (9, on O-5). The two things that would unblock
+the most beyond Plan 8 are both outside the code: running the deploy runbook's §1 bootstrap
+(Deliverable 3 is still apply-ready, not applied — see below) and getting a decision on **O-5**, the
+AI provider, which gates Plan 9 and touches personal data. Neither is something the next session can
+simply pick up and start writing.
 
 **Housekeeping owed before the next plan starts:** archive `.superpowers/sdd/` into
 `.superpowers/sdd/plan-7b/` and reset `progress.md`, per CLAUDE.md. The directory is git-ignored,
